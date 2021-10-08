@@ -125,6 +125,7 @@ Var Solver::newVar(lbool upol, bool dvar)
     }else
         v = next_var++;
 
+    variable_type.push(true);
     watches  .init(mkLit(v, false));
     watches  .init(mkLit(v, true ));
     assigns  .insert(v, l_Undef);
@@ -148,6 +149,10 @@ void Solver::releaseVar(Lit l)
         addClause(l);
         released_vars.push(var(l));
     }
+}
+
+void Solver::setVarType(Var x, bool is_existential) {
+    variable_type[x] = is_existential;
 }
 
 

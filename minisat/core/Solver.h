@@ -46,6 +46,7 @@ public:
     //
     Var     newVar    (lbool upol = l_Undef, bool dvar = true); // Add a new variable with parameters specifying variable mode.
     void    releaseVar(Lit l);                                  // Make literal true and promise to never refer to variable again.
+    void    setVarType(Var x, bool is_existential);
 
     bool    addClause (const vec<Lit>& ps);                     // Add a clause to the solver. 
     bool    addEmptyClause();                                   // Add the empty clause, making the solver contradictory.
@@ -225,6 +226,7 @@ protected:
     vec<ShrinkStackElem>analyze_stack;
     vec<Lit>            analyze_toclear;
     vec<Lit>            add_tmp;
+    vec<char>           variable_type;
 
     double              max_learnts;
     double              learntsize_adjust_confl;

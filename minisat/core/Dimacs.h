@@ -45,6 +45,18 @@ static void readClause(B& in, Solver& S, vec<Lit>& lits) {
 }
 
 template<class B, class Solver>
+static void readQuantifierBlock(B& in, Solver& S, bool is_existential) {
+    int     parsed_var, var;
+    for (;;) {
+        parsed_var = parseInt(in);
+        if (parsed_var == 0) break;
+        var = parsed_var-1;
+        while (var >= S.nVars()) S.newVar();
+        S.setVarType(var, is_existential);
+    }
+}
+
+template<class B, class Solver>
 static void parse_DIMACS_main(B& in, Solver& S, bool strictp = false) {
     vec<Lit> lits;
     int vars    = 0;
