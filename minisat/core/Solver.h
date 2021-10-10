@@ -46,7 +46,7 @@ public:
     //
     Var     newVar    (lbool upol = l_Undef, bool dvar = true); // Add a new variable with parameters specifying variable mode.
     void    releaseVar(Lit l);                                  // Make literal true and promise to never refer to variable again.
-    void    setVarType(Var x, bool is_existential);
+    void    setVarType(Var x, bool is_existential, int depth);
 
     bool    addClause (const vec<Lit>& ps);                     // Add a clause to the solver. 
     bool    addEmptyClause();                                   // Add the empty clause, making the solver contradictory.
@@ -90,6 +90,7 @@ public:
     // 
     void    setPolarity    (Var v, lbool b); // Declare which polarity the decision heuristic should use for a variable. Requires mode 'polarity_user'.
     void    setDecisionVar (Var v, bool b);  // Declare if a variable should be eligible for selection in the decision heuristic.
+    Lit     decisionLiteral(int level) const;// Return decision literal for the given decision level.
 
     // Read state:
     //
@@ -227,6 +228,7 @@ protected:
     vec<Lit>            analyze_toclear;
     vec<Lit>            add_tmp;
     vec<char>           variable_type;
+    vec<int>            variable_depth;
 
     double              max_learnts;
     double              learntsize_adjust_confl;
@@ -368,6 +370,9 @@ inline void     Solver::setDecisionVar(Var v, bool b)
     decision[v] = b;
     insertVarOrder(v);
 }
+
+inline Lit      Solver::decisionLiteral(int level) const { return trail[trail_lim[level]]; }
+
 inline void     Solver::setConfBudget(int64_t x){ conflict_budget    = conflicts    + x; }
 inline void     Solver::setPropBudget(int64_t x){ propagation_budget = propagations + x; }
 inline void     Solver::interrupt(){ asynch_interrupt = true; }

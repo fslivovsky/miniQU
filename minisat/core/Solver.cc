@@ -126,6 +126,7 @@ Var Solver::newVar(lbool upol, bool dvar)
         v = next_var++;
 
     variable_type.push(true);
+    variable_depth.push(0);
     watches  .init(mkLit(v, false));
     watches  .init(mkLit(v, true ));
     assigns  .insert(v, l_Undef);
@@ -151,8 +152,9 @@ void Solver::releaseVar(Lit l)
     }
 }
 
-void Solver::setVarType(Var x, bool is_existential) {
+void Solver::setVarType(Var x, bool is_existential, int depth) {
     variable_type[x] = is_existential;
+    variable_depth[x] = depth;
 }
 
 
@@ -302,6 +304,8 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel)
 {
     int pathC = 0;
     Lit p     = lit_Undef;
+    Lit first = ca[confl][0];
+    Lit r     = (assigns[var(first)] == l_Undef) ? first : lit_Undef; // Literal to reduce.
 
     // Generate conflict clause:
     //
@@ -318,7 +322,7 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel)
         for (int j = (p == lit_Undef) ? 0 : 1; j < c.size(); j++){
             Lit q = c[j];
 
-            if (!seen[var(q)] && level(var(q)) > 0){
+            if (!seen[var(q)] && level(var(q)) > 0 && assigns[var(q)] != l_Undef) {
                 varBumpActivity(var(q));
                 seen[var(q)] = 1;
                 if (level(var(q)) >= decisionLevel())
@@ -367,6 +371,30 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel)
     max_literals += out_learnt.size();
     out_learnt.shrink(i - j);
     tot_literals += out_learnt.size();
+
+    if (r != lit_Undef) {
+        // Replace blocking literals if necessary.
+        for (i = 0; i < out_learnt.size(); i++) {
+            Lit q = out_learnt[i];
+            if (variable_type[var(q)] != variable_type[var(r)] && variable_depth[var(q)] < variable_depth[var(r)]) {
+                out_learnt[i] = ~decisionLiteral(vardata[var(q)].level);
+            }
+        }
+        p = out_learnt[0];
+        // Remove duplicates.
+        sort(out_learnt);
+        for (i = 1, j = 0; i < out_learnt.size(); i++) {
+            if (out_learnt[i] != out_learnt[j]) {
+                out_learnt[++j] = out_learnt[i];
+            }
+        }
+        out_learnt.shrink(i-j-1);
+        // Put asserting literal back at index 0.
+        for (i = 0; i < out_learnt.size() && out_learnt[i] != p; i++);
+        assert(i < out_learnt.size());
+        out_learnt[i] = out_learnt[0];
+        out_learnt[0] = p;
+    }
 
     // Find correct backtrack level:
     //
@@ -549,7 +577,7 @@ CRef Solver::propagate()
 
             // Did not find watch -- clause is unit under assignment:
             *j++ = w;
-            if (value(first) == l_False){
+            if (value(first) == l_False || !variable_type[var(first)]){
                 confl = cr;
                 qhead = trail.size();
                 // Copy the remaining watches:
@@ -757,15 +785,15 @@ lbool Solver::search(int nof_conflicts)
                 return l_Undef; }
 
             // Simplify the set of problem clauses:
-            if (decisionLevel() == 0 && !simplify())
-                return l_False;
+            // if (decisionLevel() == 0 && !simplify())
+            //    return l_False;
 
             if (learnts.size()-nAssigns() >= max_learnts)
                 // Reduce the set of learnt clauses:
                 reduceDB();
 
             Lit next = lit_Undef;
-            while (decisionLevel() < assumptions.size()){
+            /*while (decisionLevel() < assumptions.size()){
                 // Perform user provided assumption:
                 Lit p = assumptions[decisionLevel()];
                 if (value(p) == l_True){
@@ -778,7 +806,7 @@ lbool Solver::search(int nof_conflicts)
                     next = p;
                     break;
                 }
-            }
+            }*/
 
             if (next == lit_Undef){
                 // New variable decision:
@@ -787,7 +815,7 @@ lbool Solver::search(int nof_conflicts)
 
                 if (next == lit_Undef)
                     // Model found:
-                    return l_True;
+                    return l_True; // TODO: add a new learnt term.
             }
 
             // Increase decision level and enqueue 'next'

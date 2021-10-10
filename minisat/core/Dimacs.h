@@ -45,14 +45,17 @@ static void readClause(B& in, Solver& S, vec<Lit>& lits) {
 }
 
 template<class B, class Solver>
-static void readQuantifierBlock(B& in, Solver& S, bool is_existential) {
-    int     parsed_var, var;
+static void readQuantifierBlock(B& in, Solver& S, bool is_existential, int depth) {
+    ++in;
+    skipWhitespace(in);
+    int parsed_var, var;
     for (;;) {
         parsed_var = parseInt(in);
         if (parsed_var == 0) break;
         var = parsed_var-1;
         while (var >= S.nVars()) S.newVar();
-        S.setVarType(var, is_existential);
+        S.setVarType(var, is_existential, depth);
+        //printf("Variable ex. %c at depth %i.\n", is_existential ? 'e' : 'a', depth);
     }
 }
 
@@ -62,6 +65,7 @@ static void parse_DIMACS_main(B& in, Solver& S, bool strictp = false) {
     int vars    = 0;
     int clauses = 0;
     int cnt     = 0;
+    int depth   = 0;
     for (;;){
         skipWhitespace(in);
         if (*in == EOF) break;
@@ -75,9 +79,13 @@ static void parse_DIMACS_main(B& in, Solver& S, bool strictp = false) {
             }else{
                 printf("PARSE ERROR! Unexpected char: %c\n", *in), exit(3);
             }
-        } else if (*in == 'c' || *in == 'p')
+        } else if (*in == 'c' || *in == 'p') {
             skipLine(in);
-        else{
+        } else if (*in == 'a') {
+            readQuantifierBlock(in, S, false, depth++);
+        } else if (*in == 'e') {
+            readQuantifierBlock(in, S, true, depth++);
+        } else {
             cnt++;
             readClause(in, S, lits);
             S.addClause_(lits); }
