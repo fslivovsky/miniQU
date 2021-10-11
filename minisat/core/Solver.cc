@@ -127,6 +127,7 @@ Var Solver::newVar(lbool upol, bool dvar)
 
     variable_type.push(true);
     variable_depth.push(0);
+    in_term.push(false);
     watches  .init(mkLit(v, false));
     watches  .init(mkLit(v, true ));
     assigns  .insert(v, l_Undef);
@@ -176,8 +177,13 @@ bool Solver::addClause_(vec<Lit>& ps)
     if (ps.size() == 0)
         return ok = false;
     else if (ps.size() == 1){
-        uncheckedEnqueue(ps[0]);
-        return ok = (propagate() == CRef_Undef);
+        p = ps[0];
+        if (variable_type[var(p)]) {
+            uncheckedEnqueue(ps[0]);
+            return ok = (propagate() == CRef_Undef);
+        } else {
+            return ok = false;
+        }
     }else{
         CRef cr = ca.alloc(ps, false);
         clauses.push(cr);
@@ -240,6 +246,7 @@ void Solver::cancelUntil(int level) {
         for (int c = trail.size()-1; c >= trail_lim[level]; c--){
             Var      x  = var(trail[c]);
             assigns [x] = l_Undef;
+            quantifier_blocks_unassigned[variable_depth[x]]++;
             if (phase_saving > 1 || (phase_saving == 1 && c > trail_lim.last()))
                 polarity[x] = sign(trail[c]);
             insertVarOrder(x); }
@@ -255,16 +262,18 @@ void Solver::cancelUntil(int level) {
 
 Lit Solver::pickBranchLit()
 {
+    updateDecisionVars();
     Var next = var_Undef;
 
     // Random decision:
-    if (drand(random_seed) < random_var_freq && !order_heap.empty()){
+    /*if (drand(random_seed) < random_var_freq && !order_heap.empty()){
         next = order_heap[irand(random_seed,order_heap.size())];
         if (value(next) == l_Undef && decision[next])
-            rnd_decisions++; }
+            rnd_decisions++; } */
 
     // Activity based decision:
-    while (next == var_Undef || value(next) != l_Undef || !decision[next])
+
+    while (next == var_Undef || value(next) != l_Undef || !decision[next] || !isEligibleDecision(next))
         if (order_heap.empty()){
             next = var_Undef;
             break;
@@ -376,7 +385,7 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel)
         // Replace blocking literals if necessary.
         for (i = 0; i < out_learnt.size(); i++) {
             Lit q = out_learnt[i];
-            if (variable_type[var(q)] != variable_type[var(r)] && variable_depth[var(q)] < variable_depth[var(r)]) {
+            if (variable_type[var(q)] != variable_type[var(r)] && variable_depth[var(q)] < variable_depth[var(r)]) { // TODO: invert.
                 out_learnt[i] = ~decisionLiteral(vardata[var(q)].level);
             }
         }
@@ -522,6 +531,7 @@ void Solver::uncheckedEnqueue(Lit p, CRef from)
     assigns[var(p)] = lbool(!sign(p));
     vardata[var(p)] = mkVarData(from, decisionLevel());
     trail.push_(p);
+    quantifier_blocks_unassigned[variable_depth[var(p)]]--;
 }
 
 
@@ -813,9 +823,15 @@ lbool Solver::search(int nof_conflicts)
                 decisions++;
                 next = pickBranchLit();
 
-                if (next == lit_Undef)
-                    // Model found:
+                if (next == lit_Undef) {
+                    // Model found.
+                    vec<Lit> learnt_term;
+                    getInitialTerm(learnt_term);
+                    // Reduce initial term.
+                    // Perform conflict analysis with term.
+                    // Add learnt term.
                     return l_True; // TODO: add a new learnt term.
+                }
             }
 
             // Increase decision level and enqueue 'next'
@@ -1096,4 +1112,49 @@ void Solver::garbageCollect()
         printf("|  Garbage collection:   %12d bytes => %12d bytes             |\n", 
                ca.size()*ClauseAllocator::Unit_Size, to.size()*ClauseAllocator::Unit_Size);
     to.moveTo(ca);
+}
+
+bool Solver::isEligibleDecision(Var x) const {
+    for (int i = 0; i < variable_depth[x]; i++) {
+        if (quantifier_blocks_type[i] != variable_type[x] && quantifier_blocks_unassigned[i] > 0) {
+            return false;
+        }
+    }
+    return true;
+}
+
+void Solver::updateDecisionVars() {
+    for (int quantifier_type = 0; quantifier_type < 2; quantifier_type++) {
+        for (int i = 0; i < quantifier_blocks.size(); i++) {
+            if (quantifier_blocks_type[i] == quantifier_type) {
+                // All quantifier blocks of different type and lower depth have been assigned.
+                for (int j = 0; j < quantifier_blocks[i].size(); j++) {
+                    Var v = quantifier_blocks[i][j];
+                    insertVarOrder(v);
+                }
+            } else if (quantifier_blocks_unassigned[i]) {
+                break;
+            }
+        }
+    }
+}
+
+void Solver::getInitialTerm(vec<Lit>& initial_term) {
+    for (int i = 0; i < clauses.size(); i++) {
+        CRef cr = clauses[i];
+        Clause& c = ca[cr];
+        int j;
+        for (j = 0; j < c.size() && value(c[j]) != l_True; j++);
+        assert(j < c.size());
+        Lit p = c[j];
+        if (!in_term[var(p)]) {
+            initial_term.push(p);
+            in_term[var(p)] = true;
+        }
+    }
+    // Clean up "in_term" vector.
+    for (int i = 0; i < initial_term.size(); i++) {
+        Lit p = initial_term[i];
+        in_term[var(p)] = false;
+    }
 }

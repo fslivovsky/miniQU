@@ -49,14 +49,18 @@ static void readQuantifierBlock(B& in, Solver& S, bool is_existential, int depth
     ++in;
     skipWhitespace(in);
     int parsed_var, var;
+    vec<Var> variables;
     for (;;) {
         parsed_var = parseInt(in);
         if (parsed_var == 0) break;
         var = parsed_var-1;
+        variables.push(var);
         while (var >= S.nVars()) S.newVar();
         S.setVarType(var, is_existential, depth);
         //printf("Variable ex. %c at depth %i.\n", is_existential ? 'e' : 'a', depth);
     }
+    S.addQuantifierBlock(variables, is_existential);
+    //printf("Quantifier block ex. %c with %i variables.\n", is_existential ? 'e' : 'a', variables.size());
 }
 
 template<class B, class Solver>

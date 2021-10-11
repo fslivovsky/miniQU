@@ -90,7 +90,14 @@ public:
     // 
     void    setPolarity    (Var v, lbool b); // Declare which polarity the decision heuristic should use for a variable. Requires mode 'polarity_user'.
     void    setDecisionVar (Var v, bool b);  // Declare if a variable should be eligible for selection in the decision heuristic.
-    Lit     decisionLiteral(int level) const;// Return decision literal for the given decision level.
+
+    // QBF specific:
+    //
+    Lit     decisionLiteral(int level) const;                          // Return decision literal for the given decision level.
+    void    addQuantifierBlock(vec<Var>& variables, bool existential); // Add a quantifier block.
+    bool    isEligibleDecision(Var x) const;
+    void    updateDecisionVars();                                      // Add eligible variables to order heap.
+    void    getInitialTerm(vec<Lit>& initial_term);                    // Compute a hitting set (initial term) for the current trail.
 
     // Read state:
     //
@@ -227,12 +234,17 @@ protected:
     vec<ShrinkStackElem>analyze_stack;
     vec<Lit>            analyze_toclear;
     vec<Lit>            add_tmp;
-    vec<char>           variable_type;
-    vec<int>            variable_depth;
-
     double              max_learnts;
     double              learntsize_adjust_confl;
     int                 learntsize_adjust_cnt;
+
+    // QBF specific member variables.
+    vec<vec<Var>>       quantifier_blocks;
+    vec<char>           quantifier_blocks_type;
+    vec<int>            quantifier_blocks_unassigned;
+    vec<char>           variable_type;
+    vec<int>            variable_depth;
+    vec<char>           in_term;
 
     // Resource contraints:
     //
@@ -371,7 +383,7 @@ inline void     Solver::setDecisionVar(Var v, bool b)
     insertVarOrder(v);
 }
 
-inline Lit      Solver::decisionLiteral(int level) const { return trail[trail_lim[level]]; }
+inline Lit      Solver::decisionLiteral(int level) const { return trail[trail_lim[level-1]]; }
 
 inline void     Solver::setConfBudget(int64_t x){ conflict_budget    = conflicts    + x; }
 inline void     Solver::setPropBudget(int64_t x){ propagation_budget = propagations + x; }
@@ -404,6 +416,8 @@ inline void     Solver::toDimacs     (const char* file){ vec<Lit> as; toDimacs(f
 inline void     Solver::toDimacs     (const char* file, Lit p){ vec<Lit> as; as.push(p); toDimacs(file, as); }
 inline void     Solver::toDimacs     (const char* file, Lit p, Lit q){ vec<Lit> as; as.push(p); as.push(q); toDimacs(file, as); }
 inline void     Solver::toDimacs     (const char* file, Lit p, Lit q, Lit r){ vec<Lit> as; as.push(p); as.push(q); as.push(r); toDimacs(file, as); }
+
+inline void    Solver::addQuantifierBlock(vec<Var>& variables, bool existential) { quantifier_blocks.push(); variables.copyTo(quantifier_blocks.last()); quantifier_blocks_type.push(existential), quantifier_blocks_unassigned.push(variables.size()); }
 
 
 //=================================================================================================
