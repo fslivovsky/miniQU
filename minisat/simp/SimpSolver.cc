@@ -74,8 +74,8 @@ SimpSolver::~SimpSolver()
 }
 
 
-Var SimpSolver::newVar(lbool upol, bool dvar) {
-    Var v = Solver::newVar(upol, dvar);
+Var SimpSolver::newVar(Var alias, lbool upol, bool dvar) {
+    Var v = Solver::newVar(alias, upol, dvar);
 
     frozen    .insert(v, (char)false);
     eliminated.insert(v, (char)false);
@@ -147,6 +147,11 @@ lbool SimpSolver::solve_(bool do_simp, bool turn_off_simp)
 
 bool SimpSolver::addClause_(vec<Lit>& ps)
 {
+    // Replace aliases by internal variable names/indices.
+    for (int i = 0; i < ps.size(); i++) {
+        ps[i] = mkLit(alias_to_internal[var(ps[i])], sign(ps[i]));
+    }
+
 #ifndef NDEBUG
     for (int i = 0; i < ps.size(); i++)
         assert(!isEliminated(var(ps[i])));

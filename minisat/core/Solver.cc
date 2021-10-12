@@ -116,15 +116,16 @@ Solver::~Solver()
 // Creates a new SAT variable in the solver. If 'decision' is cleared, variable will not be
 // used as a decision variable (NOTE! This has effects on the meaning of a SATISFIABLE result).
 //
-Var Solver::newVar(lbool upol, bool dvar)
+Var Solver::newVar(Var alias, lbool upol, bool dvar)
 {
     Var v;
-    if (free_vars.size() > 0){
+    /*if (free_vars.size() > 0){
         v = free_vars.last();
         free_vars.pop();
-    }else
-        v = next_var++;
-
+    }else*/
+    v = next_var++;
+    variable_names.push(alias);
+    alias_to_internal.insert(alias, v);
     variable_type.push(true);
     variable_depth.push(0);
     in_term.push(false);
@@ -167,6 +168,7 @@ bool Solver::addClause_(vec<Lit>& ps)
     // Check if clause is satisfied and remove false/duplicate literals:
     sort(ps);
     Lit p; int i, j;
+
     for (i = j = 0, p = lit_Undef; i < ps.size(); i++)
         if (value(ps[i]) == l_True || ps[i] == ~p)
             return true;
@@ -273,12 +275,17 @@ Lit Solver::pickBranchLit()
 
     // Activity based decision:
 
-    while (next == var_Undef || value(next) != l_Undef || !decision[next] || !isEligibleDecision(next))
+    while (next == var_Undef || value(next) != l_Undef || !decision[next])
         if (order_heap.empty()){
             next = var_Undef;
             break;
-        }else
+        } else {
             next = order_heap.removeMin();
+            if (!isEligibleDecision(next)) {
+                quantifier_blocks_decision_overflow[variable_depth[next]].push(next);
+                next = var_Undef;
+            }
+        }
 
     // Choose polarity based on different polarity modes (global or per-variable):
     if (next == var_Undef)
@@ -321,7 +328,7 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel)
     out_learnt.push();      // (leave room for the asserting literal)
     int index   = trail.size() - 1;
 
-    do{
+    do {
         assert(confl != CRef_Undef); // (otherwise should be UIP)
         Clause& c = ca[confl];
 
@@ -381,35 +388,106 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel)
     out_learnt.shrink(i - j);
     tot_literals += out_learnt.size();
 
+    for (int j = 0; j < analyze_toclear.size(); j++) seen[var(analyze_toclear[j])] = 0;    // ('seen[]' is now cleared)
+    
+    // QBF-specific conflict analysis.
     if (r != lit_Undef) {
-        // Replace blocking literals if necessary.
+        vardata[var(r)].level = decisionLevel();
+        out_learnt.push(r);
+    }
+
+    if (!variable_type[var(p)] || (r != lit_Undef)) {
+        Var max_dl_var = var_Undef;
+        Var rightmost_existential_var = var_Undef;
+        vec<int> decision_level_counts(decisionLevel() + 1);
         for (i = 0; i < out_learnt.size(); i++) {
-            Lit q = out_learnt[i];
-            if (variable_type[var(q)] != variable_type[var(r)] && variable_depth[var(q)] < variable_depth[var(r)]) { // TODO: invert.
-                out_learnt[i] = ~decisionLiteral(vardata[var(q)].level);
+            Var v = var(out_learnt[i]);
+            if (variable_type[v] && (rightmost_existential_var == var_Undef || rightmost_existential_var < v)) {
+                rightmost_existential_var = v;
             }
         }
-        p = out_learnt[0];
-        // Remove duplicates.
-        sort(out_learnt);
-        for (i = 1, j = 0; i < out_learnt.size(); i++) {
-            if (out_learnt[i] != out_learnt[j]) {
-                out_learnt[++j] = out_learnt[i];
+
+        for (i = 0; i < out_learnt.size(); i++) {
+            Var v = var(out_learnt[i]);
+            if (v <= rightmost_existential_var) {
+                seen[v] = 1;
+                decision_level_counts[level(v)]++;
+                if (max_dl_var == var_Undef || level(max_dl_var) < level(v)) {
+                    max_dl_var = v;
+                }
             }
         }
-        out_learnt.shrink(i-j-1);
-        // Put asserting literal back at index 0.
-        for (i = 0; i < out_learnt.size() && out_learnt[i] != p; i++);
-        assert(i < out_learnt.size());
-        out_learnt[i] = out_learnt[0];
-        out_learnt[0] = p;
+        // While the clause is not asserting, resolve out the rightmost existential literal.
+        while (rightmost_existential_var != var_Undef && (!variable_type[max_dl_var] || (level(max_dl_var) == 0) || decision_level_counts[level(max_dl_var)] > 1)) {
+            confl = reason(rightmost_existential_var);
+            assert(confl != CRef_Undef);
+            Clause& c = ca[confl];
+
+            if (c.learnt())
+                claBumpActivity(c);
+
+            seen[rightmost_existential_var] = 0;
+            decision_level_counts[level(rightmost_existential_var)]--;
+
+            // Account for new existential variables. Check whether one of them is right of the old rightmost variable.
+            for (int j = 1; j < c.size(); j++) {
+                Var v = var(c[j]);
+                if (variable_type[v] && !seen[v]) {
+                    seen[v] = 1;
+                    decision_level_counts[level(v)]++;
+                    if (rightmost_existential_var < v) {
+                        rightmost_existential_var = v;
+                    }
+                }
+            }
+            // If no new rightmost existential was found, search from the old rightmost variable, reducing along the way.
+            if (!seen[rightmost_existential_var]) {
+                for (; rightmost_existential_var >= 0 && (!seen[rightmost_existential_var] || !variable_type[rightmost_existential_var]); rightmost_existential_var--) {
+                    if (seen[rightmost_existential_var]) {
+                        // Universal variable, reduce.
+                        seen[rightmost_existential_var] = 0;
+                        decision_level_counts[level(rightmost_existential_var)]--;
+                    }
+                }
+            }
+            // Add blocked universal variables from reason clause.
+            if (rightmost_existential_var != var_Undef) {
+                for (int j = 1; j < c.size(); j++) {
+                    Var v = var(c[j]);
+                    if (!seen[v] && !variable_type[v] && v < rightmost_existential_var) {
+                        seen[v] = 1;
+                        decision_level_counts[level(v)]++;
+                    }
+                }
+            }
+            // Search for variable of maximal decision level.
+            max_dl_var = var_Undef;
+            for (int v = 0; v <= rightmost_existential_var; v++) {
+                if (seen[v] && (max_dl_var == var_Undef || level(max_dl_var) < level(v))) {
+                    max_dl_var = v;
+                }
+            }
+        }
+        // The clause represented in "seen" is empty or asserting, translate back to vector.
+        out_learnt.clear();
+        if (rightmost_existential_var != var_Undef) {
+            // Push asserting literal first.
+            seen[max_dl_var] = 0;
+            out_learnt.push(~mkLit(max_dl_var, toInt(value(max_dl_var))));
+            for (int v = 0; v <= rightmost_existential_var; v++) {
+                if (seen[v]) {
+                    out_learnt.push(~mkLit(v, toInt(value(v))));
+                    seen[v] = 0;
+                }
+            }
+        }
     }
 
     // Find correct backtrack level:
     //
     if (out_learnt.size() == 1)
         out_btlevel = 0;
-    else{
+    else if (out_learnt.size() > 0) {
         int max_i = 1;
         // Find the first literal assigned at the next-highest level:
         for (int i = 2; i < out_learnt.size(); i++)
@@ -421,8 +499,6 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel)
         out_learnt[1]     = p;
         out_btlevel       = level(var(p));
     }
-
-    for (int j = 0; j < analyze_toclear.size(); j++) seen[var(analyze_toclear[j])] = 0;    // ('seen[]' is now cleared)
 }
 
 
@@ -759,6 +835,8 @@ lbool Solver::search(int nof_conflicts)
 
             learnt_clause.clear();
             analyze(confl, learnt_clause, backtrack_level);
+            if (learnt_clause.size() == 0) return l_False;
+            
             cancelUntil(backtrack_level);
 
             if (learnt_clause.size() == 1){
@@ -1128,10 +1206,11 @@ void Solver::updateDecisionVars() {
         for (int i = 0; i < quantifier_blocks.size(); i++) {
             if (quantifier_blocks_type[i] == quantifier_type) {
                 // All quantifier blocks of different type and lower depth have been assigned.
-                for (int j = 0; j < quantifier_blocks[i].size(); j++) {
-                    Var v = quantifier_blocks[i][j];
+                for (int j = 0; j < quantifier_blocks_decision_overflow[i].size(); j++) {
+                    Var v = quantifier_blocks_decision_overflow[i][j];
                     insertVarOrder(v);
                 }
+                quantifier_blocks_decision_overflow[i].clear();
             } else if (quantifier_blocks_unassigned[i]) {
                 break;
             }

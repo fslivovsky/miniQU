@@ -44,7 +44,7 @@ public:
 
     // Problem specification:
     //
-    Var     newVar    (lbool upol = l_Undef, bool dvar = true); // Add a new variable with parameters specifying variable mode.
+    Var     newVar    (Var alias, lbool upol = l_Undef, bool dvar = true); // Add a new variable with parameters specifying variable mode.
     void    releaseVar(Lit l);                                  // Make literal true and promise to never refer to variable again.
     void    setVarType(Var x, bool is_existential, int depth);
 
@@ -240,11 +240,14 @@ protected:
 
     // QBF specific member variables.
     vec<vec<Var>>       quantifier_blocks;
+    vec<vec<Var>>       quantifier_blocks_decision_overflow;
     vec<char>           quantifier_blocks_type;
     vec<int>            quantifier_blocks_unassigned;
     vec<char>           variable_type;
     vec<int>            variable_depth;
     vec<char>           in_term;
+    vec<int>            variable_names;
+    VMap<Var>           alias_to_internal;
 
     // Resource contraints:
     //
@@ -417,7 +420,7 @@ inline void     Solver::toDimacs     (const char* file, Lit p){ vec<Lit> as; as.
 inline void     Solver::toDimacs     (const char* file, Lit p, Lit q){ vec<Lit> as; as.push(p); as.push(q); toDimacs(file, as); }
 inline void     Solver::toDimacs     (const char* file, Lit p, Lit q, Lit r){ vec<Lit> as; as.push(p); as.push(q); as.push(r); toDimacs(file, as); }
 
-inline void    Solver::addQuantifierBlock(vec<Var>& variables, bool existential) { quantifier_blocks.push(); variables.copyTo(quantifier_blocks.last()); quantifier_blocks_type.push(existential), quantifier_blocks_unassigned.push(variables.size()); }
+inline void    Solver::addQuantifierBlock(vec<Var>& variables, bool existential) { quantifier_blocks_decision_overflow.push(); quantifier_blocks.push(); variables.copyTo(quantifier_blocks.last()); quantifier_blocks_type.push(existential), quantifier_blocks_unassigned.push(variables.size()); }
 
 
 //=================================================================================================

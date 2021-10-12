@@ -38,8 +38,7 @@ static void readClause(B& in, Solver& S, vec<Lit>& lits) {
     for (;;){
         parsed_lit = parseInt(in);
         if (parsed_lit == 0) break;
-        var = abs(parsed_lit)-1;
-        while (var >= S.nVars()) S.newVar();
+        var = abs(parsed_lit);
         lits.push( (parsed_lit > 0) ? mkLit(var) : ~mkLit(var) );
     }
 }
@@ -48,15 +47,14 @@ template<class B, class Solver>
 static void readQuantifierBlock(B& in, Solver& S, bool is_existential, int depth) {
     ++in;
     skipWhitespace(in);
-    int parsed_var, var;
+    Var parsed_var;
     vec<Var> variables;
     for (;;) {
         parsed_var = parseInt(in);
         if (parsed_var == 0) break;
-        var = parsed_var-1;
-        variables.push(var);
-        while (var >= S.nVars()) S.newVar();
-        S.setVarType(var, is_existential, depth);
+        Var internal_variable = S.newVar(parsed_var);
+        S.setVarType(internal_variable, is_existential, depth);
+        variables.push(internal_variable);
         //printf("Variable ex. %c at depth %i.\n", is_existential ? 'e' : 'a', depth);
     }
     S.addQuantifierBlock(variables, is_existential);
@@ -66,6 +64,7 @@ static void readQuantifierBlock(B& in, Solver& S, bool is_existential, int depth
 template<class B, class Solver>
 static void parse_DIMACS_main(B& in, Solver& S, bool strictp = false) {
     vec<Lit> lits;
+    VMap<Var> alias_to_interal;
     int vars    = 0;
     int clauses = 0;
     int cnt     = 0;
