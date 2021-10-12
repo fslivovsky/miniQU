@@ -412,22 +412,26 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel)
             if (v <= rightmost_existential_var) {
                 seen[v] = 1;
                 decision_level_counts[level(v)]++;
-                if (max_dl_var == var_Undef || level(max_dl_var) < level(v)) {
+                if (max_dl_var == var_Undef || level(max_dl_var) < level(v) || 
+                    (level(max_dl_var) == level(v) && (!variable_type[v] || reason(v) != CRef_Undef))) {
                     max_dl_var = v;
                 }
             }
         }
         // While the clause is not asserting, resolve out the rightmost existential literal.
         while (rightmost_existential_var != var_Undef && (!variable_type[max_dl_var] || (level(max_dl_var) == 0) || decision_level_counts[level(max_dl_var)] > 1)) {
-            confl = reason(rightmost_existential_var);
+            // If there are multiple existentials at the highest decision level, resolve these out first.
+            // TODO: should this be done chronologically?
+            Var pivot = variable_type[max_dl_var] ? max_dl_var : rightmost_existential_var;
+            confl = reason(pivot);
             assert(confl != CRef_Undef);
             Clause& c = ca[confl];
 
             if (c.learnt())
                 claBumpActivity(c);
 
-            seen[rightmost_existential_var] = 0;
-            decision_level_counts[level(rightmost_existential_var)]--;
+            seen[pivot] = 0;
+            decision_level_counts[level(pivot)]--;
 
             // Account for new existential variables. Check whether one of them is right of the old rightmost variable.
             for (int j = 1; j < c.size(); j++) {
@@ -460,10 +464,11 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel)
                     }
                 }
             }
-            // Search for variable of maximal decision level.
+            // Search for variable of maximal decision level. Preferably take an implied variable.
             max_dl_var = var_Undef;
             for (int v = 0; v <= rightmost_existential_var; v++) {
-                if (seen[v] && (max_dl_var == var_Undef || level(max_dl_var) < level(v))) {
+                if (seen[v] && (max_dl_var == var_Undef || level(max_dl_var) < level(v) || 
+                    (level(max_dl_var) == level(v) && (!variable_type[v] || reason(v) != CRef_Undef)))) {
                     max_dl_var = v;
                 }
             }
@@ -839,15 +844,13 @@ lbool Solver::search(int nof_conflicts)
             
             cancelUntil(backtrack_level);
 
-            if (learnt_clause.size() == 1){
-                uncheckedEnqueue(learnt_clause[0]);
-            }else{
-                CRef cr = ca.alloc(learnt_clause, true);
-                learnts.push(cr);
+            CRef cr = ca.alloc(learnt_clause, true);
+            learnts.push(cr);
+            if (learnt_clause.size() > 1) {
                 attachClause(cr);
                 claBumpActivity(ca[cr]);
-                uncheckedEnqueue(learnt_clause[0], cr);
             }
+            uncheckedEnqueue(learnt_clause[0], cr);
 
             varDecayActivity();
             claDecayActivity();
