@@ -1,2 +1,5 @@
 config.mk
 build
+.vscode
+formula
+formula_min
