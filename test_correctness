@@ -1,0 +1,21 @@
+#!/bin/bash
+
+# The purpose of this script is to automatically test a new QBF solver against
+# a known-to-be-correct QBF solver on a set of random QBFs. This script assumes that
+# in its running directory, there is
+#
+#       QBFuzz         in file  qbfuzz.py
+#       Delta debugger in file  dd-discrepancy.sh
+#
+# NOTE: The script will generate formula instances into a file called formula,
+# therefore any data in that file will be overwritten.
+
+FILENAME=$1
+
+q=0
+while [ $q -eq 0 ]
+do
+    python3 qbfuzz.py -v 40 -c 70 -o -r 0.5 --min=4 --max=7 -s 15 -o $FILENAME
+    ./dd-discrepancy.sh $FILENAME
+    q=$?
+done
