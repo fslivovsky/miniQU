@@ -199,8 +199,8 @@ bool Solver::addClause_(vec<Lit>& ps)
 void Solver::attachClause(CRef cr){
     const Clause& c = ca[cr];
     assert(c.size() > 1);
-    watches[~c[0]].push(Watcher(cr, c[1]));
-    watches[~c[1]].push(Watcher(cr, c[0]));
+    watches[~c[0]].push(Watcher(cr, c[1]));                         // c[0]
+    watches[~c[1]].push(Watcher(cr, c[0]));                         // c[1]
     if (c.learnt()) num_learnts++, learnts_literals += c.size();
     else            num_clauses++, clauses_literals += c.size();
 }
@@ -212,7 +212,7 @@ void Solver::detachClause(CRef cr, bool strict){
     
     // Strict or lazy detaching:
     if (strict){
-        remove(watches[~c[0]], Watcher(cr, c[1]));
+        remove(watches[~c[0]], Watcher(cr, c[1]));                  // Dualize.
         remove(watches[~c[1]], Watcher(cr, c[0]));
     }else{
         watches.smudge(~c[0]);
@@ -323,6 +323,12 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel)
     Lit first = ca[confl][0];
     Lit r     = (assigns[var(first)] == l_Undef) ? first : lit_Undef; // Literal to reduce.
 
+#ifndef NDEBUG
+    printf("Conflict clause: ");
+    printClause(confl);
+    printTrail();
+#endif
+
     // Generate conflict clause:
     //
     out_learnt.push();      // (leave room for the asserting literal)
@@ -356,7 +362,7 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel)
         pathC--;
 
     }while (pathC > 0);
-    out_learnt[0] = ~p;
+    out_learnt[0] = ~p;                                                                     // out_learnt[0] = p;  
 
     // Simplify conflict clause:
     //
@@ -395,14 +401,20 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel)
         vardata[var(r)].level = decisionLevel();
         out_learnt.push(r);
     }
+#ifndef NDEBUG
+    printf("MiniSAT learned clause: ");
+    printClause(out_learnt);
+#endif
 
-    if (!variable_type[var(p)] || (r != lit_Undef)) {
+    if (!variable_type[var(p)] || (r != lit_Undef)) {           // variable_type[var(p)]
+        index   = trail.size() - 1;
+
         Var max_dl_var = var_Undef;
         Var rightmost_existential_var = var_Undef;
         vec<int> decision_level_counts(decisionLevel() + 1);
         for (i = 0; i < out_learnt.size(); i++) {
             Var v = var(out_learnt[i]);
-            if (variable_type[v] && (rightmost_existential_var == var_Undef || rightmost_existential_var < v)) {
+            if (variable_type[v] && (rightmost_existential_var == var_Undef || rightmost_existential_var < v)) { // !variable_type[var(p)]
                 rightmost_existential_var = v;
             }
         }
@@ -412,19 +424,33 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel)
             if (v <= rightmost_existential_var) {
                 seen[v] = 1;
                 decision_level_counts[level(v)]++;
-                if (max_dl_var == var_Undef || level(max_dl_var) < level(v) || 
-                    (level(max_dl_var) == level(v) && (!variable_type[v] || reason(v) != CRef_Undef))) {
-                    max_dl_var = v;
-                }
             }
         }
+        // Search for variable of maximal decision level (including the unassigned universal variable).
+        if (r != lit_Undef && seen[var(r)]) {
+            max_dl_var = var(r);
+        } else {
+            while (index >= 0 && !seen[var(trail[index--])]);
+            index++;
+            max_dl_var = (!seen[var(trail[index])]) ? var_Undef : var(trail[index]);
+        }
         // While the clause is not asserting, resolve out the rightmost existential literal.
+        // TODO: Below - variable_type[max_dl_var]
         while (rightmost_existential_var != var_Undef && (!variable_type[max_dl_var] || (level(max_dl_var) == 0) || decision_level_counts[level(max_dl_var)] > 1)) {
+    #ifndef NDEBUG
+            printf("Current clause: ");
+            printSeen(rightmost_existential_var);
+            printf("Rightmost var: %d\n", variable_names[rightmost_existential_var]);
+            printf("Max DL var: %d\n", variable_names[max_dl_var]);
+    #endif
             // If there are multiple existentials at the highest decision level, resolve these out first.
-            // TODO: should this be done chronologically?
-            Var pivot = variable_type[max_dl_var] ? max_dl_var : rightmost_existential_var;
+            Var pivot = variable_type[max_dl_var] ? max_dl_var : rightmost_existential_var;             // !variable_type[max_dl_var]
             confl = reason(pivot);
             assert(confl != CRef_Undef);
+    #ifndef NDEBUG
+            printf("Reason clause: ");
+            printClause(confl);
+    #endif
             Clause& c = ca[confl];
 
             if (c.learnt())
@@ -436,7 +462,7 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel)
             // Account for new existential variables. Check whether one of them is right of the old rightmost variable.
             for (int j = 1; j < c.size(); j++) {
                 Var v = var(c[j]);
-                if (variable_type[v] && !seen[v]) {
+                if (variable_type[v] && !seen[v]) {                                                     // !variable_type
                     seen[v] = 1;
                     decision_level_counts[level(v)]++;
                     if (rightmost_existential_var < v) {
@@ -445,7 +471,7 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel)
                 }
             }
             // If no new rightmost existential was found, search from the old rightmost variable, reducing along the way.
-            if (!seen[rightmost_existential_var]) {
+            if (!seen[rightmost_existential_var]) {                                         // variable_type[rightmost_existential_var]
                 for (; rightmost_existential_var >= 0 && (!seen[rightmost_existential_var] || !variable_type[rightmost_existential_var]); rightmost_existential_var--) {
                     if (seen[rightmost_existential_var]) {
                         // Universal variable, reduce.
@@ -458,19 +484,19 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel)
             if (rightmost_existential_var != var_Undef) {
                 for (int j = 1; j < c.size(); j++) {
                     Var v = var(c[j]);
-                    if (!seen[v] && !variable_type[v] && v < rightmost_existential_var) {
+                    if (!seen[v] && !variable_type[v] && v < rightmost_existential_var) {  //variable_type[v]
                         seen[v] = 1;
                         decision_level_counts[level(v)]++;
                     }
                 }
             }
-            // Search for variable of maximal decision level. Preferably take an implied variable.
-            max_dl_var = var_Undef;
-            for (int v = 0; v <= rightmost_existential_var; v++) {
-                if (seen[v] && (max_dl_var == var_Undef || level(max_dl_var) < level(v) || 
-                    (level(max_dl_var) == level(v) && (!variable_type[v] || reason(v) != CRef_Undef)))) {
-                    max_dl_var = v;
-                }
+            // Search for variable of maximal decision level (including the unassigned universal variable).
+            if (r != lit_Undef && seen[var(r)]) {
+                max_dl_var = var(r);
+            } else {
+                while (index >= 0 && !seen[var(trail[index--])]);
+                index++;
+                max_dl_var = (!seen[var(trail[index])]) ? var_Undef : var(trail[index]);
             }
         }
         // The clause represented in "seen" is empty or asserting, translate back to vector.
@@ -478,15 +504,19 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel)
         if (rightmost_existential_var != var_Undef) {
             // Push asserting literal first.
             seen[max_dl_var] = 0;
-            out_learnt.push(~mkLit(max_dl_var, toInt(value(max_dl_var))));
+            out_learnt.push(~mkLit(max_dl_var, toInt(value(max_dl_var))));      // mkLit (unnegated)
             for (int v = 0; v <= rightmost_existential_var; v++) {
                 if (seen[v]) {
-                    out_learnt.push(~mkLit(v, toInt(value(v))));
+                    out_learnt.push(~mkLit(v, toInt(value(v))));                // mkLit (unnegated)
                     seen[v] = 0;
                 }
             }
         }
     }
+#ifndef NDEBUG
+    printf("Learned clause: ");
+    printClause(out_learnt);
+#endif
 
     // Find correct backtrack level:
     //
@@ -634,20 +664,21 @@ CRef Solver::propagate()
 
     while (qhead < trail.size()){
         Lit            p   = trail[qhead++];     // 'p' is enqueued fact to propagate.
-        vec<Watcher>&  ws  = watches.lookup(p);
+        vec<Watcher>&  ws  = watches.lookup(p);  // Size 2 array of watches.
         Watcher        *i, *j, *end;
         num_props++;
 
-        for (i = j = (Watcher*)ws, end = i + ws.size();  i != end;){
+                                                // For loop for 0 (universal) and 1 (existential).
+        for (i = j = (Watcher*)ws, end = i + ws.size();  i != end;){    // ws[0], ws[0].size();
             // Try to avoid inspecting the clause:
             Lit blocker = i->blocker;
-            if (value(blocker) == l_True){
+            if (value(blocker) == l_True){                              // l_False for universal.
                 *j++ = *i++; continue; }
 
             // Make sure the false literal is data[1]:
             CRef     cr        = i->cref;
             Clause&  c         = ca[cr];
-            Lit      false_lit = ~p;
+            Lit      false_lit = ~p;                                    // true_lit = p;
             if (c[0] == false_lit)
                 c[0] = c[1], c[1] = false_lit;
             assert(c[1] == false_lit);
@@ -656,26 +687,26 @@ CRef Solver::propagate()
             // If 0th watch is true, then clause is already satisfied.
             Lit     first = c[0];
             Watcher w     = Watcher(cr, first);
-            if (first != blocker && value(first) == l_True){
+            if (first != blocker && value(first) == l_True){            // l_False
                 *j++ = w; continue; }
 
             // Look for new watch:
             for (int k = 2; k < c.size(); k++)
-                if (value(c[k]) != l_False){
+                if (value(c[k]) != l_False){                            // l_True
                     c[1] = c[k]; c[k] = false_lit;
-                    watches[~c[1]].push(w);
+                    watches[~c[1]].push(w);                             // watches[c[1]].push(w);
                     goto NextClause; }
 
             // Did not find watch -- clause is unit under assignment:
             *j++ = w;
-            if (value(first) == l_False || !variable_type[var(first)]){
+            if (value(first) == l_False || !variable_type[var(first)]){ // l_True || variable_type[var]
                 confl = cr;
                 qhead = trail.size();
                 // Copy the remaining watches:
                 while (i < end)
                     *j++ = *i++;
-            }else
-                uncheckedEnqueue(first, cr);
+            } else
+                uncheckedEnqueue(first, cr);                            // ~first
 
         NextClause:;
         }
@@ -1239,4 +1270,42 @@ void Solver::getInitialTerm(vec<Lit>& initial_term) {
         Lit p = initial_term[i];
         in_term[var(p)] = false;
     }
+}
+
+void Solver::printClause(CRef cr) const {
+    const Clause& c = ca[cr];
+    for (int i = 0; i < c.size(); i++) {
+        Lit p = c[i];
+        Var v = variable_names[var(p)];
+        printf("%d ", sign(p) ? -v : v);
+    }
+    printf("\n");
+}
+
+void Solver::printClause(vec<Lit>& literals) const {
+    for (int i = 0; i < literals.size(); i++) {
+        Lit p = literals[i];
+        Var v = variable_names[var(p)];
+        printf("%d ", sign(p) ? -v : v);
+    }
+    printf("\n");
+}
+
+void Solver::printTrail() const {
+    printf("Trail: ");
+    for (int i = 0; i < trail.size(); i++) {
+        Lit p = trail[i];
+        Var v = variable_names[var(p)];
+        printf("%c%d@%d ", sign(p) ? -v : v, level(var(p)), variable_type[var(p)] ? 'e' : 'a');
+    }
+    printf("\n");
+}
+
+void Solver::printSeen(Var rightmost) const {
+    for (int v = 0; v <= rightmost; v++) {
+        if (seen[v]) {
+            printf("%d ", variable_names[v]);
+        }
+    }
+    printf("\n");
 }

@@ -300,6 +300,13 @@ protected:
     bool     withinBudget     ()      const;
     void     relocAll         (ClauseAllocator& to);
 
+    // Debugging
+
+    void     printClause    (CRef cr)            const;
+    void     printClause    (vec<Lit>& literals) const;
+    void     printTrail     ()                   const;
+    void     printSeen      (Var rightmost)      const;
+
     // Static helpers:
     //
 
