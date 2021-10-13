@@ -316,12 +316,19 @@ Lit Solver::pickBranchLit()
 |        rest of literals. There may be others from the same level though.
 |  
 |________________________________________________________________________________________________@*/
-void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel)
+void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool primary_type)
 {
     int pathC = 0;
     Lit p     = lit_Undef;
     Lit first = ca[confl][0];
-    Lit r     = (assigns[var(first)] == l_Undef) ? first : lit_Undef; // Literal to reduce.
+
+    bool other_type = !primary_type;
+    if (assigns[var(first)] == l_Undef) {
+        assert(variable_type[var(first)] == other_type);
+        uncheckedEnqueue(first, CRef_Undef);
+    }
+    
+    vec<Lit> other_type_literals;
 
 #ifndef NDEBUG
     printf("Conflict clause: ");
@@ -332,7 +339,16 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel)
     // Generate conflict clause:
     //
     out_learnt.push();      // (leave room for the asserting literal)
-    int index   = trail.size() - 1;
+    int index = trail.size() - 1;
+
+    int max_primary_dl = 0;
+    Clause& cc = ca[confl];
+    for (int i = 0; i < cc.size(); i++) {
+        Var v = var(cc[i]);
+        if (variable_type[v] == primary_type && level(v) > max_primary_dl) {
+            max_primary_dl = level(v);
+        }
+    }
 
     do {
         assert(confl != CRef_Undef); // (otherwise should be UIP)
@@ -344,177 +360,187 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel)
         for (int j = (p == lit_Undef) ? 0 : 1; j < c.size(); j++){
             Lit q = c[j];
 
-            if (!seen[var(q)] && level(var(q)) > 0 && assigns[var(q)] != l_Undef) {
+            if (!seen[var(q)] && variable_type[var(q)] == primary_type && level(var(q)) > 0) {
                 varBumpActivity(var(q));
                 seen[var(q)] = 1;
-                if (level(var(q)) >= decisionLevel())
+                if (level(var(q)) >= max_primary_dl)
                     pathC++;
                 else
                     out_learnt.push(q);
+            } else if (!seen[var(q)] && variable_type[var(q)] == other_type) {
+                other_type_literals.push(q);
             }
         }
         
         // Select next clause to look at:
-        while (!seen[var(trail[index--])]);
-        p     = trail[index+1];
+        while (index >= 0 && (!seen[var(trail[index])] || variable_type[var(trail[index])] == other_type)) {
+            index--;
+        }
+        if (index < 0) {
+            // Primary constraint empty, bail.
+            out_learnt.clear();
+            break;
+        }
+        index--;
+        p     = trail[index + 1];
         confl = reason(var(p));
         seen[var(p)] = 0;
         pathC--;
 
-    }while (pathC > 0);
-    out_learnt[0] = ~p;                                                                     // out_learnt[0] = p;  
+    } while (pathC > 0);
 
-    // Simplify conflict clause:
-    //
-    int i, j;
-    out_learnt.copyTo(analyze_toclear);
-    if (ccmin_mode == 2){
-        for (i = j = 1; i < out_learnt.size(); i++)
-            if (reason(var(out_learnt[i])) == CRef_Undef || !litRedundant(out_learnt[i]))
-                out_learnt[j++] = out_learnt[i];
-        
-    }else if (ccmin_mode == 1){
-        for (i = j = 1; i < out_learnt.size(); i++){
-            Var x = var(out_learnt[i]);
+    int i = 0;
+    int j = 0;
+    if (out_learnt.size()) {
+        out_learnt[0] = primary_type ? ~p : p;
 
-            if (reason(x) == CRef_Undef)
-                out_learnt[j++] = out_learnt[i];
-            else{
-                Clause& c = ca[reason(var(out_learnt[i]))];
-                for (int k = 1; k < c.size(); k++)
-                    if (!seen[var(c[k])] && level(var(c[k])) > 0){
-                        out_learnt[j++] = out_learnt[i];
-                        break; }
+        // Simplify conflict clause:
+        //
+        out_learnt.copyTo(analyze_toclear);
+        if (ccmin_mode == 2){
+            for (i = j = 1; i < out_learnt.size(); i++)
+                if (reason(var(out_learnt[i])) == CRef_Undef || !litRedundant(out_learnt[i]))
+                    out_learnt[j++] = out_learnt[i];
+            
+        }else if (ccmin_mode == 1){
+            for (i = j = 1; i < out_learnt.size(); i++){
+                Var x = var(out_learnt[i]);
+
+                if (reason(x) == CRef_Undef)
+                    out_learnt[j++] = out_learnt[i];
+                else{
+                    Clause& c = ca[reason(var(out_learnt[i]))];
+                    for (int k = 1; k < c.size(); k++)
+                        if (!seen[var(c[k])] && level(var(c[k])) > 0){
+                            out_learnt[j++] = out_learnt[i];
+                            break; }
+                }
             }
-        }
-    }else
-        i = j = out_learnt.size();
+        }else
+            i = j = out_learnt.size();
+    }
 
     max_literals += out_learnt.size();
     out_learnt.shrink(i - j);
     tot_literals += out_learnt.size();
 
     for (int j = 0; j < analyze_toclear.size(); j++) seen[var(analyze_toclear[j])] = 0;    // ('seen[]' is now cleared)
+
+    #ifndef NDEBUG
+        printf("MiniSAT primary clause/term: ");
+        printClause(out_learnt);
+        printf("Other literals: ");
+        printClause(other_type_literals);
+    #endif
     
-    // QBF-specific conflict analysis.
-    if (r != lit_Undef) {
-        vardata[var(r)].level = decisionLevel();
-        out_learnt.push(r);
-    }
-#ifndef NDEBUG
-    printf("MiniSAT learned clause: ");
-    printClause(out_learnt);
-#endif
+    // Begin QBF-specific conflict analysis.
 
-    if (!variable_type[var(p)] || (r != lit_Undef)) {           // variable_type[var(p)]
-        index   = trail.size() - 1;
+    index   = trail.size() - 1;
 
-        Var max_dl_var = var_Undef;
-        Var rightmost_existential_var = var_Undef;
-        vec<int> decision_level_counts(decisionLevel() + 1);
-        for (i = 0; i < out_learnt.size(); i++) {
-            Var v = var(out_learnt[i]);
-            if (variable_type[v] && (rightmost_existential_var == var_Undef || rightmost_existential_var < v)) { // !variable_type[var(p)]
-                rightmost_existential_var = v;
-            }
+    Var max_dl_var = var_Undef;
+    Var rightmost_primary = var_Undef;
+
+    vec<int> decision_level_counts(decisionLevel() + 1);
+
+    for (i = 0; i < out_learnt.size(); i++) {
+        Var v = var(out_learnt[i]);
+        seen[v] = 1;
+        decision_level_counts[level(v)]++;
+        if (variable_type[v] == primary_type && (rightmost_primary == var_Undef || rightmost_primary < v)) {
+            rightmost_primary = v;
         }
-
-        for (i = 0; i < out_learnt.size(); i++) {
-            Var v = var(out_learnt[i]);
-            if (v <= rightmost_existential_var) {
+    }
+    if (rightmost_primary != var_Undef) {
+        for (i = 0; i < other_type_literals.size(); i++) {
+            Var v = var(other_type_literals[i]);
+            if (v <= rightmost_primary) {
                 seen[v] = 1;
                 decision_level_counts[level(v)]++;
             }
         }
-        // Search for variable of maximal decision level (including the unassigned universal variable).
-        if (r != lit_Undef && seen[var(r)]) {
-            max_dl_var = var(r);
-        } else {
-            while (index >= 0 && !seen[var(trail[index--])]);
-            index++;
-            max_dl_var = (!seen[var(trail[index])]) ? var_Undef : var(trail[index]);
+        // Search for variable of maximal decision level.
+        while (index >= 0 && !seen[var(trail[index--])]);
+        index++;
+        max_dl_var = (!seen[var(trail[index])]) ? var_Undef : var(trail[index]);
+    }
+
+    // While the clause is not asserting, resolve out the rightmost existential literal.
+    // TODO: Below - variable_type[max_dl_var]
+    while (rightmost_primary != var_Undef && (variable_type[max_dl_var] == other_type || level(max_dl_var) == 0 || decision_level_counts[level(max_dl_var)] > 1)) {
+#ifndef NDEBUG
+        printf("Current clause: ");
+        printSeen(rightmost_primary);
+        printf("Rightmost var: %d\n", variable_names[rightmost_primary]);
+        printf("Max DL var: %d\n", variable_names[max_dl_var]);
+#endif
+        // If there are multiple primaries at the highest decision level, resolve these out first.
+        Var pivot = (variable_type[max_dl_var] == primary_type) ? max_dl_var : rightmost_primary;
+        confl = reason(pivot);
+        assert(confl != CRef_Undef);
+#ifndef NDEBUG
+        printf("Reason clause: ");
+        printClause(confl);
+#endif
+        Clause& c = ca[confl];
+
+        if (c.learnt())
+            claBumpActivity(c);
+
+        seen[pivot] = 0;
+        decision_level_counts[level(pivot)]--;
+
+        // Account for new primary variables. Check whether one of them is right of the old rightmost primary variable.
+        for (int j = 1; j < c.size(); j++) {
+            Var v = var(c[j]);
+            if (variable_type[v] == primary_type && !seen[v]) {
+                seen[v] = 1;
+                decision_level_counts[level(v)]++;
+                if (rightmost_primary < v) {
+                    rightmost_primary = v;
+                }
+            }
         }
-        // While the clause is not asserting, resolve out the rightmost existential literal.
-        // TODO: Below - variable_type[max_dl_var]
-        while (rightmost_existential_var != var_Undef && (!variable_type[max_dl_var] || (level(max_dl_var) == 0) || decision_level_counts[level(max_dl_var)] > 1)) {
-    #ifndef NDEBUG
-            printf("Current clause: ");
-            printSeen(rightmost_existential_var);
-            printf("Rightmost var: %d\n", variable_names[rightmost_existential_var]);
-            printf("Max DL var: %d\n", variable_names[max_dl_var]);
-    #endif
-            // If there are multiple existentials at the highest decision level, resolve these out first.
-            Var pivot = variable_type[max_dl_var] ? max_dl_var : rightmost_existential_var;             // !variable_type[max_dl_var]
-            confl = reason(pivot);
-            assert(confl != CRef_Undef);
-    #ifndef NDEBUG
-            printf("Reason clause: ");
-            printClause(confl);
-    #endif
-            Clause& c = ca[confl];
-
-            if (c.learnt())
-                claBumpActivity(c);
-
-            seen[pivot] = 0;
-            decision_level_counts[level(pivot)]--;
-
-            // Account for new existential variables. Check whether one of them is right of the old rightmost variable.
+        // If no new rightmost primary was found, search from the old rightmost primary, reducing along the way.
+        if (!seen[rightmost_primary]) {
+            for (; rightmost_primary >= 0 && (!seen[rightmost_primary] || variable_type[rightmost_primary] == other_type); rightmost_primary--) {
+                if (seen[rightmost_primary]) {
+                    // Universal variable, reduce.
+                    assert(variable_type[rightmost_primary] == other_type);
+                    seen[rightmost_primary] = 0;
+                    decision_level_counts[level(rightmost_primary)]--;
+                }
+            }
+        }
+        // Add blocked universal variables from reason clause.
+        if (rightmost_primary != var_Undef) {
             for (int j = 1; j < c.size(); j++) {
                 Var v = var(c[j]);
-                if (variable_type[v] && !seen[v]) {                                                     // !variable_type
+                if (!seen[v] && variable_type[v] == other_type && v < rightmost_primary) {
                     seen[v] = 1;
                     decision_level_counts[level(v)]++;
-                    if (rightmost_existential_var < v) {
-                        rightmost_existential_var = v;
-                    }
                 }
-            }
-            // If no new rightmost existential was found, search from the old rightmost variable, reducing along the way.
-            if (!seen[rightmost_existential_var]) {                                         // variable_type[rightmost_existential_var]
-                for (; rightmost_existential_var >= 0 && (!seen[rightmost_existential_var] || !variable_type[rightmost_existential_var]); rightmost_existential_var--) {
-                    if (seen[rightmost_existential_var]) {
-                        // Universal variable, reduce.
-                        seen[rightmost_existential_var] = 0;
-                        decision_level_counts[level(rightmost_existential_var)]--;
-                    }
-                }
-            }
-            // Add blocked universal variables from reason clause.
-            if (rightmost_existential_var != var_Undef) {
-                for (int j = 1; j < c.size(); j++) {
-                    Var v = var(c[j]);
-                    if (!seen[v] && !variable_type[v] && v < rightmost_existential_var) {  //variable_type[v]
-                        seen[v] = 1;
-                        decision_level_counts[level(v)]++;
-                    }
-                }
-            }
-            // Search for variable of maximal decision level (including the unassigned universal variable).
-            if (r != lit_Undef && seen[var(r)]) {
-                max_dl_var = var(r);
-            } else {
-                while (index >= 0 && !seen[var(trail[index--])]);
-                index++;
-                max_dl_var = (!seen[var(trail[index])]) ? var_Undef : var(trail[index]);
             }
         }
-        // The clause represented in "seen" is empty or asserting, translate back to vector.
-        out_learnt.clear();
-        if (rightmost_existential_var != var_Undef) {
-            // Push asserting literal first.
-            seen[max_dl_var] = 0;
-            out_learnt.push(~mkLit(max_dl_var, toInt(value(max_dl_var))));      // mkLit (unnegated)
-            for (int v = 0; v <= rightmost_existential_var; v++) {
-                if (seen[v]) {
-                    out_learnt.push(~mkLit(v, toInt(value(v))));                // mkLit (unnegated)
-                    seen[v] = 0;
-                }
+        // Search for variable of maximal decision level (including the unassigned universal variable).
+        while (index >= 0 && !seen[var(trail[index--])]);
+        index++;
+        max_dl_var = (!seen[var(trail[index])]) ? var_Undef : var(trail[index]);
+    }
+    // The clause represented in "seen" is empty or asserting, translate back to vector.
+    out_learnt.clear();
+    if (rightmost_primary != var_Undef) {
+        // Push asserting literal first.
+        seen[max_dl_var] = 0;
+        out_learnt.push(mkLit(max_dl_var, primary_type ^ toInt(value(max_dl_var))));
+        for (int v = 0; v <= rightmost_primary; v++) {
+            if (seen[v]) {
+                out_learnt.push(mkLit(v, primary_type ^ toInt(value(v))));
+                seen[v] = 0;
             }
         }
     }
 #ifndef NDEBUG
-    printf("Learned clause: ");
+    printf("Learned clause/term: ");
     printClause(out_learnt);
 #endif
 
@@ -1296,7 +1322,7 @@ void Solver::printTrail() const {
     for (int i = 0; i < trail.size(); i++) {
         Lit p = trail[i];
         Var v = variable_names[var(p)];
-        printf("%c%d@%d ", sign(p) ? -v : v, level(var(p)), variable_type[var(p)] ? 'e' : 'a');
+        printf("%c%d@%d ", variable_type[var(p)] ? 'E' : 'A', sign(p) ? -v : v, level(var(p)));
     }
     printf("\n");
 }
