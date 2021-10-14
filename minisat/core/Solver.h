@@ -28,8 +28,13 @@ OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWA
 #include "minisat/utils/Options.h"
 #include "minisat/core/SolverTypes.h"
 
+#include <vector>
+
 
 namespace Minisat {
+
+
+enum ConstraintTypes { Clauses = 0, Terms = 1 };
 
 //=================================================================================================
 // Solver -- the main class:
@@ -208,8 +213,8 @@ protected:
     VMap<lbool>         user_pol;         // The users preferred polarity of each variable.
     VMap<char>          decision;         // Declares if a variable is eligible for selection in the decision heuristic.
     VMap<VarData>       vardata;          // Stores reason and level for each variable.
-    OccLists<Lit, vec<Watcher>, WatcherDeleted, MkIndexLit>
-                        watches;          // 'watches[lit]' is a list of constraints watching 'lit' (will go there if literal becomes true).
+    OccLists<Lit, vec<Watcher>, WatcherDeleted, MkIndexLit>*
+                        watches[2];       // 'watches[lit]' is a list of constraints watching 'lit' (will go there if literal becomes true).
 
     Heap<Var,VarOrderLt>order_heap;       // A priority queue of variables ordered with respect to the variable activity.
 
@@ -248,6 +253,7 @@ protected:
     vec<char>           in_term;
     vec<int>            variable_names;
     VMap<Var>           alias_to_internal;
+    CMap<bool>          constraint_type;
 
     // Resource contraints:
     //
@@ -262,7 +268,7 @@ protected:
     void     newDecisionLevel ();                                                      // Begins a new decision level.
     void     uncheckedEnqueue (Lit p, CRef from = CRef_Undef);                         // Enqueue a literal. Assumes value of literal is undefined.
     bool     enqueue          (Lit p, CRef from = CRef_Undef);                         // Test if fact 'p' contradicts current state, enqueue otherwise.
-    CRef     propagate        ();                                                      // Perform unit propagation. Returns possibly conflicting clause.
+    CRef     propagate        (bool& ct);                                              // Perform unit propagation. Returns possibly conflicting clause.
     void     cancelUntil      (int level);                                             // Backtrack until a certain level.
     void     analyze          (CRef confl, vec<Lit>& out_learnt, int& out_btlevel, 
                                bool primary_type=true);                                // (bt = backtrack)
@@ -284,12 +290,12 @@ protected:
 
     // Operations on clauses:
     //
-    void     attachClause     (CRef cr);               // Attach a clause to watcher lists.
+    void     attachClause     (CRef cr);                      // Attach a clause to watcher lists.
     void     detachClause     (CRef cr, bool strict = false); // Detach a clause to watcher lists.
-    void     removeClause     (CRef cr);               // Detach and free a clause.
-    bool     isRemoved        (CRef cr) const;         // Test if a clause has been removed.
-    bool     locked           (const Clause& c) const; // Returns TRUE if a clause is a reason for some implication in the current state.
-    bool     satisfied        (const Clause& c) const; // Returns TRUE if a clause is satisfied in the current state.
+    void     removeClause     (CRef cr);                      // Detach and free a clause.
+    bool     isRemoved        (CRef cr) const;                // Test if a clause has been removed.
+    bool     locked           (const Clause& c) const;        // Returns TRUE if a clause is a reason for some implication in the current state.
+    bool     satisfied        (const Clause& c) const;        // Returns TRUE if a clause is satisfied in the current state.
 
     // Misc:
     //
@@ -369,7 +375,7 @@ inline bool     Solver::addClause       (Lit p, Lit q, Lit r)   { add_tmp.clear(
 inline bool     Solver::addClause       (Lit p, Lit q, Lit r, Lit s){ add_tmp.clear(); add_tmp.push(p); add_tmp.push(q); add_tmp.push(r); add_tmp.push(s); return addClause_(add_tmp); }
 
 inline bool     Solver::isRemoved       (CRef cr)         const { return ca[cr].mark() == 1; }
-inline bool     Solver::locked          (const Clause& c) const { return value(c[0]) == l_True && reason(var(c[0])) != CRef_Undef && ca.lea(reason(var(c[0]))) == &c; }
+inline bool     Solver::locked          (const Clause& c) const { return value(c[0]) == ((constraint_type[ca.ael(&c)] == Clauses) ? l_True : l_False) && reason(var(c[0])) != CRef_Undef && ca.lea(reason(var(c[0]))) == &c; }
 inline void     Solver::newDecisionLevel()                      { trail_lim.push(trail.size()); }
 
 inline int      Solver::decisionLevel ()      const   { return trail_lim.size(); }

@@ -84,7 +84,7 @@ Solver::Solver() :
   , solves(0), starts(0), decisions(0), rnd_decisions(0), propagations(0), conflicts(0)
   , dec_vars(0), num_clauses(0), num_learnts(0), clauses_literals(0), learnts_literals(0), max_literals(0), tot_literals(0)
 
-  , watches            (WatcherDeleted(ca))
+//  , watches {OccLists<Lit, vec<Watcher>, WatcherDeleted, MkIndexLit>(WatcherDeleted(ca)), OccLists<Lit, vec<Watcher>, WatcherDeleted, MkIndexLit>(WatcherDeleted(ca))}
   , order_heap         (VarOrderLt(activity))
   , ok                 (true)
   , cla_inc            (1)
@@ -101,11 +101,16 @@ Solver::Solver() :
   , conflict_budget    (-1)
   , propagation_budget (-1)
   , asynch_interrupt   (false)
-{}
+{
+    watches[0] = new OccLists<Lit, vec<Watcher>, WatcherDeleted, MkIndexLit>(WatcherDeleted(ca));
+    watches[1] = new OccLists<Lit, vec<Watcher>, WatcherDeleted, MkIndexLit>(WatcherDeleted(ca));
+}
 
 
 Solver::~Solver()
 {
+    delete watches[0];
+    delete watches[1];
 }
 
 
@@ -129,8 +134,10 @@ Var Solver::newVar(Var alias, lbool upol, bool dvar)
     variable_type.push(true);
     variable_depth.push(0);
     in_term.push(false);
-    watches  .init(mkLit(v, false));
-    watches  .init(mkLit(v, true ));
+    watches[0]->init(mkLit(v, false));
+    watches[0]->init(mkLit(v, true ));
+    watches[1]->init(mkLit(v, false));
+    watches[1]->init(mkLit(v, true ));
     assigns  .insert(v, l_Undef);
     vardata  .insert(v, mkVarData(CRef_Undef, 0));
     activity .insert(v, rnd_init_act ? drand(random_seed) * 0.00001 : 0);
@@ -165,6 +172,10 @@ bool Solver::addClause_(vec<Lit>& ps)
     assert(decisionLevel() == 0);
     if (!ok) return false;
 
+    for (int i = 0; i < ps.size(); i++) {
+        ps[i] = mkLit(alias_to_internal[var(ps[i])], sign(ps[i]));
+    }
+
     // Check if clause is satisfied and remove false/duplicate literals:
     sort(ps);
     Lit p; int i, j;
@@ -178,29 +189,34 @@ bool Solver::addClause_(vec<Lit>& ps)
 
     if (ps.size() == 0)
         return ok = false;
-    else if (ps.size() == 1){
-        p = ps[0];
-        if (variable_type[var(p)]) {
-            uncheckedEnqueue(ps[0]);
-            return ok = (propagate() == CRef_Undef);
-        } else {
-            return ok = false;
-        }
-    }else{
+    else {
         CRef cr = ca.alloc(ps, false);
         clauses.push(cr);
-        attachClause(cr);
+        constraint_type.insert(cr, Clauses);
+        if (ps.size() == 1){
+            p = ps[0];
+            bool ct;
+            if (variable_type[var(p)]) {
+                uncheckedEnqueue(ps[0], cr);
+                return ok = (propagate(ct) == CRef_Undef);
+            } else {
+                return ok = false;
+            }
+        } else { // ps.size > 1
+            attachClause(cr);
+        }
     }
 
     return true;
 }
 
 
-void Solver::attachClause(CRef cr){
+void Solver::attachClause(CRef cr) {
     const Clause& c = ca[cr];
+    auto ct = constraint_type[cr];
     assert(c.size() > 1);
-    watches[~c[0]].push(Watcher(cr, c[1]));                         // c[0]
-    watches[~c[1]].push(Watcher(cr, c[0]));                         // c[1]
+    (*watches[ct])[ct == Terms ? c[0] : ~c[0]].push(Watcher(cr, c[1]));
+    (*watches[ct])[ct == Terms ? c[1] : ~c[1]].push(Watcher(cr, c[0]));
     if (c.learnt()) num_learnts++, learnts_literals += c.size();
     else            num_clauses++, clauses_literals += c.size();
 }
@@ -209,14 +225,15 @@ void Solver::attachClause(CRef cr){
 void Solver::detachClause(CRef cr, bool strict){
     const Clause& c = ca[cr];
     assert(c.size() > 1);
+    auto ct = constraint_type[cr];
     
     // Strict or lazy detaching:
     if (strict){
-        remove(watches[~c[0]], Watcher(cr, c[1]));                  // Dualize.
-        remove(watches[~c[1]], Watcher(cr, c[0]));
+        remove((*watches[ct])[ct == Terms ? c[0] : ~c[0]], Watcher(cr, c[1]));
+        remove((*watches[ct])[ct == Terms ? c[1] : ~c[1]], Watcher(cr, c[0]));
     }else{
-        watches.smudge(~c[0]);
-        watches.smudge(~c[1]);
+        watches[ct]->smudge(ct == Terms ? c[0] : ~c[0]);
+        watches[ct]->smudge(ct == Terms ? c[1] : ~c[1]);
     }
 
     if (c.learnt()) num_learnts--, learnts_literals -= c.size();
@@ -226,7 +243,8 @@ void Solver::detachClause(CRef cr, bool strict){
 
 void Solver::removeClause(CRef cr) {
     Clause& c = ca[cr];
-    detachClause(cr);
+    if (c.size() > 1)
+        detachClause(cr);
     // Don't leave pointers to free'd memory!
     if (locked(c)) vardata[var(c[0])].reason = CRef_Undef;
     c.mark(1); 
@@ -331,7 +349,7 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool pr
     vec<Lit> other_type_literals;
 
 #ifndef NDEBUG
-    printf("Conflict clause: ");
+    printf("Conflict %s: ", primary_type ? "clause" : "term");
     printClause(confl);
     printTrail();
 #endif
@@ -368,6 +386,7 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool pr
                 else
                     out_learnt.push(q);
             } else if (!seen[var(q)] && variable_type[var(q)] == other_type) {
+                seen[var(q)] = 1;
                 other_type_literals.push(q);
             }
         }
@@ -424,10 +443,11 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool pr
     out_learnt.shrink(i - j);
     tot_literals += out_learnt.size();
 
-    for (int j = 0; j < analyze_toclear.size(); j++) seen[var(analyze_toclear[j])] = 0;    // ('seen[]' is now cleared)
+    for (int j = 0; j < analyze_toclear.size(); j++) seen[var(analyze_toclear[j])] = 0;   
+    for (int j = 0; j < other_type_literals.size(); j++) seen[var(other_type_literals[j])] = 0; // ('seen[]' is now cleared)
 
     #ifndef NDEBUG
-        printf("MiniSAT primary clause/term: ");
+        printf("MiniSAT primary %s: ", primary_type ? "clause" : "term");
         printClause(out_learnt);
         printf("Other literals: ");
         printClause(other_type_literals);
@@ -468,7 +488,7 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool pr
     // TODO: Below - variable_type[max_dl_var]
     while (rightmost_primary != var_Undef && (variable_type[max_dl_var] == other_type || level(max_dl_var) == 0 || decision_level_counts[level(max_dl_var)] > 1)) {
 #ifndef NDEBUG
-        printf("Current clause: ");
+        printf("Current %s: ", primary_type ? "clause" : "term");
         printSeen(rightmost_primary);
         printf("Rightmost var: %d\n", variable_names[rightmost_primary]);
         printf("Max DL var: %d\n", variable_names[max_dl_var]);
@@ -478,7 +498,7 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool pr
         confl = reason(pivot);
         assert(confl != CRef_Undef);
 #ifndef NDEBUG
-        printf("Reason clause: ");
+        printf("Reason %s: ", primary_type ? "clause" : "term");
         printClause(confl);
 #endif
         Clause& c = ca[confl];
@@ -540,7 +560,7 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool pr
         }
     }
 #ifndef NDEBUG
-    printf("Learned clause/term: ");
+    printf("Learned %s: ", primary_type ? "clause" : "term");
     printClause(out_learnt);
 #endif
 
@@ -683,60 +703,66 @@ void Solver::uncheckedEnqueue(Lit p, CRef from)
 |    Post-conditions:
 |      * the propagation queue is empty, even if there was a conflict.
 |________________________________________________________________________________________________@*/
-CRef Solver::propagate()
+CRef Solver::propagate(bool& ct)
 {
     CRef    confl     = CRef_Undef;
     int     num_props = 0;
 
     while (qhead < trail.size()){
-        Lit            p   = trail[qhead++];     // 'p' is enqueued fact to propagate.
-        vec<Watcher>&  ws  = watches.lookup(p);  // Size 2 array of watches.
-        Watcher        *i, *j, *end;
         num_props++;
+        Lit            p   = trail[qhead++];     // 'p' is enqueued fact to propagate.
+        
+        for (auto ct_ : { Clauses, Terms } ) {
+            lbool l_disabling = (ct_ == Clauses) ? l_True : l_False;
+            lbool l_vanishing = (ct_ == Clauses) ? l_False : l_True;
 
-                                                // For loop for 0 (universal) and 1 (existential).
-        for (i = j = (Watcher*)ws, end = i + ws.size();  i != end;){    // ws[0], ws[0].size();
-            // Try to avoid inspecting the clause:
-            Lit blocker = i->blocker;
-            if (value(blocker) == l_True){                              // l_False for universal.
-                *j++ = *i++; continue; }
+            vec<Watcher>&  ws  = watches[ct_]->lookup(p);
+            Watcher        *i, *j, *end;
 
-            // Make sure the false literal is data[1]:
-            CRef     cr        = i->cref;
-            Clause&  c         = ca[cr];
-            Lit      false_lit = ~p;                                    // true_lit = p;
-            if (c[0] == false_lit)
-                c[0] = c[1], c[1] = false_lit;
-            assert(c[1] == false_lit);
-            i++;
+            for (i = j = (Watcher*)ws, end = i + ws.size();  i != end;){
+                // Try to avoid inspecting the clause:
+                Lit blocker = i->blocker;
+                if (value(blocker) == l_disabling){                             
+                    *j++ = *i++; continue; }
 
-            // If 0th watch is true, then clause is already satisfied.
-            Lit     first = c[0];
-            Watcher w     = Watcher(cr, first);
-            if (first != blocker && value(first) == l_True){            // l_False
-                *j++ = w; continue; }
+                // Make sure the false literal is data[1]:
+                CRef     cr        = i->cref;
+                Clause&  c         = ca[cr];
+                Lit      false_lit = (ct_ == Clauses) ? ~p : p;
+                if (c[0] == false_lit)
+                    c[0] = c[1], c[1] = false_lit;
+                assert(c[1] == false_lit);
+                i++;
 
-            // Look for new watch:
-            for (int k = 2; k < c.size(); k++)
-                if (value(c[k]) != l_False){                            // l_True
-                    c[1] = c[k]; c[k] = false_lit;
-                    watches[~c[1]].push(w);                             // watches[c[1]].push(w);
-                    goto NextClause; }
+                // If 0th watch is true, then clause is already satisfied.
+                Lit     first = c[0];
+                Watcher w     = Watcher(cr, first);
+                if (first != blocker && value(first) == l_disabling){
+                    *j++ = w; continue; }
 
-            // Did not find watch -- clause is unit under assignment:
-            *j++ = w;
-            if (value(first) == l_False || !variable_type[var(first)]){ // l_True || variable_type[var]
-                confl = cr;
-                qhead = trail.size();
-                // Copy the remaining watches:
-                while (i < end)
-                    *j++ = *i++;
-            } else
-                uncheckedEnqueue(first, cr);                            // ~first
+                // Look for new watch:
+                for (int k = 2; k < c.size(); k++)
+                    if (value(c[k]) != l_vanishing){
+                        c[1] = c[k]; c[k] = false_lit;
+                        (*watches[ct_])[(ct_ == Clauses) ? ~c[1] : c[1]].push(w);
+                        goto NextClause; }
 
-        NextClause:;
+                // Did not find watch -- clause is unit under assignment:
+                *j++ = w;
+                if (value(first) == l_vanishing || variable_type[var(first)] == ct_){
+                    ct = ct_;
+                    confl = cr;
+                    qhead = trail.size();
+                    // Copy the remaining watches:
+                    while (i < end)
+                        *j++ = *i++;
+                } else
+                    uncheckedEnqueue(ct_ == Clauses ? first : ~first, cr);
+
+            NextClause:;
+            }
+            ws.shrink(i - j);
         }
-        ws.shrink(i - j);
     }
     propagations += num_props;
     simpDB_props -= num_props;
@@ -822,8 +848,8 @@ void Solver::rebuildOrderHeap()
 bool Solver::simplify()
 {
     assert(decisionLevel() == 0);
-
-    if (!ok || propagate() != CRef_Undef)
+    bool ct;
+    if (!ok || propagate(ct) != CRef_Undef)
         return ok = false;
 
     if (nAssigns() == simpDB_assigns || (simpDB_props > 0))
@@ -885,29 +911,34 @@ lbool Solver::search(int nof_conflicts)
     assert(ok);
     int         backtrack_level;
     int         conflictC = 0;
+    bool        ct;
     vec<Lit>    learnt_clause;
     starts++;
 
     for (;;){
-        CRef confl = propagate();
+        CRef confl = propagate(ct);
         if (confl != CRef_Undef){
             // CONFLICT
+            conflict: // goto label
+        
             conflicts++; conflictC++;
-            if (decisionLevel() == 0) return l_False;
+            if (decisionLevel() == 0) return (ct == Clauses) ? l_False : l_True;
 
             learnt_clause.clear();
-            analyze(confl, learnt_clause, backtrack_level);
-            if (learnt_clause.size() == 0) return l_False;
+            analyze(confl, learnt_clause, backtrack_level, !ct);
+            if (learnt_clause.size() == 0) return (ct == Clauses) ? l_False : l_True;
             
             cancelUntil(backtrack_level);
 
             CRef cr = ca.alloc(learnt_clause, true);
             learnts.push(cr);
+            constraint_type.insert(cr, ct);
+
             if (learnt_clause.size() > 1) {
                 attachClause(cr);
                 claBumpActivity(ca[cr]);
             }
-            uncheckedEnqueue(learnt_clause[0], cr);
+            uncheckedEnqueue((ct == Clauses) ? learnt_clause[0] : ~learnt_clause[0], cr);
 
             varDecayActivity();
             claDecayActivity();
@@ -965,10 +996,12 @@ lbool Solver::search(int nof_conflicts)
                     // Model found.
                     vec<Lit> learnt_term;
                     getInitialTerm(learnt_term);
-                    // Reduce initial term.
-                    // Perform conflict analysis with term.
-                    // Add learnt term.
-                    return l_True; // TODO: add a new learnt term.
+                    confl = ca.alloc(learnt_term, true);
+                    ct = Terms;
+                #ifndef NDEBUG
+                    printf("Initial term found. \n");
+                #endif
+                    goto conflict;
                 }
             }
 
@@ -1086,7 +1119,8 @@ bool Solver::implies(const vec<Lit>& assumps, vec<Lit>& out)
 
     unsigned trail_before = trail.size();
     bool     ret          = true;
-    if (propagate() == CRef_Undef){
+    bool ct;
+    if (propagate(ct) == CRef_Undef){
         out.clear();
         for (int j = trail_before; j < trail.size(); j++)
             out.push(trail[j]);
@@ -1196,13 +1230,16 @@ void Solver::relocAll(ClauseAllocator& to)
 {
     // All watchers:
     //
-    watches.cleanAll();
+    watches[Clauses]->cleanAll();
+    watches[Terms]  ->cleanAll();
     for (int v = 0; v < nVars(); v++)
         for (int s = 0; s < 2; s++){
             Lit p = mkLit(v, s);
-            vec<Watcher>& ws = watches[p];
-            for (int j = 0; j < ws.size(); j++)
-                ca.reloc(ws[j].cref, to);
+            for (auto ct: {Clauses, Terms}) {
+                vec<Watcher>& ws = (*watches[ct])[p];
+                for (int j = 0; j < ws.size(); j++)
+                    ca.reloc(ws[j].cref, to);
+            }
         }
 
     // All reasons:
@@ -1218,12 +1255,17 @@ void Solver::relocAll(ClauseAllocator& to)
         }
     }
 
+    // New constraint type map.
+    CMap<bool> constraint_type_;
+
     // All learnt:
     //
     int i, j;
     for (i = j = 0; i < learnts.size(); i++)
         if (!isRemoved(learnts[i])){
+            auto ct = constraint_type[learnts[i]];
             ca.reloc(learnts[i], to);
+            constraint_type_.insert(learnts[i], ct);
             learnts[j++] = learnts[i];
         }
     learnts.shrink(i - j);
@@ -1233,9 +1275,12 @@ void Solver::relocAll(ClauseAllocator& to)
     for (i = j = 0; i < clauses.size(); i++)
         if (!isRemoved(clauses[i])){
             ca.reloc(clauses[i], to);
+            constraint_type_.insert(clauses[i], Clauses);
             clauses[j++] = clauses[i];
         }
     clauses.shrink(i - j);
+
+    constraint_type_.moveTo(constraint_type);
 }
 
 

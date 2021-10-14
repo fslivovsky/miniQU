@@ -32,7 +32,7 @@ static const char* _cat = "SIMP";
 
 static BoolOption   opt_use_asymm        (_cat, "asymm",        "Shrink clauses by asymmetric branching.", false);
 static BoolOption   opt_use_rcheck       (_cat, "rcheck",       "Check if a clause is already implied. (costly)", false);
-static BoolOption   opt_use_elim         (_cat, "elim",         "Perform variable elimination.", true);
+static BoolOption   opt_use_elim         (_cat, "elim",         "Perform variable elimination.", false);
 static IntOption    opt_grow             (_cat, "grow",         "Allow a variable elimination step to grow by a number of clauses.", 0);
 static IntOption    opt_clause_lim       (_cat, "cl-lim",       "Variables are not eliminated if it produces a resolvent with a length above this limit. -1 means no limit", 20,   IntRange(-1, INT32_MAX));
 static IntOption    opt_subsumption_lim  (_cat, "sub-lim",      "Do not check if subsumption against a clause larger than this. -1 means no limit.", 1000, IntRange(-1, INT32_MAX));
@@ -227,7 +227,7 @@ bool SimpSolver::strengthenClause(CRef cr, Lit l)
         updateElimHeap(var(l));
     }
 
-    return c.size() == 1 ? enqueue(c[0]) && propagate() == CRef_Undef : true;
+    return true; //c.size() == 1 ? enqueue(c[0]) && propagate() == CRef_Undef : true;
 }
 
 
@@ -336,7 +336,7 @@ bool SimpSolver::implied(const vec<Lit>& c)
             uncheckedEnqueue(~c[i]);
         }
 
-    bool result = propagate() != CRef_Undef;
+    bool result = false; // propagate() != CRef_Undef;
     cancelUntil(0);
     return result;
 }
@@ -425,7 +425,8 @@ bool SimpSolver::asymm(Var v, CRef cr)
         else
             l = c[i];
 
-    if (propagate() != CRef_Undef){
+    bool ct;
+    if (propagate(ct) != CRef_Undef){
         cancelUntil(0);
         asymm_lits++;
         if (!strengthenClause(cr, l))
@@ -541,8 +542,8 @@ bool SimpSolver::eliminateVar(Var v)
     occurs[v].clear(true);
     
     // Free watchers lists for this variable, if possible:
-    if (watches[ mkLit(v)].size() == 0) watches[ mkLit(v)].clear(true);
-    if (watches[~mkLit(v)].size() == 0) watches[~mkLit(v)].clear(true);
+    //if (watches[0][ mkLit(v)].size() == 0) watches[0][ mkLit(v)].clear(true);
+    //if (watches[0][~mkLit(v)].size() == 0) watches[0][~mkLit(v)].clear(true);
 
     return backwardSubsumptionCheck();
 }

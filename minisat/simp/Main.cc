@@ -25,7 +25,7 @@ OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWA
 #include "minisat/utils/ParseUtils.h"
 #include "minisat/utils/Options.h"
 #include "minisat/core/Dimacs.h"
-#include "minisat/simp/SimpSolver.h"
+#include "minisat/core/Solver.h"
 
 using namespace Minisat;
 
@@ -69,10 +69,10 @@ int main(int argc, char** argv)
 
         parseOptions(argc, argv, true);
         
-        SimpSolver  S;
+        Solver  S;
         double      initial_time = cpuTime();
 
-        if (!pre) S.eliminate(true);
+        //if (!pre) S.eliminate(true);
 
         S.verbosity = verb;
         
@@ -112,11 +112,11 @@ int main(int argc, char** argv)
         // voluntarily:
         sigTerm(SIGINT_interrupt);
 
-        S.eliminate(true);
-        double simplified_time = cpuTime();
-        if (S.verbosity > 0){
-            printf("|  Simplification time:  %12.2f s                                       |\n", simplified_time - parsed_time);
-            printf("|                                                                             |\n"); }
+        // S.eliminate(true);
+        // double simplified_time = cpuTime();
+        // if (S.verbosity > 0){
+        //     printf("|  Simplification time:  %12.2f s                                       |\n", simplified_time - parsed_time);
+        //     printf("|                                                                             |\n"); }
 
         if (!S.okay()){
             if (res != NULL) fprintf(res, "UNSAT\n"), fclose(res);

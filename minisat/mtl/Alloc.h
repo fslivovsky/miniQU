@@ -65,7 +65,7 @@ class RegionAllocator
 
     T*       lea       (Ref r)       { assert(r < sz); return &memory[r]; }
     const T* lea       (Ref r) const { assert(r < sz); return &memory[r]; }
-    Ref      ael       (const T* t)  { assert((void*)t >= (void*)&memory[0] && (void*)t < (void*)&memory[sz-1]);
+    Ref      ael       (const T* t)  const { assert((void*)t >= (void*)&memory[0] && (void*)t < (void*)&memory[sz-1]);
         return  (Ref)(t - &memory[0]); }
 
     void     moveTo(RegionAllocator& to) {

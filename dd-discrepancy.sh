@@ -8,12 +8,12 @@ ARG=$1
 RES1=$?
 
 # TO DO: call some reference solver here which is supposed to work correctly
-depqbf $ARG
+../qute/qute $ARG
 RES2=$?
 
 # the script returns non-zero if the solvers disagree or if either one terminated abnormally
-#if (( $RES1 != $RES2 ))
-if [[ ( $RES1 == 20 && $RES2 != 20 ) || ( $RES1 != 10 && $RES1 != 20 ) ]]
+#if [[ ( $RES1 == 20 && $RES2 != 20 ) || ( $RES1 != 10 && $RES1 != 20 ) ]]
+if (( $RES1 != $RES2 ))
 then 
     exit 1
 else
