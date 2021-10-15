@@ -8,7 +8,7 @@ ARG=$1
 RES1=$?
 
 # TO DO: call some reference solver here which is supposed to work correctly
-../qute/qute $ARG
+depqbf $ARG
 RES2=$?
 
 # the script returns non-zero if the solvers disagree or if either one terminated abnormally

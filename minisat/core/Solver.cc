@@ -722,7 +722,7 @@ CRef Solver::propagate(bool& ct)
             for (i = j = (Watcher*)ws, end = i + ws.size();  i != end;){
                 // Try to avoid inspecting the clause:
                 Lit blocker = i->blocker;
-                if (value(blocker) == l_disabling){                             
+                if (value(blocker) == l_disabling){
                     *j++ = *i++; continue; }
 
                 // Make sure the false literal is data[1]:
@@ -756,8 +756,9 @@ CRef Solver::propagate(bool& ct)
                     // Copy the remaining watches:
                     while (i < end)
                         *j++ = *i++;
-                } else
+                } else {
                     uncheckedEnqueue(ct_ == Clauses ? first : ~first, cr);
+                }
 
             NextClause:;
             }
@@ -923,6 +924,8 @@ lbool Solver::search(int nof_conflicts)
         
             conflicts++; conflictC++;
             if (decisionLevel() == 0) return (ct == Clauses) ? l_False : l_True;
+
+            if (ct == Terms && ca[confl].size() == 0) return l_True;
 
             learnt_clause.clear();
             analyze(confl, learnt_clause, backtrack_level, !ct);
@@ -1341,6 +1344,21 @@ void Solver::getInitialTerm(vec<Lit>& initial_term) {
         Lit p = initial_term[i];
         in_term[var(p)] = false;
     }
+    Var max_universal = var_Undef;
+    for (int i = 0; i < initial_term.size(); i++) {
+        Var v = var(initial_term[i]);
+        if (!variable_type[v] && (max_universal < v || max_universal == var_Undef)) {
+            max_universal = v;
+        }
+    }
+    int i, j;
+    for (i = j = 0; i < initial_term.size(); i++) {
+        Var v = var(initial_term[i]);
+        if (!variable_type[v] || v < max_universal) {
+            initial_term[j++] = initial_term[i];
+        }
+    }
+    initial_term.shrink(i - j);
 }
 
 void Solver::printClause(CRef cr) const {
@@ -1379,4 +1397,8 @@ void Solver::printSeen(Var rightmost) const {
         }
     }
     printf("\n");
+}
+
+void Solver::updateDependencyWatchers() {
+    
 }

@@ -103,6 +103,7 @@ public:
     bool    isEligibleDecision(Var x) const;
     void    updateDecisionVars();                                      // Add eligible variables to order heap.
     void    getInitialTerm(vec<Lit>& initial_term);                    // Compute a hitting set (initial term) for the current trail.
+    void    updateDependencyWatchers();
 
     // Read state:
     //
@@ -254,6 +255,9 @@ protected:
     vec<int>            variable_names;
     VMap<Var>           alias_to_internal;
     CMap<bool>          constraint_type;
+    VMap<vec<Var>>      dependencies;
+    VMap<vec<Var>>      dependency_watched_variables;
+    int                 dqhead;            // Head of queue (as index into the trail) of watched dependencies to update.
 
     // Resource contraints:
     //
