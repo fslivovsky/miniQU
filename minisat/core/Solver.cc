@@ -476,6 +476,7 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool pr
         for (i = 0; i < other_type_literals.size(); i++) {
             Var v = var(other_type_literals[i]);
             if (v <= rightmost_primary) {
+                varBumpActivity(v);
                 seen[v] = 1;
                 decision_level_counts[level(v)]++;
             }
@@ -516,6 +517,7 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool pr
             Var v = var(c[j]);
             if (variable_type[v] == primary_type && !seen[v]) {
                 seen[v] = 1;
+                varBumpActivity(v);
                 decision_level_counts[level(v)]++;
                 if (rightmost_primary < v) {
                     rightmost_primary = v;
@@ -539,6 +541,7 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool pr
                 Var v = var(c[j]);
                 if (!seen[v] && variable_type[v] == other_type && v < rightmost_primary) {
                     seen[v] = 1;
+                    varBumpActivity(v);
                     decision_level_counts[level(v)]++;
                 }
             }
