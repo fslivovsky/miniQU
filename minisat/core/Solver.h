@@ -254,6 +254,8 @@ protected:
     VMap<vec<Var>>      dependency_watched_variables;
     int                 dqhead;            // Head of queue (as index into the trail) of watched dependencies to update.
     CRef                initial_term_ref;
+    vec<CRef>           terms;
+    Var                 max_alias;
 
     // Resource contraints:
     //
@@ -315,11 +317,13 @@ protected:
     void    getInitialTerm();                                          // Compute a hitting set (initial term) for the current trail.
     void    updateDependencyWatchers();
     void    allocInitialTerm();
+    lbool   addTerm(const vec<Lit>& term);                             // Add a term.
+    lbool   addInitialTerms();
 
     // Debugging
 
     void     printClause    (CRef cr)            const;
-    void     printClause    (vec<Lit>& literals) const;
+    void     printClause    (const vec<Lit>& literals) const;
     void     printTrail     ()                   const;
     void     printSeen      (Var rightmost)      const;
 

@@ -95,6 +95,7 @@ Solver::Solver() :
   , progress_estimate  (0)
   , remove_satisfied   (true)
   , next_var           (0)
+  , max_alias          (-1)
 
     // Resource constraints:
     //
@@ -128,6 +129,7 @@ Var Solver::newVar(Var alias, lbool upol, bool dvar)
         v = free_vars.last();
         free_vars.pop();
     }else*/
+    max_alias = (alias > max_alias) ? alias : max_alias;
     v = next_var++;
     variable_names.push(alias);
     alias_to_internal.insert(alias, v);
@@ -1082,6 +1084,7 @@ lbool Solver::solve_()
     }
 
     allocInitialTerm();
+    //status = addInitialTerms();
 
     // Search:
     int curr_restarts = 0;
@@ -1284,12 +1287,22 @@ void Solver::relocAll(ClauseAllocator& to)
         }
     clauses.shrink(i - j);
 
-    constraint_type_.moveTo(constraint_type);
-
     // Initial term:
     Clause& initial_term = ca[initial_term_ref];
     initial_term.setSize(nVars());
     ca.reloc(initial_term_ref, to);
+
+    // All terms:
+    //
+    for (i = j = 0; i < terms.size(); i++)
+        if (!isRemoved(terms[i])){
+            ca.reloc(terms[i], to);
+            constraint_type_.insert(terms[i], Terms);
+            terms[j++] = terms[i];
+        }
+    terms.shrink(i - j);
+
+    constraint_type_.moveTo(constraint_type);
 }
 
 
@@ -1379,7 +1392,7 @@ void Solver::printClause(CRef cr) const {
     printf("\n");
 }
 
-void Solver::printClause(vec<Lit>& literals) const {
+void Solver::printClause(const vec<Lit>& literals) const {
     for (int i = 0; i < literals.size(); i++) {
         Lit p = literals[i];
         Var v = variable_names[var(p)];
@@ -1414,4 +1427,54 @@ void Solver::updateDependencyWatchers() {
 void Solver::allocInitialTerm() {
     vec<Lit> all_variables(nVars());
     initial_term_ref = ca.alloc(all_variables, false);
+}
+
+lbool Solver::addTerm(const vec<Lit>& term) {
+    CRef cr = ca.alloc(term, false);
+#ifndef NDEBUG
+    printf("Adding term: ");
+    printClause(term);
+#endif
+    terms.push(cr);
+    constraint_type.insert(cr, Terms);
+    if (term.size() == 1){
+        Lit p = term[0];
+        bool ct;
+        if (!variable_type[var(p)]) {
+            uncheckedEnqueue(~p, cr);
+            if (propagate(ct) != CRef_Undef) {
+                return lbool(ct);
+            }
+        }
+    } else {
+        attachClause(cr);
+    }
+    return l_Undef;
+}
+
+lbool Solver::addInitialTerms() {
+    vec<Var> tseitin_variables;
+    for (int i = 0; i < clauses.size(); i++) {
+        Var v = newVar(++max_alias, l_Undef, false);
+        setVarType(v, false, quantifier_blocks.size());
+        tseitin_variables.push(v);
+    }
+    addQuantifierBlock(tseitin_variables, false);
+    vec<Lit> term;
+    for (int i = 0; i < clauses.size(); i++) {
+        assert(!term.size());
+        term.push(mkLit(tseitin_variables[i], true));
+        Clause& c = ca[clauses[i]];
+        for (int j = 0; j < c.size(); j++) {
+            Lit p = c[j];
+            term.push(p);
+            addTerm(term);
+            term.pop();
+        }
+        term.pop();
+    }
+    for (int i = 0; i < tseitin_variables.size(); i++) {
+        term.push(mkLit(tseitin_variables[i], false));
+    }
+    return addTerm(term);
 }
