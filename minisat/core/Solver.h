@@ -98,12 +98,7 @@ public:
 
     // QBF specific:
     //
-    Lit     decisionLiteral(int level) const;                          // Return decision literal for the given decision level.
     void    addQuantifierBlock(vec<Var>& variables, bool existential); // Add a quantifier block.
-    bool    isEligibleDecision(Var x) const;
-    void    updateDecisionVars();                                      // Add eligible variables to order heap.
-    void    getInitialTerm(vec<Lit>& initial_term);                    // Compute a hitting set (initial term) for the current trail.
-    void    updateDependencyWatchers();
 
     // Read state:
     //
@@ -258,6 +253,7 @@ protected:
     VMap<vec<Var>>      dependencies;
     VMap<vec<Var>>      dependency_watched_variables;
     int                 dqhead;            // Head of queue (as index into the trail) of watched dependencies to update.
+    CRef                initial_term_ref;
 
     // Resource contraints:
     //
@@ -310,6 +306,15 @@ protected:
     double   progressEstimate ()      const; // DELETE THIS ?? IT'S NOT VERY USEFUL ...
     bool     withinBudget     ()      const;
     void     relocAll         (ClauseAllocator& to);
+
+    // QBF specific:
+    //
+    Lit     decisionLiteral(int level) const;                          // Return decision literal for the given decision level.
+    bool    isEligibleDecision(Var x) const;
+    void    updateDecisionVars();                                      // Add eligible variables to order heap.
+    void    getInitialTerm();                                          // Compute a hitting set (initial term) for the current trail.
+    void    updateDependencyWatchers();
+    void    allocInitialTerm();
 
     // Debugging
 

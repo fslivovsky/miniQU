@@ -997,9 +997,8 @@ lbool Solver::search(int nof_conflicts)
 
                 if (next == lit_Undef) {
                     // Model found.
-                    vec<Lit> learnt_term;
-                    getInitialTerm(learnt_term);
-                    confl = ca.alloc(learnt_term, true);
+                    getInitialTerm();
+                    confl = initial_term_ref;
                     ct = Terms;
                 #ifndef NDEBUG
                     printf("Initial term found. \n");
@@ -1081,6 +1080,8 @@ lbool Solver::solve_()
         printf("|           |    Vars  Clauses Literals |    Limit  Clauses Lit/Cl |          |\n");
         printf("===============================================================================\n");
     }
+
+    allocInitialTerm();
 
     // Search:
     int curr_restarts = 0;
@@ -1284,6 +1285,11 @@ void Solver::relocAll(ClauseAllocator& to)
     clauses.shrink(i - j);
 
     constraint_type_.moveTo(constraint_type);
+
+    // Initial term:
+    Clause& initial_term = ca[initial_term_ref];
+    initial_term.setSize(nVars());
+    ca.reloc(initial_term_ref, to);
 }
 
 
@@ -1326,7 +1332,9 @@ void Solver::updateDecisionVars() {
     }
 }
 
-void Solver::getInitialTerm(vec<Lit>& initial_term) {
+void Solver::getInitialTerm() {
+    Clause& initial_term = ca[initial_term_ref];
+    int initial_term_size = 0;
     for (int i = 0; i < clauses.size(); i++) {
         CRef cr = clauses[i];
         Clause& c = ca[cr];
@@ -1335,30 +1343,30 @@ void Solver::getInitialTerm(vec<Lit>& initial_term) {
         assert(j < c.size());
         Lit p = c[j];
         if (!in_term[var(p)]) {
-            initial_term.push(p);
+            initial_term[initial_term_size++] = p;
             in_term[var(p)] = true;
         }
     }
     // Clean up "in_term" vector.
-    for (int i = 0; i < initial_term.size(); i++) {
+    for (int i = 0; i < initial_term_size; i++) {
         Lit p = initial_term[i];
         in_term[var(p)] = false;
     }
     Var max_universal = var_Undef;
-    for (int i = 0; i < initial_term.size(); i++) {
+    for (int i = 0; i < initial_term_size; i++) {
         Var v = var(initial_term[i]);
         if (!variable_type[v] && (max_universal < v || max_universal == var_Undef)) {
             max_universal = v;
         }
     }
     int i, j;
-    for (i = j = 0; i < initial_term.size(); i++) {
+    for (i = j = 0; i < initial_term_size; i++) {
         Var v = var(initial_term[i]);
         if (!variable_type[v] || v < max_universal) {
             initial_term[j++] = initial_term[i];
         }
     }
-    initial_term.shrink(i - j);
+    initial_term.setSize(j);
 }
 
 void Solver::printClause(CRef cr) const {
@@ -1401,4 +1409,9 @@ void Solver::printSeen(Var rightmost) const {
 
 void Solver::updateDependencyWatchers() {
     
+}
+
+void Solver::allocInitialTerm() {
+    vec<Lit> all_variables(nVars());
+    initial_term_ref = ca.alloc(all_variables, false);
 }

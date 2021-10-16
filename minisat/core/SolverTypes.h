@@ -216,6 +216,7 @@ public:
 
     Lit          subsumes    (const Clause& other) const;
     void         strengthen  (Lit p);
+    void         setSize     (int sz)        { header.size = sz; }
 };
 
 
