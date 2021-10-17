@@ -388,6 +388,7 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool pr
                 else
                     out_learnt.push(q);
             } else if (!seen[var(q)] && variable_type[var(q)] == other_type) {
+                varBumpActivity(var(q));
                 seen[var(q)] = 1;
                 other_type_literals.push(q);
             }
@@ -476,7 +477,6 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool pr
         for (i = 0; i < other_type_literals.size(); i++) {
             Var v = var(other_type_literals[i]);
             if (v <= rightmost_primary) {
-                varBumpActivity(v);
                 seen[v] = 1;
                 decision_level_counts[level(v)]++;
             }
@@ -1355,7 +1355,9 @@ void Solver::getInitialTerm() {
         CRef cr = clauses[i];
         Clause& c = ca[cr];
         int j;
-        for (j = 0; j < c.size() && value(c[j]) != l_True; j++);
+        for (j = 0; j < c.size() && (value(c[j]) != l_True || !in_term[var(c[j])]); j++);
+        if (j == c.size())
+            for (j = 0; j < c.size() && value(c[j]) != l_True; j++);
         assert(j < c.size());
         Lit p = c[j];
         if (!in_term[var(p)]) {
@@ -1375,6 +1377,11 @@ void Solver::getInitialTerm() {
             max_universal = v;
         }
     }
+    #ifndef NDEBUG
+    printf("Unreduced initial term term: ");
+    initial_term.setSize(initial_term_size);
+    printClause(initial_term_ref);
+    #endif
     int i, j;
     for (i = j = 0; i < initial_term_size; i++) {
         Var v = var(initial_term[i]);
