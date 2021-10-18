@@ -256,6 +256,7 @@ protected:
     CRef                initial_term_ref;
     vec<CRef>           terms;
     Var                 max_alias;
+    bool                use_dependency_learning;
 
     // Resource contraints:
     //
@@ -271,9 +272,9 @@ protected:
     void     uncheckedEnqueue (Lit p, CRef from = CRef_Undef);                         // Enqueue a literal. Assumes value of literal is undefined.
     bool     enqueue          (Lit p, CRef from = CRef_Undef);                         // Test if fact 'p' contradicts current state, enqueue otherwise.
     CRef     propagate        (bool& ct);                                              // Perform unit propagation. Returns possibly conflicting clause.
-    void     cancelUntil      (int level);                                             // Backtrack until a certain level.
+    void     cancelUntil      (int level_to);                                          // Backtrack until a certain level.
     void     analyze          (CRef confl, vec<Lit>& out_learnt, int& out_btlevel, 
-                               bool primary_type=true);                                // (bt = backtrack)
+                               bool& learn_dependency, bool primary_type);             // (bt = backtrack)
     void     analyzeFinal     (Lit p, LSet& out_conflict);                             // COULD THIS BE IMPLEMENTED BY THE ORDINARIY "analyze" BY SOME REASONABLE GENERALIZATION?
     bool     litRedundant     (Lit p);                                                 // (helper method for 'analyze()')
     lbool    search           (int nof_conflicts);                                     // Search for a given number of conflicts.

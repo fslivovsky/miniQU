@@ -96,6 +96,8 @@ Solver::Solver() :
   , remove_satisfied   (true)
   , next_var           (0)
   , max_alias          (-1)
+  , dqhead             (0)
+  , use_dependency_learning (true)
 
     // Resource constraints:
     //
@@ -136,6 +138,8 @@ Var Solver::newVar(Var alias, lbool upol, bool dvar)
     variable_type.push(true);
     variable_depth.push(0);
     in_term.push(false);
+    dependency_watched_variables.reserve(v);
+    dependencies.reserve(v);
     watches[0]->init(mkLit(v, false));
     watches[0]->init(mkLit(v, true ));
     watches[1]->init(mkLit(v, false));
@@ -263,18 +267,24 @@ bool Solver::satisfied(const Clause& c) const {
 
 // Revert to the state at given level (keeping all assignment at 'level' but not beyond).
 //
-void Solver::cancelUntil(int level) {
-    if (decisionLevel() > level){
-        for (int c = trail.size()-1; c >= trail_lim[level]; c--){
+void Solver::cancelUntil(int level_to) {
+    if (decisionLevel() > level_to){
+        for (int c = trail.size()-1; c >= trail_lim[level_to]; c--){
             Var      x  = var(trail[c]);
             assigns [x] = l_Undef;
-            quantifier_blocks_unassigned[variable_depth[x]]++;
+            if (!use_dependency_learning) {
+                quantifier_blocks_unassigned[variable_depth[x]]++;
+            }
             if (phase_saving > 1 || (phase_saving == 1 && c > trail_lim.last()))
                 polarity[x] = sign(trail[c]);
-            insertVarOrder(x); }
-        qhead = trail_lim[level];
-        trail.shrink(trail.size() - trail_lim[level]);
-        trail_lim.shrink(trail_lim.size() - level);
+            if (!use_dependency_learning || dependencies[x].size() == 0 || (assigns[dependencies[x][0]] != l_Undef && level(dependencies[x][0]) <= level_to)) {
+                insertVarOrder(x); 
+            }
+        }
+        qhead = trail_lim[level_to];
+        dqhead = (dqhead < trail_lim[level_to]) ? dqhead : trail_lim[level_to];
+        trail.shrink(trail.size() - trail_lim[level_to]);
+        trail_lim.shrink(trail_lim.size() - level_to);
     } }
 
 
@@ -284,7 +294,11 @@ void Solver::cancelUntil(int level) {
 
 Lit Solver::pickBranchLit()
 {
-    updateDecisionVars();
+    if (!use_dependency_learning) {
+        updateDecisionVars();
+    } else {
+        updateDependencyWatchers();
+    }
     Var next = var_Undef;
 
     // Random decision:
@@ -302,8 +316,10 @@ Lit Solver::pickBranchLit()
         } else {
             next = order_heap.removeMin();
             if (!isEligibleDecision(next)) {
-                quantifier_blocks_decision_overflow[variable_depth[next]].push(next);
                 next = var_Undef;
+                if (!use_dependency_learning) {
+                    quantifier_blocks_decision_overflow[variable_depth[next]].push(next);
+                }
             }
         }
 
@@ -336,8 +352,9 @@ Lit Solver::pickBranchLit()
 |        rest of literals. There may be others from the same level though.
 |  
 |________________________________________________________________________________________________@*/
-void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool primary_type)
+void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool& learn_dependency, bool primary_type)
 {
+    learn_dependency = false;
     int pathC = 0;
     Lit p     = lit_Undef;
     Lit first = ca[confl][0];
@@ -489,7 +506,7 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool pr
 
     // While the clause is not asserting, resolve out the rightmost existential literal.
     // TODO: Below - variable_type[max_dl_var]
-    while (rightmost_primary != var_Undef && (variable_type[max_dl_var] == other_type || level(max_dl_var) == 0 || decision_level_counts[level(max_dl_var)] > 1)) {
+    while (rightmost_primary != var_Undef && (/*(variable_depth[rightmost_primary] == quantifier_blocks.size() - 1) ||*/ variable_type[max_dl_var] == other_type || level(max_dl_var) == 0 || decision_level_counts[level(max_dl_var)] > 1)) {
 #ifndef NDEBUG
         printf("Current %s: ", primary_type ? "clause" : "term");
         printSeen(rightmost_primary);
@@ -497,9 +514,22 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool pr
         printf("Max DL var: %d\n", variable_names[max_dl_var]);
 #endif
         // If there are multiple primaries at the highest decision level, resolve these out first.
-        Var pivot = (variable_type[max_dl_var] == primary_type) ? max_dl_var : rightmost_primary;
+        Var pivot = (variable_type[max_dl_var] == primary_type /*&& (variable_depth[rightmost_primary] < quantifier_blocks.size() - 1)*/) ? max_dl_var : rightmost_primary;
         confl = reason(pivot);
-        assert(confl != CRef_Undef);
+        if (confl == CRef_Undef) {
+            assert(use_dependency_learning);
+            assert(variable_type[max_dl_var] == other_type);
+            learn_dependency = true;
+            out_learnt.clear();
+            out_learnt.push(mkLit(pivot, false));
+            out_learnt.push(mkLit(max_dl_var, false));
+            out_btlevel = level(pivot) - 1;
+            assert(out_btlevel >= 0);
+            for (int v = 0; v <= rightmost_primary; v++) {
+                seen[v] = 0;
+            }
+            return;
+        }
 #ifndef NDEBUG
         printf("Reason %s: ", primary_type ? "clause" : "term");
         printClause(confl);
@@ -918,6 +948,7 @@ lbool Solver::search(int nof_conflicts)
     int         backtrack_level;
     int         conflictC = 0;
     bool        ct;
+    bool        learn_dependency = false;
     vec<Lit>    learnt_clause;
     starts++;
 
@@ -933,34 +964,59 @@ lbool Solver::search(int nof_conflicts)
             if (ct == Terms && ca[confl].size() == 0) return l_True;
 
             learnt_clause.clear();
-            analyze(confl, learnt_clause, backtrack_level, !ct);
+            analyze(confl, learnt_clause, backtrack_level, learn_dependency, !ct);
             if (learnt_clause.size() == 0) return (ct == Clauses) ? l_False : l_True;
-            
-            cancelUntil(backtrack_level);
+            if (learn_dependency) {
+                assert(learnt_clause.size() == 2);
+                Var x = var(learnt_clause[0]);
+                Var y = var(learnt_clause[1]);
+                dependencies[x].push(y);
+                dependencies[x].last() = dependencies[x][0];
+                dependencies[x][0] = y;
+                dependency_watched_variables[y].push(x);
+                cancelUntil(backtrack_level);
+                #ifndef NDEBUG
+                printf("Learned dependency of %d on %d.\n", variable_names[x], variable_names[y]);
+                #endif
+                if (order_heap.inHeap(x)) {
+                    order_heap.remove(x);
+                }
+                if (dependencies[x].size() > 1) { // Remove x from list of variables watched by the old watcher.
+                    Var old_watcher = dependencies[x].last();
+                    auto &watched = dependency_watched_variables[old_watcher];
+                    int i;
+                    for (i = 0; i < watched.size() && watched[i] != x; i++);
+                    assert(i < watched.size());
+                    watched[i] = watched.last();
+                    watched.shrink(1);
+                }
+            } else {
+                cancelUntil(backtrack_level);
+                CRef cr = ca.alloc(learnt_clause, true);
+                learnts.push(cr);
+                constraint_type.insert(cr, ct);
 
-            CRef cr = ca.alloc(learnt_clause, true);
-            learnts.push(cr);
-            constraint_type.insert(cr, ct);
+                if (learnt_clause.size() > 1) {
+                    attachClause(cr);
+                    claBumpActivity(ca[cr]);
+                }
+                uncheckedEnqueue((ct == Clauses) ? learnt_clause[0] : ~learnt_clause[0], cr);
 
-            if (learnt_clause.size() > 1) {
-                attachClause(cr);
-                claBumpActivity(ca[cr]);
-            }
-            uncheckedEnqueue((ct == Clauses) ? learnt_clause[0] : ~learnt_clause[0], cr);
 
-            varDecayActivity();
-            claDecayActivity();
+                varDecayActivity();
+                claDecayActivity();
 
-            if (--learntsize_adjust_cnt == 0){
-                learntsize_adjust_confl *= learntsize_adjust_inc;
-                learntsize_adjust_cnt    = (int)learntsize_adjust_confl;
-                max_learnts             *= learntsize_inc;
+                if (--learntsize_adjust_cnt == 0){
+                    learntsize_adjust_confl *= learntsize_adjust_inc;
+                    learntsize_adjust_cnt    = (int)learntsize_adjust_confl;
+                    max_learnts             *= learntsize_inc;
 
-                if (verbosity >= 1)
-                    printf("| %9d | %7d %8d %8d | %8d %8d %6.0f | %6.3f %% |\n", 
-                           (int)conflicts, 
-                           (int)dec_vars - (trail_lim.size() == 0 ? trail.size() : trail_lim[0]), nClauses(), (int)clauses_literals, 
-                           (int)max_learnts, nLearnts(), (double)learnts_literals/nLearnts(), progressEstimate()*100);
+                    if (verbosity >= 1)
+                        printf("| %9d | %7d %8d %8d | %8d %8d %6.0f | %6.3f %% |\n", 
+                            (int)conflicts, 
+                            (int)dec_vars - (trail_lim.size() == 0 ? trail.size() : trail_lim[0]), nClauses(), (int)clauses_literals, 
+                            (int)max_learnts, nLearnts(), (double)learnts_literals/nLearnts(), progressEstimate()*100);
+                }
             }
 
         }else{
@@ -1323,12 +1379,16 @@ void Solver::garbageCollect()
 }
 
 bool Solver::isEligibleDecision(Var x) const {
-    for (int i = 0; i < variable_depth[x]; i++) {
-        if (quantifier_blocks_type[i] != variable_type[x] && quantifier_blocks_unassigned[i] > 0) {
-            return false;
+    if (!use_dependency_learning) {
+        for (int i = 0; i < variable_depth[x]; i++) {
+            if (quantifier_blocks_type[i] != variable_type[x] && quantifier_blocks_unassigned[i] > 0) {
+                return false;
+            }
         }
+        return true;
+    } else {
+        return dependencies[x].size() == 0 || value(dependencies[x][0]) != l_Undef;
     }
-    return true;
 }
 
 void Solver::updateDecisionVars() {
@@ -1378,15 +1438,17 @@ void Solver::getInitialTerm() {
         }
     }
     #ifndef NDEBUG
-    printf("Unreduced initial term term: ");
+    printf("Unreduced initial term: ");
     initial_term.setSize(initial_term_size);
     printClause(initial_term_ref);
     #endif
     int i, j;
     for (i = j = 0; i < initial_term_size; i++) {
         Var v = var(initial_term[i]);
-        if (!variable_type[v] || v < max_universal) {
+        if (v <= max_universal) {
             initial_term[j++] = initial_term[i];
+        } else {
+            varBumpActivity(v);
         }
     }
     initial_term.setSize(j);
@@ -1431,7 +1493,30 @@ void Solver::printSeen(Var rightmost) const {
 }
 
 void Solver::updateDependencyWatchers() {
-    
+    while (dqhead < trail.size()) {
+        Var v = var(trail[dqhead++]);
+        vec<Var>& watched = dependency_watched_variables[v];
+        int i, j;
+        for (i = j = 0; i < watched.size(); i++) {
+            Var w = watched[i];
+            // Find a new watcher for w.
+            int k;
+            assert(dependencies[w][0] == v);
+            for (k = 1; k < dependencies[w].size() && value(dependencies[w][k]) != l_Undef; k++);
+            if (k < dependencies[w].size()) {
+                // New watcher found. Put at at index 0 of dependency vec.
+                Var y = dependencies[w][k];
+                dependencies[w][k] = dependencies[w][0];
+                dependencies[w][0] = y;
+                dependency_watched_variables[y].push(w);
+            } else {
+                // No new watcher found. Insert w into decision queue.
+                insertVarOrder(w);
+                watched[j++] = w;
+            }
+        }
+        watched.shrink(i - j);
+    }
 }
 
 void Solver::allocInitialTerm() {
@@ -1486,5 +1571,17 @@ lbool Solver::addInitialTerms() {
     for (int i = 0; i < tseitin_variables.size(); i++) {
         term.push(mkLit(tseitin_variables[i], false));
     }
-    return addTerm(term);
+    auto val = addTerm(term);
+    if (val != l_Undef) {
+        assert(val == l_True);
+        return val;
+    } else {
+        // Propagate decision level 0 again.
+        bool ct;
+        qhead = 0;
+        if (propagate(ct) != CRef_Undef) {
+            return lbool(ct);
+        }
+        return l_Undef;
+    }
 }
