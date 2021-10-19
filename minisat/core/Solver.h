@@ -54,6 +54,7 @@ public:
     void    setVarType(Var x, bool is_existential, int depth);
 
     bool    addClause (const vec<Lit>& ps);                     // Add a clause to the solver. 
+    bool    addClauseInternal (const vec<Lit>& ps);             // Add a clause to the solver (using internal variables). 
     bool    addEmptyClause();                                   // Add the empty clause, making the solver contradictory.
     bool    addClause (Lit p);                                  // Add a unit clause to the solver. 
     bool    addClause (Lit p, Lit q);                           // Add a binary clause to the solver. 
@@ -61,6 +62,8 @@ public:
     bool    addClause (Lit p, Lit q, Lit r, Lit s);             // Add a quaternary clause to the solver. 
     bool    addClause_(      vec<Lit>& ps);                     // Add a clause to the solver without making superflous internal copy. Will
                                                                 // change the passed vector 'ps'.
+    lbool   addTerm(const vec<Lit>& term);                      // Add a term.
+                                                    
 
     // Solving:
     //
@@ -215,6 +218,7 @@ protected:
     Heap<Var,VarOrderLt>order_heap;       // A priority queue of variables ordered with respect to the variable activity.
 
     bool                ok;               // If FALSE, the constraints are already unsatisfiable. No part of the solver state may be used!
+    lbool               input_status;     // l_Undef unless a universal unit clause (l_False) or an existential unit term (l_True) have been added.
     double              cla_inc;          // Amount to bump next clause with.
     double              var_inc;          // Amount to bump next variable with.
     int                 qhead;            // Head of queue (as index into the trail -- no more explicit propagation queue in MiniSat).
@@ -318,7 +322,6 @@ protected:
     void    getInitialTerm();                                          // Compute a hitting set (initial term) for the current trail.
     void    updateDependencyWatchers();
     void    allocInitialTerm();
-    lbool   addTerm(const vec<Lit>& term);                             // Add a term.
     lbool   addInitialTerms();
 
     // Debugging

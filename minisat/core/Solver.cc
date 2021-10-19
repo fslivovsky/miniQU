@@ -87,6 +87,7 @@ Solver::Solver() :
 //  , watches {OccLists<Lit, vec<Watcher>, WatcherDeleted, MkIndexLit>(WatcherDeleted(ca)), OccLists<Lit, vec<Watcher>, WatcherDeleted, MkIndexLit>(WatcherDeleted(ca))}
   , order_heap         (VarOrderLt(activity))
   , ok                 (true)
+  , input_status       (l_Undef)
   , cla_inc            (1)
   , var_inc            (1)
   , qhead              (0)
@@ -182,33 +183,46 @@ bool Solver::addClause_(vec<Lit>& ps)
         ps[i] = mkLit(alias_to_internal[var(ps[i])], sign(ps[i]));
     }
 
+    return addClauseInternal(ps);
+}
+
+bool Solver::addClauseInternal(const vec<Lit>& ps) {
+    vec<Lit> ps_copy;
+    ps.copyTo(ps_copy);
     // Check if clause is satisfied and remove false/duplicate literals:
-    sort(ps);
+    sort(ps_copy);
     Lit p; int i, j;
 
-    for (i = j = 0, p = lit_Undef; i < ps.size(); i++)
-        if (value(ps[i]) == l_True || ps[i] == ~p)
-            return true;
-        else if (value(ps[i]) != l_False && ps[i] != p)
-            ps[j++] = p = ps[i];
-    ps.shrink(i - j);
+    #ifndef NDEBUG
+    printf("Adding clause: ");
+    printClause(ps_copy);
+    #endif
 
-    if (ps.size() == 0)
+    for (i = j = 0, p = lit_Undef; i < ps_copy.size(); i++)
+        if (value(ps_copy[i]) == l_True || ps_copy[i] == ~p)
+            return true;
+        else if (value(ps_copy[i]) != l_False && ps_copy[i] != p)
+            ps_copy[j++] = p = ps_copy[i];
+    ps_copy.shrink(i - j);
+
+    if (ps_copy.size() == 0) {
+        input_status = l_False;
         return ok = false;
+    }
     else {
-        CRef cr = ca.alloc(ps, false);
+        CRef cr = ca.alloc(ps_copy, false);
         clauses.push(cr);
         constraint_type.insert(cr, Clauses);
-        if (ps.size() == 1){
-            p = ps[0];
-            bool ct;
+        if (ps_copy.size() == 1){
+            p = ps_copy[0];
             if (variable_type[var(p)]) {
-                uncheckedEnqueue(ps[0], cr);
-                return ok = (propagate(ct) == CRef_Undef);
+                uncheckedEnqueue(ps_copy[0], cr);
+                return ok = true;
             } else {
+                input_status = l_False;
                 return ok = false;
             }
-        } else { // ps.size > 1
+        } else { // ps_copy.size > 1
             attachClause(cr);
         }
     }
@@ -1143,7 +1157,9 @@ lbool Solver::solve_()
     }
 
     allocInitialTerm();
-    //status = addInitialTerms();
+    //addInitialTerms();
+
+    status = input_status;
 
     // Search:
     int curr_restarts = 0;
@@ -1532,14 +1548,16 @@ lbool Solver::addTerm(const vec<Lit>& term) {
 #endif
     terms.push(cr);
     constraint_type.insert(cr, Terms);
+    if (term.size() == 0) {
+        return input_status = l_True;
+    }
     if (term.size() == 1){
         Lit p = term[0];
-        bool ct;
         if (!variable_type[var(p)]) {
             uncheckedEnqueue(~p, cr);
-            if (propagate(ct) != CRef_Undef) {
-                return lbool(ct);
-            }
+            return l_Undef;
+        } else {
+            return input_status = l_True;
         }
     } else {
         attachClause(cr);
@@ -1571,17 +1589,5 @@ lbool Solver::addInitialTerms() {
     for (int i = 0; i < tseitin_variables.size(); i++) {
         term.push(mkLit(tseitin_variables[i], false));
     }
-    auto val = addTerm(term);
-    if (val != l_Undef) {
-        assert(val == l_True);
-        return val;
-    } else {
-        // Propagate decision level 0 again.
-        bool ct;
-        qhead = 0;
-        if (propagate(ct) != CRef_Undef) {
-            return lbool(ct);
-        }
-        return l_Undef;
-    }
+    return addTerm(term);
 }
