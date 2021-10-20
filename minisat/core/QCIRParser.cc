@@ -71,7 +71,7 @@ void QCIRParser::readOutput(const string& line) {
 void QCIRParser::initSolver(Minisat::Solver& solver) {
   removeRedundant();
   std::unordered_map<int, Minisat::Var> alias_to_solver_internal;
-  for (unsigned i = 0; i < variable_gate_boundary; i++) {
+  for (unsigned i = 1; i < variable_gate_boundary; i++) {
     Gate& g = gates[i];
     bool is_existential = (g.gate_type == GateType::Existential);
     auto solver_var = solver.newVar(i);

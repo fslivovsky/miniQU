@@ -215,7 +215,7 @@ protected:
     OccLists<Lit, vec<Watcher>, WatcherDeleted, MkIndexLit>*
                         watches[2];       // 'watches[lit]' is a list of constraints watching 'lit' (will go there if literal becomes true).
 
-    Heap<Var,VarOrderLt>order_heap;       // A priority queue of variables ordered with respect to the variable activity.
+    Heap<Var,VarOrderLt> **order_heaps;    // A priority queue of variables ordered with respect to the variable activity.
 
     bool                ok;               // If FALSE, the constraints are already unsatisfiable. No part of the solver state may be used!
     lbool               input_status;     // l_Undef unless a universal unit clause (l_False) or an existential unit term (l_True) have been added.
@@ -319,10 +319,12 @@ protected:
     Lit     decisionLiteral(int level) const;                          // Return decision literal for the given decision level.
     bool    isEligibleDecision(Var x) const;
     void    updateDecisionVars();                                      // Add eligible variables to order heap.
+    int     getDecisionBlock();
     void    getInitialTerm();                                          // Compute a hitting set (initial term) for the current trail.
     void    updateDependencyWatchers();
     void    allocInitialTerm();
     lbool   addInitialTerms();
+    void    initOrderHeaps();
 
     // Debugging
 
@@ -354,7 +356,13 @@ inline CRef Solver::reason(Var x) const { return vardata[x].reason; }
 inline int  Solver::level (Var x) const { return vardata[x].level; }
 
 inline void Solver::insertVarOrder(Var x) {
-    if (!order_heap.inHeap(x) && decision[x]) order_heap.insert(x); }
+    if (use_dependency_learning) {
+        if (!order_heaps[0]->inHeap(x) && decision[x]) order_heaps[0]->insert(x);
+    } else {
+        int depth = variable_depth[x];
+        if (!order_heaps[depth]->inHeap(x) && decision[x]) order_heaps[depth]->insert(x);
+    }
+}
 
 inline void Solver::varDecayActivity() { var_inc *= (1 / var_decay); }
 inline void Solver::varBumpActivity(Var v) { varBumpActivity(v, var_inc); }
@@ -365,9 +373,16 @@ inline void Solver::varBumpActivity(Var v, double inc) {
             activity[i] *= 1e-100;
         var_inc *= 1e-100; }
 
-    // Update order_heap with respect to new activity:
-    if (order_heap.inHeap(v))
-        order_heap.decrease(v); }
+    // Update order_heaps with respect to new activity:
+    if (use_dependency_learning) {
+        if (order_heaps[0]->inHeap(v))
+            order_heaps[0]->decrease(v);
+    } else {
+        int depth = variable_depth[v];
+        if (order_heaps[depth]->inHeap(v))
+            order_heaps[depth]->decrease(v);
+    }
+}
 
 inline void Solver::claDecayActivity() { cla_inc *= (1 / clause_decay); }
 inline void Solver::claBumpActivity (Clause& c) {
@@ -414,7 +429,6 @@ inline void     Solver::setDecisionVar(Var v, bool b)
     else if (!b &&  decision[v]) dec_vars--;
 
     decision[v] = b;
-    insertVarOrder(v);
 }
 
 inline Lit      Solver::decisionLiteral(int level) const { return trail[trail_lim[level-1]]; }
@@ -452,7 +466,6 @@ inline void     Solver::toDimacs     (const char* file, Lit p, Lit q){ vec<Lit> 
 inline void     Solver::toDimacs     (const char* file, Lit p, Lit q, Lit r){ vec<Lit> as; as.push(p); as.push(q); as.push(r); toDimacs(file, as); }
 
 inline void    Solver::addQuantifierBlock(vec<Var>& variables, bool existential) { quantifier_blocks_decision_overflow.push(); quantifier_blocks.push(); variables.copyTo(quantifier_blocks.last()); quantifier_blocks_type.push(existential), quantifier_blocks_unassigned.push(variables.size()); }
-
 
 //=================================================================================================
 // Debug etc:

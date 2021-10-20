@@ -85,7 +85,7 @@ Solver::Solver() :
   , dec_vars(0), num_clauses(0), num_learnts(0), clauses_literals(0), learnts_literals(0), max_literals(0), tot_literals(0)
 
 //  , watches {OccLists<Lit, vec<Watcher>, WatcherDeleted, MkIndexLit>(WatcherDeleted(ca)), OccLists<Lit, vec<Watcher>, WatcherDeleted, MkIndexLit>(WatcherDeleted(ca))}
-  , order_heap         (VarOrderLt(activity))
+  //, order_heap         (VarOrderLt(activity))
   , ok                 (true)
   , input_status       (l_Undef)
   , cla_inc            (1)
@@ -98,7 +98,7 @@ Solver::Solver() :
   , next_var           (0)
   , max_alias          (-1)
   , dqhead             (0)
-  , use_dependency_learning (true)
+  , use_dependency_learning (false)
 
     // Resource constraints:
     //
@@ -115,6 +115,14 @@ Solver::~Solver()
 {
     delete watches[0];
     delete watches[1];
+    if (use_dependency_learning) {
+        delete order_heaps[0];
+    } else {
+        for (int i = 0; i < quantifier_blocks.size(); i++) {
+            delete order_heaps[i];
+        }
+    }
+    delete[] order_heaps;
 }
 
 
@@ -288,6 +296,8 @@ void Solver::cancelUntil(int level_to) {
             assigns [x] = l_Undef;
             if (!use_dependency_learning) {
                 quantifier_blocks_unassigned[variable_depth[x]]++;
+            } else {
+                dqhead = (dqhead < trail_lim[level_to]) ? dqhead : trail_lim[level_to];
             }
             if (phase_saving > 1 || (phase_saving == 1 && c > trail_lim.last()))
                 polarity[x] = sign(trail[c]);
@@ -296,10 +306,10 @@ void Solver::cancelUntil(int level_to) {
             }
         }
         qhead = trail_lim[level_to];
-        dqhead = (dqhead < trail_lim[level_to]) ? dqhead : trail_lim[level_to];
         trail.shrink(trail.size() - trail_lim[level_to]);
         trail_lim.shrink(trail_lim.size() - level_to);
-    } }
+    }
+}
 
 
 //=================================================================================================
@@ -308,9 +318,12 @@ void Solver::cancelUntil(int level_to) {
 
 Lit Solver::pickBranchLit()
 {
+    int i;
     if (!use_dependency_learning) {
-        updateDecisionVars();
+        //updateDecisionVars();
+        i = getDecisionBlock();
     } else {
+        i = 0;
         updateDependencyWatchers();
     }
     Var next = var_Undef;
@@ -324,16 +337,16 @@ Lit Solver::pickBranchLit()
     // Activity based decision:
 
     while (next == var_Undef || value(next) != l_Undef || !decision[next])
-        if (order_heap.empty()){
+        if (order_heaps[i]->empty()){
             next = var_Undef;
             break;
         } else {
-            next = order_heap.removeMin();
+            next = order_heaps[i]->removeMin();
             if (!isEligibleDecision(next)) {
-                next = var_Undef;
                 if (!use_dependency_learning) {
-                    quantifier_blocks_decision_overflow[variable_depth[next]].push(next);
+                    // quantifier_blocks_decision_overflow[variable_depth[next]].push(next);
                 }
+                next = var_Undef;
             }
         }
 
@@ -883,7 +896,7 @@ void Solver::rebuildOrderHeap()
     for (Var v = 0; v < nVars(); v++)
         if (decision[v] && value(v) == l_Undef)
             vs.push(v);
-    order_heap.build(vs);
+    order_heaps[0]->build(vs);
 }
 
 
@@ -992,8 +1005,8 @@ lbool Solver::search(int nof_conflicts)
                 #ifndef NDEBUG
                 printf("Learned dependency of %d on %d.\n", variable_names[x], variable_names[y]);
                 #endif
-                if (order_heap.inHeap(x)) {
-                    order_heap.remove(x);
+                if (order_heaps[0]->inHeap(x)) {
+                    order_heaps[0]->remove(x);
                 }
                 if (dependencies[x].size() > 1) { // Remove x from list of variables watched by the old watcher.
                     Var old_watcher = dependencies[x].last();
@@ -1157,6 +1170,7 @@ lbool Solver::solve_()
     }
 
     allocInitialTerm();
+    initOrderHeaps();
     //addInitialTerms();
 
     status = input_status;
@@ -1590,4 +1604,22 @@ lbool Solver::addInitialTerms() {
         term.push(mkLit(tseitin_variables[i], false));
     }
     return addTerm(term);
+}
+
+void Solver::initOrderHeaps() { 
+    int nr_heaps = use_dependency_learning ? 1 : quantifier_blocks.size();
+    order_heaps = new Heap<Var,VarOrderLt>*[nr_heaps];
+    for (int i = 0; i < nr_heaps; i++) {
+        order_heaps[i] = new Heap<Var,VarOrderLt>(VarOrderLt(activity)); 
+    }
+    for (Var v = 0; v < nVars(); v++) {
+        insertVarOrder(v);
+    }
+}
+
+int Solver::getDecisionBlock() {
+    int i;
+    for (i = 0; i < quantifier_blocks.size() && quantifier_blocks_unassigned[i] == 0; i++);
+    assert(i < quantifier_blocks.size()-2);
+    return i;
 }
