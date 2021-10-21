@@ -21,6 +21,8 @@ OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWA
 #ifndef Minisat_Solver_h
 #define Minisat_Solver_h
 
+#include <unordered_map>
+
 #include "minisat/mtl/Vec.h"
 #include "minisat/mtl/Heap.h"
 #include "minisat/mtl/Alg.h"
@@ -28,12 +30,7 @@ OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWA
 #include "minisat/utils/Options.h"
 #include "minisat/core/SolverTypes.h"
 
-#include <unordered_map>
-#include <vector>
-
-
 namespace Minisat {
-
 
 enum ConstraintTypes { Clauses = 0, Terms = 1 };
 
@@ -236,8 +233,8 @@ protected:
     // Temporaries (to reduce allocation overhead). Each variable is prefixed by the method in which it is
     // used, exept 'seen' wich is used in several places.
     //
-    //VMap<char>          seen;
-    std::unordered_map<Var, char> seen;
+
+    vec<char>           seen;
     vec<ShrinkStackElem>analyze_stack;
     vec<Lit>            analyze_toclear;
     vec<Lit>            add_tmp;
@@ -249,10 +246,10 @@ protected:
     vec<vec<Var>>       quantifier_blocks;
     vec<vec<Var>>       quantifier_blocks_decision_overflow;
     //vec<char>           quantifier_blocks_type;
-    std::vector<char>   quantifier_blocks_type;
+    vec<char>           quantifier_blocks_type;
     vec<int>            quantifier_blocks_unassigned;
     //vec<char>           variable_type;
-    std::vector<char>   variable_type;
+    vec<char>           variable_type;
     vec<int>            variable_depth;
     vec<char>           in_term;
     vec<int>            variable_names;
@@ -470,7 +467,7 @@ inline void     Solver::toDimacs     (const char* file, Lit p){ vec<Lit> as; as.
 inline void     Solver::toDimacs     (const char* file, Lit p, Lit q){ vec<Lit> as; as.push(p); as.push(q); toDimacs(file, as); }
 inline void     Solver::toDimacs     (const char* file, Lit p, Lit q, Lit r){ vec<Lit> as; as.push(p); as.push(q); as.push(r); toDimacs(file, as); }
 
-inline void    Solver::addQuantifierBlock(vec<Var>& variables, bool existential) { quantifier_blocks_decision_overflow.push(); quantifier_blocks.push(); variables.copyTo(quantifier_blocks.last()); quantifier_blocks_type.push_back(existential), quantifier_blocks_unassigned.push(variables.size()); }
+inline void    Solver::addQuantifierBlock(vec<Var>& variables, bool existential) { quantifier_blocks_decision_overflow.push(); quantifier_blocks.push(); variables.copyTo(quantifier_blocks.last()); quantifier_blocks_type.push(existential), quantifier_blocks_unassigned.push(variables.size()); }
 
 //=================================================================================================
 // Debug etc:

@@ -115,16 +115,16 @@ Solver::Solver() :
 
 Solver::~Solver()
 {
-    delete watches[0];
-    delete watches[1];
-    if (use_dependency_learning) {
-        delete order_heaps[0];
-    } else {
-        for (int i = 0; i < quantifier_blocks.size(); i++) {
-            delete order_heaps[i];
-        }
-    }
-    delete[] order_heaps;
+    // delete watches[0];
+    // delete watches[1];
+    // if (use_dependency_learning) {
+    //     delete order_heaps[0];
+    // } else {
+    //     for (int i = 0; i < quantifier_blocks.size(); i++) {
+    //         delete order_heaps[i];
+    //     }
+    // }
+    // delete[] order_heaps;
 }
 
 
@@ -146,7 +146,7 @@ Var Solver::newVar(Var alias, lbool upol, bool dvar)
     v = next_var++;
     variable_names.push(alias);
     alias_to_internal.insert(alias, v);
-    variable_type.push_back(true); //push
+    variable_type.push(true); //push
     variable_depth.push(0);
     in_term.push(false);
     dependency_watched_variables.reserve(v);
@@ -159,7 +159,7 @@ Var Solver::newVar(Var alias, lbool upol, bool dvar)
     vardata  .insert(v, mkVarData(CRef_Undef, 0));
     activity .insert(v, rnd_init_act ? drand(random_seed) * 0.00001 : 0);
     //seen     .insert(v, 0);
-    seen[v] = 0;
+    seen.push(0);
     polarity .insert(v, true);
     user_pol .insert(v, upol);
     decision .reserve(v);
@@ -223,7 +223,8 @@ bool Solver::addClauseInternal(const vec<Lit>& ps) {
     else {
         CRef cr = ca.alloc(ps_copy, false);
         clauses.push(cr);
-        constraint_type[cr] = Clauses;  //.insert(cr, Clauses);
+        //constraint_type.insert(cr, Clauses);
+        constraint_type[cr] = Clauses;
         if (ps_copy.size() == 1){
             p = ps_copy[0];
             if (variable_type[var(p)]) {
@@ -511,6 +512,7 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool& l
     tot_literals += out_learnt.size();
 
     for (int j = 0; j < seen_stack.size(); j++) seen[seen_stack[j]] = 0;
+    for (int j = 0; j < analyze_toclear.size(); j++) seen[var(analyze_toclear[j])] = 0;    // ('seen[]' is now cleared)
 
     #ifndef NDEBUG
         printf("MiniSAT %s: ", primary_type ? "clause" : "term");
@@ -524,10 +526,13 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool& l
     Var max_dl_var = var_Undef;
     Var rightmost_primary = var_Undef;
 
-    out_learnt.push(r);
+    if (r != lit_Undef) {
+        out_learnt.push(r);
+    }
 
     for (i = 0; i < out_learnt.size(); i++) {
         Var v = var(out_learnt[i]);
+        assert(v < nVars());
         if (variable_type[v] == primary_type && (rightmost_primary == var_Undef || rightmost_primary < v)) {
             rightmost_primary = v;
         }
@@ -535,8 +540,10 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool& l
     if (rightmost_primary != var_Undef) {
         for (i = 0; i < out_learnt.size(); i++) {
             Var v = var(out_learnt[i]);
+            assert(v >= 0);
             if (v <= rightmost_primary) {
                 seen[v] = 1;
+                assert(level(v) >= 0);
                 decision_level_counts[level(v)]++;
             }
         }
@@ -1049,7 +1056,8 @@ lbool Solver::search(int nof_conflicts)
                 cancelUntil(backtrack_level);
                 CRef cr = ca.alloc(learnt_clause, true);
                 learnts.push(cr);
-                constraint_type[cr] = ct; // constraint_type.insert
+                //constraint_type.insert(cr, ct);
+                constraint_type[cr] = ct;
 
                 if (learnt_clause.size() > 1) {
                     attachClause(cr);
@@ -1390,7 +1398,8 @@ void Solver::relocAll(ClauseAllocator& to)
         if (!isRemoved(learnts[i])){
             auto ct = constraint_type[learnts[i]];
             ca.reloc(learnts[i], to);
-            constraint_type_[learnts[i]] = ct; //.insert(learnts[i], ct);
+            //constraint_type_.insert(learnts[i], ct);
+            constraint_type_[learnts[i]] = ct;
             learnts[j++] = learnts[i];
         }
     learnts.shrink(i - j);
@@ -1400,7 +1409,8 @@ void Solver::relocAll(ClauseAllocator& to)
     for (i = j = 0; i < clauses.size(); i++)
         if (!isRemoved(clauses[i])){
             ca.reloc(clauses[i], to);
-            constraint_type_[clauses[i]] = Clauses; //.insert(clauses[i], Clauses);
+            //constraint_type_.insert(clauses[i], Clauses);
+            constraint_type_[clauses[i]] = Clauses;
             clauses[j++] = clauses[i];
         }
     clauses.shrink(i - j);
@@ -1409,19 +1419,21 @@ void Solver::relocAll(ClauseAllocator& to)
     Clause& initial_term = ca[initial_term_ref];
     initial_term.setSize(nVars());
     ca.reloc(initial_term_ref, to);
-    constraint_type_[initial_term_ref] = Terms; //.insert(initial_term_ref, ConstraintTypes::Terms);
+    //constraint_type_.insert(initial_term_ref, ConstraintTypes::Terms);
+    constraint_type_[initial_term_ref] = ConstraintTypes::Terms;
 
     // All terms:
     //
     for (i = j = 0; i < terms.size(); i++)
         if (!isRemoved(terms[i])){
             ca.reloc(terms[i], to);
-            constraint_type_ [terms[i]] = Terms; //.insert(terms[i], Terms);
+            constraint_type_[terms[i]] = Terms; //.insert(terms[i], Terms);
             terms[j++] = terms[i];
         }
     terms.shrink(i - j);
 
-    constraint_type.swap(constraint_type_); // constraint_type_.moveTo(constraint_type);
+    //constraint_type_.moveTo(constraint_type);
+    constraint_type_.swap(constraint_type);
 }
 
 
@@ -1545,7 +1557,7 @@ void Solver::printTrail() const {
 
 void Solver::printSeen(Var rightmost) const {
     for (int v = 0; v <= rightmost; v++) {
-        if (seen.at(v)) {
+        if (seen[v]) {
             printf("%d ", variable_names[v]);
         }
     }
@@ -1582,7 +1594,8 @@ void Solver::updateDependencyWatchers() {
 void Solver::allocInitialTerm() {
     vec<Lit> all_variables(nVars());
     initial_term_ref = ca.alloc(all_variables, false);
-    constraint_type[initial_term_ref] = Terms; //.insert(initial_term_ref, Terms);
+    //constraint_type.insert(initial_term_ref, Terms);
+    constraint_type[initial_term_ref] = Terms;
 }
 
 lbool Solver::addTerm(const vec<Lit>& term) {
