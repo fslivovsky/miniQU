@@ -146,7 +146,7 @@ Var Solver::newVar(Var alias, lbool upol, bool dvar)
     v = next_var++;
     variable_names.push(alias);
     alias_to_internal.insert(alias, v);
-    variable_type.push(true);
+    variable_type.push_back(true); //push
     variable_depth.push(0);
     in_term.push(false);
     dependency_watched_variables.reserve(v);
@@ -158,7 +158,8 @@ Var Solver::newVar(Var alias, lbool upol, bool dvar)
     assigns  .insert(v, l_Undef);
     vardata  .insert(v, mkVarData(CRef_Undef, 0));
     activity .insert(v, rnd_init_act ? drand(random_seed) * 0.00001 : 0);
-    seen     .insert(v, 0);
+    //seen     .insert(v, 0);
+    seen[v] = 0;
     polarity .insert(v, true);
     user_pol .insert(v, upol);
     decision .reserve(v);
@@ -1544,7 +1545,7 @@ void Solver::printTrail() const {
 
 void Solver::printSeen(Var rightmost) const {
     for (int v = 0; v <= rightmost; v++) {
-        if (seen[v]) {
+        if (seen.at(v)) {
             printf("%d ", variable_names[v]);
         }
     }
