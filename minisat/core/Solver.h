@@ -21,8 +21,6 @@ OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWA
 #ifndef Minisat_Solver_h
 #define Minisat_Solver_h
 
-#include <unordered_map>
-
 #include "minisat/mtl/Vec.h"
 #include "minisat/mtl/Heap.h"
 #include "minisat/mtl/Alg.h"
@@ -33,6 +31,12 @@ OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWA
 namespace Minisat {
 
 enum ConstraintTypes { Clauses = 0, Terms = 1 };
+
+// For sorting literals.
+
+struct Lt_Lits {
+    bool operator () (Lit x, Lit y) { return var(x) < var(y); }
+};
 
 //=================================================================================================
 // Solver -- the main class:
@@ -100,6 +104,9 @@ public:
     // QBF specific:
     //
     void    addQuantifierBlock(vec<Var>& variables, bool existential); // Add a quantifier block.
+    void    traceVector(vec<Lit>& lits);
+    void    traceResolvent(Var rightmost_primary, Var pivot, Var r, bool primary_type);
+    void    traceReduction(vec<Lit>& lits, bool primary_type);
 
     // Read state:
     //
@@ -254,8 +261,7 @@ protected:
     vec<char>           in_term;
     vec<int>            variable_names;
     VMap<Var>           alias_to_internal;
-    //CMap<bool>          constraint_type;
-    std::unordered_map<unsigned int, bool> constraint_type;
+    CMap<bool>          constraint_type;
     VMap<vec<Var>>      dependencies;
     VMap<vec<Var>>      dependency_watched_variables;
     int                 dqhead;            // Head of queue (as index into the trail) of watched dependencies to update.
@@ -263,6 +269,7 @@ protected:
     vec<CRef>           terms;
     Var                 max_alias;
     bool                use_dependency_learning;
+    Lt_Lits             lt_lits;
 
     // Resource contraints:
     //
@@ -282,7 +289,7 @@ protected:
     void     analyze          (CRef confl, vec<Lit>& out_learnt, int& out_btlevel, 
                                bool& learn_dependency, bool& ct);                      // (bt = backtrack)
     void     analyzeFinal     (Lit p, LSet& out_conflict);                             // COULD THIS BE IMPLEMENTED BY THE ORDINARIY "analyze" BY SOME REASONABLE GENERALIZATION?
-    bool     litRedundant     (Lit p);                                                 // (helper method for 'analyze()')
+    bool     litRedundant     (Lit p, bool ct);                                        // (helper method for 'analyze()')
     lbool    search           (int nof_conflicts);                                     // Search for a given number of conflicts.
     lbool    solve_           ();                                                      // Main solve method (assumptions given in 'assumptions').
     void     reduceDB         ();                                                      // Reduce the set of learnt clauses.
@@ -409,7 +416,7 @@ inline bool     Solver::addClause       (Lit p, Lit q, Lit r)   { add_tmp.clear(
 inline bool     Solver::addClause       (Lit p, Lit q, Lit r, Lit s){ add_tmp.clear(); add_tmp.push(p); add_tmp.push(q); add_tmp.push(r); add_tmp.push(s); return addClause_(add_tmp); }
 
 inline bool     Solver::isRemoved       (CRef cr)         const { return ca[cr].mark() == 1; }
-inline bool     Solver::locked          (const Clause& c) const { return value(c[0]) == ((constraint_type.at(ca.ael(&c)) == Clauses) ? l_True : l_False) && reason(var(c[0])) != CRef_Undef && ca.lea(reason(var(c[0]))) == &c; }
+inline bool     Solver::locked          (const Clause& c) const { return value(c[0]) == ((constraint_type[ca.ael(&c)] == Clauses) ? l_True : l_False) && reason(var(c[0])) != CRef_Undef && ca.lea(reason(var(c[0]))) == &c; }
 inline void     Solver::newDecisionLevel()                      { trail_lim.push(trail.size()); }
 
 inline int      Solver::decisionLevel ()      const   { return trail_lim.size(); }

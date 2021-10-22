@@ -87,23 +87,23 @@ int main(int argc, char** argv)
         if (cpu_lim != 0) limitTime(cpu_lim);
         if (mem_lim != 0) limitMemory(mem_lim);
 
-        if (argc == 1)
-            printf("Reading from standard input... Use '--help' for help.\n");
+        // if (argc == 1)
+        //     printf("Reading from standard input... Use '--help' for help.\n");
 
-        gzFile in = (argc == 1) ? gzdopen(0, "rb") : gzopen(argv[1], "rb");
-        if (in == NULL)
-            printf("ERROR! Could not open file: %s\n", argc == 1 ? "<stdin>" : argv[1]), exit(1);
+        // gzFile in = (argc == 1) ? gzdopen(0, "rb") : gzopen(argv[1], "rb");
+        // if (in == NULL)
+        //     printf("ERROR! Could not open file: %s\n", argc == 1 ? "<stdin>" : argv[1]), exit(1);
         
-        if (S.verbosity > 0){
-            printf("============================[ Problem Statistics ]=============================\n");
-            printf("|                                                                             |\n"); }
+        // if (S.verbosity > 0){
+        //     printf("============================[ Problem Statistics ]=============================\n");
+        //     printf("|                                                                             |\n"); }
         
-        parse_DIMACS(in, S, (bool)strictp);
-        gzclose(in);
+        // parse_DIMACS(in, S, (bool)strictp);
+        // gzclose(in);
 
-        // std::string filename_string(argv[1]);
-        // QCIRParser qcir_parser(filename_string);
-        // qcir_parser.initSolver(S);
+        std::string filename_string(argv[1]);
+        QCIRParser qcir_parser(filename_string);
+        qcir_parser.initSolver(S);
 
         FILE* res = (argc >= 3) ? fopen(argv[2], "wb") : NULL;
 
