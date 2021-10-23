@@ -100,7 +100,7 @@ Solver::Solver() :
   , next_var           (0)
   , dqhead             (0)
   , max_alias          (-1)
-  , use_dependency_learning (false)
+  , use_dependency_learning (true)
 
     // Resource constraints:
     //
@@ -519,6 +519,7 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool& l
 
     analyzeStart:
 
+    learn_dependency = false;
     bool primary_type = (ct == ConstraintTypes::Clauses);
     bool other_type = !primary_type;
 
@@ -558,7 +559,7 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool& l
             }
         }
         // Search for variable of maximal decision level (except variable to be reduced).
-        while (index >= 0 && (!seen[var(trail[index])] || var(trail[index]) == r)) index--;
+        while (index >= 0 && !seen[var(trail[index])]) index--;
         max_dl_var = (!seen[var(trail[index])]) ? var_Undef : var(trail[index]);
     }
 
@@ -576,7 +577,7 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool& l
             printf("Reason: %d (%s)\n", reason(max_dl_var), (constraint_type[reason(max_dl_var)] == Terms) ? "term" : "clause");
         }
 #endif
-        Var pivot = (rightmost_primary == r || reason(rightmost_primary) == CRef_Undef || (reason(max_dl_var) != CRef_Undef && constraint_type[reason(max_dl_var)] == ct)) ? max_dl_var : rightmost_primary;
+        Var pivot = (reason(max_dl_var) != CRef_Undef && (constraint_type[reason(max_dl_var)] == ct || variable_type[max_dl_var] == primary_type)) ? max_dl_var : rightmost_primary;
         confl = reason(pivot);
         if (confl != CRef_Undef && constraint_type[confl] != ct) {
             ct = constraint_type[confl];
@@ -584,6 +585,7 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool& l
                 seen[v] = 0;
             }
             r = pivot;
+            vardata[r].reason = CRef_Undef;
             goto analyzeStart;
         }
         if (confl == CRef_Undef) {
@@ -648,10 +650,10 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool& l
                     decision_level_counts[level(v)]++;
                 }
             }
+            // Search for last assigned literal (excluding literal to be reduced).
+            while (index >= 0 && !seen[var(trail[index])]) index--;
+            max_dl_var = (!seen[var(trail[index])]) ? var_Undef : var(trail[index]);
         }
-        // Search for last assigned literal (excluding literal to be reduced).
-        while (index >= 0 && (!seen[var(trail[index])] || var(trail[index]) == r)) index--;
-        max_dl_var = (!seen[var(trail[index])]) ? var_Undef : var(trail[index]);
     }
     // The clause represented in "seen" is empty or asserting, translate back to vector.
     out_learnt.clear();
