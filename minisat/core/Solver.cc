@@ -673,7 +673,7 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool& l
         seen[var_asserting] = 1;
     }
 #ifndef NDEBUG
-    printf("Learned %s before minimization: ", primary_type ? "clause" : "term");
+    printf("Learned %s before:    ", primary_type ? "clause" : "term");
     printClause(out_learnt);
 #endif
 
@@ -687,13 +687,16 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool& l
     } else if (ccmin_mode == 1) {
         for (i = j = 1; i < out_learnt.size(); i++){
             Var x = var(out_learnt[i]);
-
             if (reason(x) == CRef_Undef || reasonType(x) != ct)
                 out_learnt[j++] = out_learnt[i];
             else {
-                Clause& c = ca[reason(var(out_learnt[i]))];
+                Clause& c = ca[reason(x)];
+                printf("Checking for local redundancy of %d\n", variable_names[x]);
+                printf("Reason: ");
+                printClause(reason(x));
+                assert(var(c[0]) == x && reasonType(x) == ct);
                 for (int k = 1; k < c.size(); k++)
-                    if (!seen[var(c[k])] && (level(var(c[k])) > 0 || reasonType(var(c[k])) != ct)) {
+                    if (!seen[var(c[k])] && (level(var(c[k])) > 0 || reasonType(var(c[k])) != ct || ca[reason(var(c[k]))].size() > 1)) {
                         out_learnt[j++] = out_learnt[i];
                         break; }
             }
@@ -771,7 +774,7 @@ bool Solver::litRedundant(Lit p, bool ct)
             Lit l = (*c)[i];
             
             // Variable at level 0 or previously removable:
-            if (seen[var(l)] == seen_source || seen[var(l)] == seen_removable || (level(var(l)) == 0 && reasonType(var(l)) == ct)) {
+            if (seen[var(l)] == seen_source || seen[var(l)] == seen_removable || (level(var(l)) == 0 && reasonType(var(l)) == ct && ca[reason(var(l))].size() == 1)) {
                 continue; }
             
             // Check variable can not be removed for some local reason:
@@ -791,6 +794,7 @@ bool Solver::litRedundant(Lit p, bool ct)
             i  = 0;
             p  = l;
             c  = &ca[reason(var(p))];
+            assert(reasonType(var(p)) == ct);
         }else{
             // Finished with current element 'p' and reason 'c':
             if (seen[var(p)] == seen_undef){
@@ -805,6 +809,7 @@ bool Solver::litRedundant(Lit p, bool ct)
             i  = stack.last().i;
             p  = stack.last().l;
             c  = &ca[reason(var(p))];
+            assert(reasonType(var(p)) == ct);
 
             stack.pop();
         }
