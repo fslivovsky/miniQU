@@ -143,6 +143,7 @@ public:
 
     // Mode of operation:
     //
+    bool      use_dependency_learning;
     int       verbosity;
     double    var_decay;
     double    clause_decay;
@@ -173,8 +174,8 @@ protected:
 
     // Helper structures:
     //
-    struct VarData { CRef reason; int level; };
-    static inline VarData mkVarData(CRef cr, int l){ VarData d = {cr, l}; return d; }
+    struct VarData { CRef reason; int level; bool constraint_type; };
+    static inline VarData mkVarData(CRef cr, int l, bool constraint_type){ VarData d = {cr, l, constraint_type}; return d; }
 
     struct Watcher {
         CRef cref;
@@ -261,15 +262,13 @@ protected:
     vec<char>           in_term;
     vec<int>            variable_names;
     VMap<Var>           alias_to_internal;
-    CMap<bool>          constraint_type;
     VMap<vec<Var>>      dependencies;
     VMap<vec<Var>>      dependency_watched_variables;
     int                 dqhead;            // Head of queue (as index into the trail) of watched dependencies to update.
     CRef                initial_term_ref;
     vec<CRef>           terms;
     Var                 max_alias;
-    bool                use_dependency_learning;
-    Lt_Lits             lt_lits;
+    CMap<bool>          constraint_type;
 
     // Resource contraints:
     //
@@ -282,7 +281,8 @@ protected:
     void     insertVarOrder   (Var x);                                                 // Insert a variable in the decision order priority queue.
     Lit      pickBranchLit    ();                                                      // Return the next decision variable.
     void     newDecisionLevel ();                                                      // Begins a new decision level.
-    void     uncheckedEnqueue (Lit p, CRef from = CRef_Undef);                         // Enqueue a literal. Assumes value of literal is undefined.
+    void     uncheckedEnqueue (Lit p, CRef from = CRef_Undef, 
+                               bool constraint_type = ConstraintTypes::Clauses);       // Enqueue a literal. Assumes value of literal is undefined.
     bool     enqueue          (Lit p, CRef from = CRef_Undef);                         // Test if fact 'p' contradicts current state, enqueue otherwise.
     CRef     propagate        (bool& ct);                                              // Perform unit propagation. Returns possibly conflicting clause.
     void     cancelUntil      (int level_to);                                          // Backtrack until a certain level.
@@ -319,6 +319,7 @@ protected:
     uint32_t abstractLevel    (Var x) const; // Used to represent an abstraction of sets of decision levels.
     CRef     reason           (Var x) const;
     int      level            (Var x) const;
+    bool     reasonType       (Var x) const;
     double   progressEstimate ()      const; // DELETE THIS ?? IT'S NOT VERY USEFUL ...
     bool     withinBudget     ()      const;
     void     relocAll         (ClauseAllocator& to);
@@ -334,6 +335,7 @@ protected:
     void    allocInitialTerm();
     lbool   addInitialTerms();
     void    initOrderHeaps();
+    void    resetDependencies();
 
     // Debugging
 
@@ -341,6 +343,7 @@ protected:
     void     printClause    (const vec<Lit>& literals) const;
     void     printTrail     ()                   const;
     void     printSeen      (Var rightmost)      const;
+    Lt_Lits             lt_lits;
 
     // Static helpers:
     //
@@ -363,6 +366,7 @@ protected:
 
 inline CRef Solver::reason(Var x) const { return vardata[x].reason; }
 inline int  Solver::level (Var x) const { return vardata[x].level; }
+inline bool Solver::reasonType(Var x) const { return vardata[x].constraint_type; }
 
 inline void Solver::insertVarOrder(Var x) {
     if (use_dependency_learning) {
@@ -416,7 +420,7 @@ inline bool     Solver::addClause       (Lit p, Lit q, Lit r)   { add_tmp.clear(
 inline bool     Solver::addClause       (Lit p, Lit q, Lit r, Lit s){ add_tmp.clear(); add_tmp.push(p); add_tmp.push(q); add_tmp.push(r); add_tmp.push(s); return addClause_(add_tmp); }
 
 inline bool     Solver::isRemoved       (CRef cr)         const { return ca[cr].mark() == 1; }
-inline bool     Solver::locked          (const Clause& c) const { return value(c[0]) == ((constraint_type[ca.ael(&c)] == Clauses) ? l_True : l_False) && reason(var(c[0])) != CRef_Undef && ca.lea(reason(var(c[0]))) == &c; }
+inline bool     Solver::locked          (const Clause& c) const { return value(var(c[0])) != l_Undef && reason(var(c[0])) != CRef_Undef && ca.lea(reason(var(c[0]))) == &c; }
 inline void     Solver::newDecisionLevel()                      { trail_lim.push(trail.size()); }
 
 inline int      Solver::decisionLevel ()      const   { return trail_lim.size(); }

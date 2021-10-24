@@ -68,6 +68,7 @@ int main(int argc, char** argv)
         IntOption    cpu_lim("MAIN", "cpu-lim","Limit on CPU time allowed in seconds.\n", 0, IntRange(0, INT32_MAX));
         IntOption    mem_lim("MAIN", "mem-lim","Limit on memory usage in megabytes.\n", 0, IntRange(0, INT32_MAX));
         BoolOption   strictp("MAIN", "strict", "Validate DIMACS header during parsing.", false);
+        BoolOption   dl     ("MAIN", "dl",     "Turn on/off dependency learning.", false);
 
         parseOptions(argc, argv, true);
         
@@ -76,6 +77,7 @@ int main(int argc, char** argv)
 
         //if (!pre) S.eliminate(true);
 
+        S.use_dependency_learning = dl;
         S.verbosity = verb;
         
         solver = &S;
@@ -87,8 +89,8 @@ int main(int argc, char** argv)
         if (cpu_lim != 0) limitTime(cpu_lim);
         if (mem_lim != 0) limitMemory(mem_lim);
 
-        // if (argc == 1)
-        //     printf("Reading from standard input... Use '--help' for help.\n");
+        if (argc == 1)
+            printf("Reading from standard input... Use '--help' for help.\n");
 
         // gzFile in = (argc == 1) ? gzdopen(0, "rb") : gzopen(argv[1], "rb");
         // if (in == NULL)

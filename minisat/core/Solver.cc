@@ -100,7 +100,6 @@ Solver::Solver() :
   , next_var           (0)
   , dqhead             (0)
   , max_alias          (-1)
-  , use_dependency_learning (true)
 
     // Resource constraints:
     //
@@ -156,7 +155,7 @@ Var Solver::newVar(Var alias, lbool upol, bool dvar)
     watches[1]->init(mkLit(v, false));
     watches[1]->init(mkLit(v, true ));
     assigns  .insert(v, l_Undef);
-    vardata  .insert(v, mkVarData(CRef_Undef, 0));
+    vardata  .insert(v, mkVarData(CRef_Undef, 0, ConstraintTypes::Clauses));
     activity .insert(v, rnd_init_act ? drand(random_seed) * 0.00001 : 0);
     //seen     .insert(v, 0);
     seen.push(0);
@@ -228,7 +227,7 @@ bool Solver::addClauseInternal(const vec<Lit>& ps) {
         if (ps_copy.size() == 1){
             p = ps_copy[0];
             if (variable_type[var(p)]) {
-                uncheckedEnqueue(ps_copy[0], cr);
+                uncheckedEnqueue(ps_copy[0], cr, ConstraintTypes::Clauses);
                 return ok = true;
             } else {
                 input_status = l_False;
@@ -570,17 +569,17 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool& l
         printSeen(rightmost_primary);
         printf("Rightmost var: %d\n", variable_names[rightmost_primary]);
         if (reason(rightmost_primary) != CRef_Undef) {
-            printf("Reason: %d (%s)\n", reason(rightmost_primary), (constraint_type[reason(rightmost_primary)] == Terms) ? "term" : "clause");
+            printf("Reason: %d (%s)\n", reason(rightmost_primary), (reasonType(rightmost_primary) == Terms) ? "term" : "clause");
         }
         printf("Max DL var: %d\n", variable_names[max_dl_var]);
         if (reason(max_dl_var) != CRef_Undef) {
-            printf("Reason: %d (%s)\n", reason(max_dl_var), (constraint_type[reason(max_dl_var)] == Terms) ? "term" : "clause");
+            printf("Reason: %d (%s)\n", reason(max_dl_var), (reasonType(max_dl_var) == Terms) ? "term" : "clause");
         }
 #endif
-        Var pivot = (reason(max_dl_var) != CRef_Undef && (constraint_type[reason(max_dl_var)] == ct || variable_type[max_dl_var] == primary_type)) ? max_dl_var : rightmost_primary;
+        Var pivot = (reason(max_dl_var) != CRef_Undef && (reasonType(max_dl_var) == ct || variable_type[max_dl_var] == primary_type)) ? max_dl_var : rightmost_primary;
         confl = reason(pivot);
-        if (confl != CRef_Undef && constraint_type[confl] != ct) {
-            ct = constraint_type[confl];
+        if (confl != CRef_Undef && reasonType(pivot) != ct) {
+            ct = reasonType(pivot);
             for (int v = 0; v <= rightmost_primary; v++) {
                 seen[v] = 0;
             }
@@ -683,18 +682,18 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool& l
     int i, j;
     if (ccmin_mode == 2) {
              for (i = j = 1; i < out_learnt.size(); i++)
-                 if (reason(var(out_learnt[i])) == CRef_Undef || constraint_type[reason(var(out_learnt[i]))] != ct || !litRedundant(out_learnt[i], ct))
+                 if (reason(var(out_learnt[i])) == CRef_Undef || reasonType(var(out_learnt[i])) != ct || !litRedundant(out_learnt[i], ct))
                      out_learnt[j++] = out_learnt[i];
     } else if (ccmin_mode == 1) {
         for (i = j = 1; i < out_learnt.size(); i++){
             Var x = var(out_learnt[i]);
 
-            if (reason(x) == CRef_Undef || constraint_type[reason(x)] != ct)
+            if (reason(x) == CRef_Undef || reasonType(x) != ct)
                 out_learnt[j++] = out_learnt[i];
             else {
                 Clause& c = ca[reason(var(out_learnt[i]))];
                 for (int k = 1; k < c.size(); k++)
-                    if (!seen[var(c[k])] && (level(var(c[k])) > 0 || constraint_type[reason(var(c[k]))] != ct)) {
+                    if (!seen[var(c[k])] && (level(var(c[k])) > 0 || reasonType(var(c[k])) != ct)) {
                         out_learnt[j++] = out_learnt[i];
                         break; }
             }
@@ -772,11 +771,11 @@ bool Solver::litRedundant(Lit p, bool ct)
             Lit l = (*c)[i];
             
             // Variable at level 0 or previously removable:
-            if (seen[var(l)] == seen_source || seen[var(l)] == seen_removable || (level(var(l)) == 0 && constraint_type[reason(var(l))] == ct)) {
+            if (seen[var(l)] == seen_source || seen[var(l)] == seen_removable || (level(var(l)) == 0 && reasonType(var(l)) == ct)) {
                 continue; }
             
             // Check variable can not be removed for some local reason:
-            if (reason(var(l)) == CRef_Undef || constraint_type[reason(var(l))] != ct || seen[var(l)] == seen_failed) {
+            if (reason(var(l)) == CRef_Undef || reasonType(var(l)) != ct || seen[var(l)] == seen_failed) {
                 stack.push(ShrinkStackElem(0, p));
                 for (int i = 0; i < stack.size(); i++)
                     if (seen[var(stack[i].l)] == seen_undef){
@@ -854,13 +853,13 @@ void Solver::analyzeFinal(Lit p, LSet& out_conflict)
 }
 
 
-void Solver::uncheckedEnqueue(Lit p, CRef from)
+void Solver::uncheckedEnqueue(Lit p, CRef from, bool constraint_type)
 {
     assert(value(p) == l_Undef);
     assigns[var(p)] = lbool(!sign(p));
-    vardata[var(p)] = mkVarData(from, decisionLevel());
+    vardata[var(p)] = mkVarData(from, decisionLevel(), constraint_type);
     trail.push_(p);
-    quantifier_blocks_unassigned[variable_depth[var(p)]]--;
+    if (!use_dependency_learning) quantifier_blocks_unassigned[variable_depth[var(p)]]--;
 }
 
 
@@ -930,7 +929,7 @@ CRef Solver::propagate(bool& ct)
                     while (i < end)
                         *j++ = *i++;
                 } else {
-                    uncheckedEnqueue(ct_ == Clauses ? first : ~first, cr);
+                    uncheckedEnqueue(ct_ == Clauses ? first : ~first, cr, ct_);
                 }
 
             NextClause:;
@@ -1136,7 +1135,7 @@ lbool Solver::search(int nof_conflicts)
                     attachClause(cr);
                     claBumpActivity(ca[cr]);
                 }
-                uncheckedEnqueue((ct == Clauses) ? learnt_clause[0] : ~learnt_clause[0], cr);
+                uncheckedEnqueue((ct == Clauses) ? learnt_clause[0] : ~learnt_clause[0], cr, ct);
 
 
                 varDecayActivity();
@@ -1291,6 +1290,7 @@ lbool Solver::solve_()
         status = search(rest_base * restart_first);
         if (!withinBudget()) break;
         curr_restarts++;
+        if (use_dependency_learning) resetDependencies();
     }
 
     if (verbosity >= 1)
@@ -1687,7 +1687,7 @@ lbool Solver::addTerm(const vec<Lit>& term) {
     if (term.size() == 1){
         Lit p = term[0];
         if (!variable_type[var(p)]) {
-            uncheckedEnqueue(~p, cr);
+            uncheckedEnqueue(~p, cr, ConstraintTypes::Terms);
             return l_Undef;
         } else {
             return input_status = l_True;
@@ -1784,4 +1784,13 @@ void Solver::traceReduction(vec<Lit>& lits, bool primary_type) {
         lits.pop();
         traceVector(lits);
     }
+}
+
+void Solver::resetDependencies() {
+    for (Var v = 0; v < nVars(); v++) {
+        dependency_watched_variables[v].clear();
+        dependencies[v].clear();
+        insertVarOrder(v);
+    }
+    dqhead = 0;
 }
