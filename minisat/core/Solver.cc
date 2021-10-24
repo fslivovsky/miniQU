@@ -691,9 +691,11 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool& l
                 out_learnt[j++] = out_learnt[i];
             else {
                 Clause& c = ca[reason(x)];
+                #ifndef NDEBUG
                 printf("Checking for local redundancy of %d\n", variable_names[x]);
                 printf("Reason: ");
                 printClause(reason(x));
+                #endif
                 assert(var(c[0]) == x && reasonType(x) == ct);
                 for (int k = 1; k < c.size(); k++)
                     if (!seen[var(c[k])] && (level(var(c[k])) > 0 || reasonType(var(c[k])) != ct || ca[reason(var(c[k]))].size() > 1)) {
