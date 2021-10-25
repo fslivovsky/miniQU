@@ -71,14 +71,14 @@ void QCIRParser::readOutput(const string& line) {
 void QCIRParser::initSolver(Minisat::Solver& solver) {
   removeRedundant();
   std::unordered_map<int, Minisat::Var> alias_to_solver_internal;
-  for (unsigned i = 1; i < variable_gate_boundary; i++) {
+  for (unsigned int i = 1; i < variable_gate_boundary; i++) {
     Gate& g = gates[i];
     bool is_existential = (g.gate_type == GateType::Existential);
     auto solver_var = solver.newVar(i);
     alias_to_solver_internal[i] = solver_var;
     solver.setVarType(solver_var, is_existential, g.variable_depth);
   }
-  for (unsigned i = 0; i < quantifier_blocks.size(); i++) {
+  for (unsigned int i = 0; i < quantifier_blocks.size(); i++) {
     Minisat::vec<Minisat::Var> block;
     for (auto v: quantifier_blocks[i]) {
       block.push(alias_to_solver_internal[v]);
@@ -93,7 +93,7 @@ void QCIRParser::initSolver(Minisat::Solver& solver) {
   Minisat::vec<Minisat::Var> tseitin_block_existential;
 
   // Create innermost quantifier blocks for Tseitin variables.
-  for (unsigned i = variable_gate_boundary; i < gates.size(); i++) {
+  for (unsigned int i = variable_gate_boundary; i < gates.size(); i++) {
     auto& gate = gates[i];
     auto tseitin_var_universal = solver.newVar(i*2+1);
     gate_alias_to_tseitin_universal[i] = tseitin_var_universal;
@@ -109,7 +109,7 @@ void QCIRParser::initSolver(Minisat::Solver& solver) {
   gate_alias_to_tseitin_existential.insert(alias_to_solver_internal.begin(), alias_to_solver_internal.end());
   gate_alias_to_tseitin_universal.insert(alias_to_solver_internal.begin(), alias_to_solver_internal.end());
   // TODO: Compute gate polarities for Plaisted-Greenbaum encoding.
-  for (unsigned i = variable_gate_boundary; i < gates.size(); i++) {
+  for (unsigned int i = variable_gate_boundary; i < gates.size(); i++) {
     auto& gate = gates[i];
     if (gate.gate_type == GateType::And) {
       // Clauses.
@@ -117,7 +117,7 @@ void QCIRParser::initSolver(Minisat::Solver& solver) {
       Minisat::vec<Minisat::Lit> long_clause;
       small_clause.push(~Minisat::mkLit(gate_alias_to_tseitin_existential[i], false));
       long_clause.push(Minisat::mkLit(gate_alias_to_tseitin_existential[i], false));
-      for (int j = 0; j < gate.nr_inputs; j++) {
+      for (unsigned int j = 0; j < gate.nr_inputs; j++) {
         int l = gate.gate_inputs[j];
         int v = abs(l);
         bool negated = (l < 0);
@@ -132,7 +132,7 @@ void QCIRParser::initSolver(Minisat::Solver& solver) {
       Minisat::vec<Minisat::Lit> long_term;
       small_term.push(Minisat::mkLit(gate_alias_to_tseitin_universal[i], false));
       long_term.push(~Minisat::mkLit(gate_alias_to_tseitin_universal[i], false));
-      for (int j = 0; j < gate.nr_inputs; j++) {
+      for (unsigned int j = 0; j < gate.nr_inputs; j++) {
         int l = gate.gate_inputs[j];
         int v = abs(l);
         bool negated = (l < 0);
@@ -149,7 +149,7 @@ void QCIRParser::initSolver(Minisat::Solver& solver) {
       Minisat::vec<Minisat::Lit> long_clause;
       small_clause.push(Minisat::mkLit(gate_alias_to_tseitin_existential[i], false));
       long_clause.push(~Minisat::mkLit(gate_alias_to_tseitin_existential[i], false));
-      for (int j = 0; j < gate.nr_inputs; j++) {
+      for (unsigned int j = 0; j < gate.nr_inputs; j++) {
         int l = gate.gate_inputs[j];
         int v = abs(l);
         bool negated = (l < 0);
@@ -164,7 +164,7 @@ void QCIRParser::initSolver(Minisat::Solver& solver) {
       Minisat::vec<Minisat::Lit> long_term;
       small_term.push(~Minisat::mkLit(gate_alias_to_tseitin_universal[i], false));
       long_term.push(Minisat::mkLit(gate_alias_to_tseitin_universal[i], false));
-      for (int j = 0; j < gate.nr_inputs; j++) {
+      for (unsigned int j = 0; j < gate.nr_inputs; j++) {
         int l = gate.gate_inputs[j];
         int v = abs(l);
         bool negated = (l < 0);
