@@ -533,8 +533,6 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool& l
     }
     #endif
 
-    int index = trail.size() - 1;
-    Var max_dl_var = var_Undef;
     Var rightmost_primary = var_Undef;
     vec<int> decision_level_counts(decisionLevel() + 1);
 
@@ -557,26 +555,42 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool& l
                 decision_level_counts[level(v)]++;
             }
         }
-        // Search for variable of maximal decision level (except variable to be reduced).
-        while (index >= 0 && !seen[var(trail[index])]) index--;
-        max_dl_var = (!seen[var(trail[index])]) ? var_Undef : var(trail[index]);
     }
 
-    // While the clause is not asserting, resolve out the rightmost primary literal (if possible).
-    while (rightmost_primary != var_Undef && (level(max_dl_var) == 0 || decision_level_counts[level(max_dl_var)] > 1)) {
+    int max_dl = decisionLevel();
+    while (!decision_level_counts[max_dl]) max_dl--;
+    int index = trail.size() - 1;
+    Var leftmost_blocked_var = var_Undef;
+    for (Var v = rightmost_primary - 1; v >= 0; v--) {
+        if (seen[v] && variable_type[v] == other_type && (reason(v) == CRef_Undef || reasonType(v) != ct)) { // TODO: More efficiently.
+            leftmost_blocked_var = v;
+        }
+    }
+
+    // Keep going while the clause/term is not asserting.
+    while (rightmost_primary != var_Undef && (max_dl == 0 || decision_level_counts[max_dl] > 1)) {
 #ifndef NDEBUG
+        printf("Maximum DL: %d\n", max_dl);
         printf("Current %s: ", primary_type ? "clause" : "term");
         printSeen(rightmost_primary);
         printf("Rightmost var: %d\n", variable_names[rightmost_primary]);
         if (reason(rightmost_primary) != CRef_Undef) {
             printf("Reason: %d (%s)\n", reason(rightmost_primary), (reasonType(rightmost_primary) == Terms) ? "term" : "clause");
         }
-        printf("Max DL var: %d\n", variable_names[max_dl_var]);
-        if (reason(max_dl_var) != CRef_Undef) {
-            printf("Reason: %d (%s)\n", reason(max_dl_var), (reasonType(max_dl_var) == Terms) ? "term" : "clause");
+        if (leftmost_blocked_var != var_Undef) {
+            printf("Leftmost blocked: %d\n", variable_names[leftmost_blocked_var]);
         }
 #endif
-        Var pivot = (reason(max_dl_var) != CRef_Undef && (reasonType(max_dl_var) == ct || variable_type[max_dl_var] == primary_type)) ? max_dl_var : rightmost_primary;
+        while(index >= 0 && 
+             (!seen[var(trail[index])] || 
+              !((level(var(trail[index])) == max_dl && reason(var(trail[index]))!= CRef_Undef && (variable_type[var(trail[index])] == primary_type || reasonType(var(trail[index])) == ct)) ||
+                (leftmost_blocked_var != var_Undef && variable_type[var(trail[index])] == primary_type && leftmost_blocked_var < var(trail[index]) && reason(var(trail[index]))!= CRef_Undef && reasonType(var(trail[index])) == ct)))) index--;
+        Var pivot = (index >= 0) ? var(trail[index]) : rightmost_primary;
+
+#ifndef NDEBUG
+        printf("Pivot: %d\n", variable_names[pivot]);
+#endif
+
         confl = reason(pivot);
         if (confl != CRef_Undef && reasonType(pivot) != ct) {
             ct = reasonType(pivot);
@@ -589,11 +603,11 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool& l
         }
         if (confl == CRef_Undef) {
             assert(use_dependency_learning);
-            assert(variable_type[max_dl_var] == other_type);
+            assert(leftmost_blocked_var != var_Undef);
             learn_dependency = true;
             out_learnt.clear();
             out_learnt.push(mkLit(pivot, false));
-            out_learnt.push(mkLit(max_dl_var, false));
+            out_learnt.push(mkLit(leftmost_blocked_var, false));
             out_btlevel = level(pivot) - 1;
             assert(out_btlevel >= 0);
             for (int v = 0; v <= rightmost_primary; v++) {
@@ -641,36 +655,45 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool& l
         }
         // Add blocked universal variables from reason clause.
         if (rightmost_primary != var_Undef) {
+            if (rightmost_primary < leftmost_blocked_var) {
+                leftmost_blocked_var = var_Undef;
+            }
             for (int j = 1; j < c.size(); j++) {
                 Var v = var(c[j]);
                 if (!seen[v] && variable_type[v] == other_type && v < rightmost_primary) {
                     seen[v] = 1;
                     varBumpActivity(v);
                     decision_level_counts[level(v)]++;
+                    leftmost_blocked_var = (leftmost_blocked_var == var_Undef || v < leftmost_blocked_var) ? v : leftmost_blocked_var;
                 }
             }
-            // Search for last assigned literal (excluding literal to be reduced).
-            while (index >= 0 && !seen[var(trail[index])]) index--;
-            max_dl_var = (!seen[var(trail[index])]) ? var_Undef : var(trail[index]);
+            // Check if the maximum decision level present in the current clause/term has changed.
+            if (!decision_level_counts[max_dl]) {
+                while (!decision_level_counts[max_dl]) max_dl--;
+                index = trail_lim[max_dl];
+                leftmost_blocked_var = var_Undef;
+                for (Var v = rightmost_primary - 1; v >= 0; v--) {
+                    if (seen[v] && variable_type[v] == other_type && level(v) == max_dl && (reason(v) == CRef_Undef || reasonType(v) != ct)) { // TODO: More efficiently.
+                        leftmost_blocked_var = v;
+                    }
+                }
+            }
         }
     }
     // The clause represented in "seen" is empty or asserting, translate back to vector.
     out_learnt.clear();
     if (rightmost_primary != var_Undef) {
-        // Push asserting literal first.
-        auto var_asserting = (r != var_Undef && seen[r]) ? r : max_dl_var;
-        seen[var_asserting] = 0;
-        if (var_asserting == r) {
-            out_learnt.push(~mkLit(var_asserting, primary_type ^ toInt(value(var_asserting))));
-        } else { 
-            out_learnt.push(mkLit(var_asserting, primary_type ^ toInt(value(var_asserting))));
-        }
+        int max_dl_var_index = 0;
         for (int v = 0; v <= rightmost_primary; v++) {
             if (seen[v]) {
-                out_learnt.push(mkLit(v, primary_type ^ toInt(value(v))));
+                out_learnt.push(v == r? ~mkLit(v, primary_type ^ toInt(value(v))) : mkLit(v, primary_type ^ toInt(value(v))));
+                max_dl_var_index = (level(v) > level(var(out_learnt[max_dl_var_index]))) ? out_learnt.size() - 1 : max_dl_var_index;
             }
         }
-        seen[var_asserting] = 1;
+        // Move max dl. variable to index 0.
+        Lit tmp = out_learnt[0];
+        out_learnt[0] = out_learnt[max_dl_var_index];
+        out_learnt[max_dl_var_index] = tmp;
     }
 #ifndef NDEBUG
     printf("Learned %s before:    ", primary_type ? "clause" : "term");
@@ -1612,7 +1635,7 @@ void Solver::printClause(CRef cr) const {
     for (int i = 0; i < c.size(); i++) {
         Lit p = c[i];
         Var v = variable_names[var(p)];
-        printf("%d ", sign(p) ? -v : v);
+        printf("%c%d@%d ", variable_type[var(p)] ? 'e' : 'a', sign(p) ? -v : v, level(var(p)));
     }
     printf("\n");
 }
@@ -1621,7 +1644,7 @@ void Solver::printClause(const vec<Lit>& literals) const {
     for (int i = 0; i < literals.size(); i++) {
         Lit p = literals[i];
         Var v = variable_names[var(p)];
-        printf("%d ", sign(p) ? -v : v);
+        printf("%c%d@%d ", variable_type[var(p)] ? 'e' : 'a', sign(p) ? -v : v, level(var(p)));
     }
     printf("\n");
 }
@@ -1632,6 +1655,9 @@ void Solver::printTrail() const {
         Lit p = trail[i];
         Var v = variable_names[var(p)];
         printf("%c%d@%d ", variable_type[var(p)] ? 'E' : 'A', sign(p) ? -v : v, level(var(p)));
+        if (reason(var(p)) != CRef_Undef) {
+            printf("(%s) ", reasonType(var(p)) == Clauses ? "clause" : "term");
+        }
     }
     printf("\n");
 }
@@ -1639,7 +1665,7 @@ void Solver::printTrail() const {
 void Solver::printSeen(Var rightmost) const {
     for (int v = 0; v <= rightmost; v++) {
         if (seen[v]) {
-            printf("%d ", variable_names[v]);
+            printf("%c%d@%d ", variable_type[v] ? 'e' : 'a', variable_names[v], level(v));
         }
     }
     printf("\n");
