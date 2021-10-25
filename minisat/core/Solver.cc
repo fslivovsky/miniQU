@@ -83,7 +83,7 @@ Solver::Solver() :
 
     // Statistics: (formerly in 'SolverStats')
     //
-  , solves(0), starts(0), decisions(0), rnd_decisions(0), propagations(0), conflicts(0)
+  , solves(0), starts(0), decisions(0), rnd_decisions(0), propagations(0), conflicts(0), nr_dependencies(0)
   , dec_vars(0), num_clauses(0), num_learnts(0), clauses_literals(0), learnts_literals(0), max_literals(0), tot_literals(0)
 
 //  , watches {OccLists<Lit, vec<Watcher>, WatcherDeleted, MkIndexLit>(WatcherDeleted(ca)), OccLists<Lit, vec<Watcher>, WatcherDeleted, MkIndexLit>(WatcherDeleted(ca))}
@@ -562,13 +562,14 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool& l
     int index = trail.size() - 1;
     Var leftmost_blocked_var = var_Undef;
     for (Var v = rightmost_primary - 1; v >= 0; v--) {
-        if (seen[v] && variable_type[v] == other_type && (reason(v) == CRef_Undef || reasonType(v) != ct)) { // TODO: More efficiently.
+        if (seen[v] && variable_type[v] == other_type && level(v) == max_dl && (reason(v) == CRef_Undef || reasonType(v) != ct)) { // TODO: More efficiently.
             leftmost_blocked_var = v;
         }
     }
 
     // Keep going while the clause/term is not asserting.
     while (rightmost_primary != var_Undef && (max_dl == 0 || decision_level_counts[max_dl] > 1)) {
+        assert(leftmost_blocked_var == var_Undef || level(leftmost_blocked_var) == max_dl);
 #ifndef NDEBUG
         printf("Maximum DL: %d\n", max_dl);
         printf("Current %s: ", primary_type ? "clause" : "term");
@@ -664,7 +665,7 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool& l
                     seen[v] = 1;
                     varBumpActivity(v);
                     decision_level_counts[level(v)]++;
-                    leftmost_blocked_var = (leftmost_blocked_var == var_Undef || v < leftmost_blocked_var) ? v : leftmost_blocked_var;
+                    leftmost_blocked_var = (level(v) == max_dl && (leftmost_blocked_var == var_Undef || v < leftmost_blocked_var)) ? v : leftmost_blocked_var;
                 }
             }
             // Check if the maximum decision level present in the current clause/term has changed.
@@ -1131,9 +1132,11 @@ lbool Solver::search(int nof_conflicts)
             analyze(confl, learnt_clause, backtrack_level, learn_dependency, ct);
             if (learnt_clause.size() == 0) return (ct == Clauses) ? l_False : l_True;
             if (learn_dependency) {
+                nr_dependencies++;
                 assert(learnt_clause.size() == 2);
                 Var x = var(learnt_clause[0]);
                 Var y = var(learnt_clause[1]);
+                assert(!hasDependency(x, y));
                 dependencies[x].push(y);
                 dependencies[x].last() = dependencies[x][0];
                 dependencies[x][0] = y;
@@ -1320,7 +1323,7 @@ lbool Solver::solve_()
         status = search(rest_base * restart_first);
         if (!withinBudget()) break;
         curr_restarts++;
-        if (use_dependency_learning) resetDependencies();
+        if (use_dependency_learning && (curr_restarts + 1) % 20 == 0) resetDependencies();
     }
 
     if (verbosity >= 1)
@@ -1448,11 +1451,12 @@ void Solver::printStats() const
 {
     double cpu_time = cpuTime();
     double mem_used = memUsedPeak();
-    printf("restarts              : %"PRIu64"\n", starts);
-    printf("conflicts             : %-12"PRIu64"   (%.0f /sec)\n", conflicts   , conflicts   /cpu_time);
-    printf("decisions             : %-12"PRIu64"   (%4.2f %% random) (%.0f /sec)\n", decisions, (float)rnd_decisions*100 / (float)decisions, decisions   /cpu_time);
-    printf("propagations          : %-12"PRIu64"   (%.0f /sec)\n", propagations, propagations/cpu_time);
-    printf("conflict literals     : %-12"PRIu64"   (%4.2f %% deleted)\n", tot_literals, (max_literals - tot_literals)*100 / (double)max_literals);
+    printf("restarts              : %" PRIu64 "\n", starts);
+    printf("conflicts             : %-12" PRIu64 "   (%.0f /sec)\n", conflicts   , conflicts   /cpu_time);
+    printf("dependencies          : %-12" PRIu64 "   (%.2f /conflict) \n", nr_dependencies, (float)nr_dependencies/(float)conflicts);
+    printf("decisions             : %-12" PRIu64 "   (%4.2f %% random) (%.0f /sec)\n", decisions, (float)rnd_decisions*100 / (float)decisions, decisions   /cpu_time);
+    printf("propagations          : %-12" PRIu64 "   (%.0f /sec)\n", propagations, propagations/cpu_time);
+    printf("conflict literals     : %-12" PRIu64 "   (%4.2f %% deleted)\n", tot_literals, (max_literals - tot_literals)*100 / (double)max_literals);
     if (mem_used != 0) printf("Memory used           : %.2f MB\n", mem_used);
     printf("CPU time              : %g s\n", cpu_time);
 }
@@ -1826,4 +1830,11 @@ void Solver::resetDependencies() {
         insertVarOrder(v);
     }
     dqhead = 0;
+}
+
+bool Solver::hasDependency(Var of, Var on) const {
+    for (int i = 0; i < dependencies[of].size(); i++) {
+        if (dependencies[of][i] == on) return true;
+    }
+    return false;
 }

@@ -167,7 +167,7 @@ public:
 
     // Statistics: (read-only member variable)
     //
-    uint64_t solves, starts, decisions, rnd_decisions, propagations, conflicts;
+    uint64_t solves, starts, decisions, rnd_decisions, propagations, conflicts, nr_dependencies;
     uint64_t dec_vars, num_clauses, num_learnts, clauses_literals, learnts_literals, max_literals, tot_literals;
 
 protected:
@@ -344,6 +344,7 @@ protected:
     void     printTrail     ()                   const;
     void     printSeen      (Var rightmost)      const;
     Lt_Lits             lt_lits;
+    bool     hasDependency  (Var of, Var on)     const;
 
     // Static helpers:
     //
