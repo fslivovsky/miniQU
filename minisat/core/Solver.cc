@@ -437,16 +437,6 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool& l
     while (!decision_level_counts[max_dl]) max_dl--;
     int index = trail.size() - 1;
     Var leftmost_blocked_var = var_Undef;
-    for (int d = 0; d < rightmost_depth && leftmost_blocked_var == var_Undef; d++) {
-        if (quantifier_blocks_type[d] == other_type) {
-            for (int i = 0; i < variables_at[d].size(); i++) {
-                Var v = variables_at[d][i];
-                if (level(v) == max_dl && (reason(v) == CRef_Undef || reasonType(v) != ct) && (leftmost_blocked_var == var_Undef || v < leftmost_blocked_var)) {
-                    leftmost_blocked_var = v;
-                }
-            }
-        }
-    }
 
     // Keep going while the clause/term is not asserting.
     while (rightmost_depth > -1 && (max_dl == 0 || decision_level_counts[max_dl] > 1)) {
@@ -464,22 +454,14 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool& l
             printf("Leftmost blocked: %d\n", variable_names[leftmost_blocked_var]);
         }
 #endif
+        // While we're at max_dl, take the next variable.
+        // If it is blocked and left of the current leftmost blocked variable, 
+        // make it the new leftmost blocked variable.
         while(index >= 0 && 
              (seen_at[var(trail[index])] < 0 || 
               !((level(var(trail[index])) == max_dl && reason(var(trail[index]))!= CRef_Undef && (variable_type[var(trail[index])] == primary_type || reasonType(var(trail[index])) == ct)) ||
                 (leftmost_blocked_var != var_Undef && variable_type[var(trail[index])] == primary_type && leftmost_blocked_var < var(trail[index]) && reason(var(trail[index]))!= CRef_Undef && reasonType(var(trail[index])) == ct)))) index--;
-        Var pivot;
-        if (index >= 0) {
-            pivot = var(trail[index]);
-        } else {
-            int index_max = 0;
-            for (int j = 0; j < variables_at[rightmost_depth].size(); j++) {
-                if (variables_at[rightmost_depth][j] > variables_at[rightmost_depth][index_max]) {
-                    index_max = j;
-                }
-            }
-            pivot = variables_at[rightmost_depth][index_max];
-        }
+        Var pivot = (index >= 0) ? var(trail[index]) : variables_at[rightmost_depth].last();
 
 #ifndef NDEBUG
         printf("Pivot: %d\n", variable_names[pivot]);
@@ -511,19 +493,18 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool& l
         printClause(confl);
         if (primary_type) traceResolvent(quantifier_blocks[rightmost_depth].last(), pivot, r, primary_type);
 #endif
-        Clause& c = ca[confl];
-        assert(var(c[0]) == pivot);
-
-        if (c.learnt())
-            claBumpActivity(c);
-
         Var w = variables_at[variable_depth[pivot]].last();
         variables_at[variable_depth[pivot]][seen_at[pivot]] = w;
         variables_at[variable_depth[pivot]].pop();
         seen_at[w] = seen_at[pivot];
         seen_at[pivot] = -1;
-
         decision_level_counts[level(pivot)]--;
+
+        Clause& c = ca[confl];
+        assert(var(c[0]) == pivot);
+
+        if (c.learnt())
+            claBumpActivity(c);
 
         // Account for new primary variables. Check whether one of them is right of the old rightmost primary variable.
         for (int j = 1; j < c.size(); j++) {
@@ -573,8 +554,9 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool& l
                 if (quantifier_blocks_type[d] == other_type) {
                     for (int i = 0; i < variables_at[d].size(); i++) {
                         Var v = variables_at[d][i];
-                        if (level(v) == max_dl && (reason(v) == CRef_Undef || reasonType(v) != ct) && (leftmost_blocked_var == var_Undef || v < leftmost_blocked_var)) {
+                        if (level(v) == max_dl && (reason(v) == CRef_Undef || reasonType(v) != ct)) {
                             leftmost_blocked_var = v;
+                            break;
                         }
                     }
                 }
@@ -586,7 +568,6 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool& l
     if (rightmost_depth > -1) {
         int max_dl_var_index = 0;
         for (int d = 0; d <= rightmost_depth; d++) {
-            sort(variables_at[d]); // For debugging purposes only.
             for (int i = 0; i < variables_at[d].size(); i++) {
                 Var v = variables_at[d][i];
                 out_learnt.push(v == r? ~mkLit(v, primary_type ^ toInt(value(v))) : mkLit(v, primary_type ^ toInt(value(v))));
