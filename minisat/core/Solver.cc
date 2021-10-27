@@ -437,6 +437,7 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool& l
     while (!decision_level_counts[max_dl]) max_dl--;
     int index = trail.size() - 1;
     Var leftmost_blocked_var = var_Undef;
+    // TODO: Remove.
     for (int d = 0; d < rightmost_depth && leftmost_blocked_var == var_Undef; d++) {
         if (quantifier_blocks_type[d] == other_type) {
             for (int i = 0; i < variables_at[d].size(); i++) {
@@ -465,10 +466,14 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool& l
             printf("Leftmost blocked: %d\n", variable_names[leftmost_blocked_var]);
         }
 #endif
+        // While at max_dl (except decision), take next variable.
+        // Afterwards:
+        // - Resolve out blocking primaries 
+        // - (Optional) other literals with the right premise. 
         while(index >= 0 && 
              (seen_at[var(trail[index])] < 0 || 
               !((level(var(trail[index])) == max_dl && reason(var(trail[index]))!= CRef_Undef && (variable_type[var(trail[index])] == primary_type || reasonType(var(trail[index])) == ct)) ||
-                (leftmost_blocked_var != var_Undef && variable_type[var(trail[index])] == primary_type && leftmost_blocked_var < var(trail[index]) && reason(var(trail[index]))!= CRef_Undef && reasonType(var(trail[index])) == ct)))) index--;
+                (leftmost_blocked_var != var_Undef && variable_type[var(trail[index])] == primary_type && leftmost_blocked_var < var(trail[index]))))) index--;
         Var pivot = (index >= 0) ? var(trail[index]) : variables_at[rightmost_depth].last();
 
 #ifndef NDEBUG
@@ -522,7 +527,7 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool& l
                 variables_at[variable_depth[v]].push(v);
                 varBumpActivity(v);
                 decision_level_counts[level(v)]++;
-                if (rightmost_depth < variable_depth[v]) {
+                if (rightmost_depth < variable_depth[v]) { // TODO: Branchless alternative?
                     rightmost_depth = variable_depth[v];
                 }
             }
@@ -549,6 +554,7 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool& l
                     variables_at[variable_depth[v]].push(v);
                     varBumpActivity(v);
                     decision_level_counts[level(v)]++;
+                    // TODO: Remove
                     leftmost_blocked_var = ((leftmost_blocked_var == var_Undef || v < leftmost_blocked_var) && level(v) == max_dl && (reason(v) == CRef_Undef || reasonType(v) != ct)) ? v : leftmost_blocked_var;
                 }
             }
@@ -558,7 +564,7 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool& l
                 index = trail_lim[max_dl];
                 leftmost_blocked_var = var_Undef;
             }
-            for (int d = 0; d < rightmost_depth && leftmost_blocked_var == var_Undef; d++) { // TODO: inline method?
+            for (int d = 0; d < rightmost_depth && leftmost_blocked_var == var_Undef; d++) { // TODO: Remove
                 if (quantifier_blocks_type[d] == other_type) {
                     for (int i = 0; i < variables_at[d].size(); i++) {
                         Var v = variables_at[d][i];
