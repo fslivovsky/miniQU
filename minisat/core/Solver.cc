@@ -665,7 +665,7 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool& l
                     seen[v] = 1;
                     varBumpActivity(v);
                     decision_level_counts[level(v)]++;
-                    leftmost_blocked_var = (level(v) == max_dl && (leftmost_blocked_var == var_Undef || v < leftmost_blocked_var)) ? v : leftmost_blocked_var;
+                    leftmost_blocked_var = ((leftmost_blocked_var == var_Undef || v < leftmost_blocked_var) && level(v) == max_dl && (reason(v) == CRef_Undef || reasonType(v) != ct)) ? v : leftmost_blocked_var;
                 }
             }
             // Check if the maximum decision level present in the current clause/term has changed.
@@ -1459,6 +1459,8 @@ void Solver::printStats() const
     printf("conflict literals     : %-12" PRIu64 "   (%4.2f %% deleted)\n", tot_literals, (max_literals - tot_literals)*100 / (double)max_literals);
     if (mem_used != 0) printf("Memory used           : %.2f MB\n", mem_used);
     printf("CPU time              : %g s\n", cpu_time);
+    fprintf(stderr, "%lu\n", conflicts);
+
 }
 
 
