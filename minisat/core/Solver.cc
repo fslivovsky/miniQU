@@ -436,19 +436,8 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool& l
     int max_dl = decisionLevel();
     while (!decision_level_counts[max_dl]) max_dl--;
     int index = trail.size() - 1;
+    int dl_start = max_dl ? trail_lim[max_dl - 1] : 0;
     Var leftmost_blocked_var = var_Undef;
-    // TODO: Remove.
-    for (int d = 0; d < rightmost_depth && leftmost_blocked_var == var_Undef; d++) {
-        if (quantifier_blocks_type[d] == other_type) {
-            for (int i = 0; i < variables_at[d].size(); i++) {
-                Var v = variables_at[d][i];
-                if (level(v) == max_dl && (reason(v) == CRef_Undef || reasonType(v) != ct)) {
-                    leftmost_blocked_var = v;
-                    break;
-                }
-            }
-        }
-    }
 
     // Keep going while the clause/term is not asserting.
     while (rightmost_depth > -1 && (max_dl == 0 || decision_level_counts[max_dl] > 1)) {
@@ -467,14 +456,22 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool& l
         }
 #endif
         // While at max_dl (except decision), take next variable.
+        // If leftmost blocking, update.
         // Afterwards:
         // - Resolve out blocking primaries 
-        // - (Optional) other literals with the right premise. 
-        while(index >= 0 && 
-             (seen_at[var(trail[index])] < 0 || 
-              !((level(var(trail[index])) == max_dl && reason(var(trail[index]))!= CRef_Undef && (variable_type[var(trail[index])] == primary_type || reasonType(var(trail[index])) == ct)) ||
-                (leftmost_blocked_var != var_Undef && variable_type[var(trail[index])] == primary_type && leftmost_blocked_var < var(trail[index]))))) index--;
-        Var pivot = (index >= 0) ? var(trail[index]) : variables_at[rightmost_depth].last();
+
+        while(seen_at[var(trail[index--])] < 0);
+        Var pivot = var(trail[index + 1]);
+
+        if (index >= dl_start) {
+            if (variable_type[pivot] == other_type && (reason(pivot) == CRef_Undef || reasonType(pivot) != ct)) {
+                leftmost_blocked_var = (leftmost_blocked_var == var_Undef || pivot < leftmost_blocked_var) ? pivot : leftmost_blocked_var;
+                continue;
+            }
+        } else {
+            assert(leftmost_blocked_var != var_Undef); // Otherwise should be asserting.
+            if (pivot < leftmost_blocked_var || variable_type[pivot] == other_type) continue;
+        }
 
 #ifndef NDEBUG
         printf("Pivot: %d\n", variable_names[pivot]);
@@ -554,26 +551,14 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool& l
                     variables_at[variable_depth[v]].push(v);
                     varBumpActivity(v);
                     decision_level_counts[level(v)]++;
-                    // TODO: Remove
-                    leftmost_blocked_var = ((leftmost_blocked_var == var_Undef || v < leftmost_blocked_var) && level(v) == max_dl && (reason(v) == CRef_Undef || reasonType(v) != ct)) ? v : leftmost_blocked_var;
                 }
             }
             // Check if the maximum decision level present in the current clause/term has changed.
             if (!decision_level_counts[max_dl]) {
                 while (!decision_level_counts[max_dl]) max_dl--;
-                index = trail_lim[max_dl];
+                index = trail_lim[max_dl] - 1;
+                dl_start = max_dl ? trail_lim[max_dl - 1] : 0;
                 leftmost_blocked_var = var_Undef;
-            }
-            for (int d = 0; d < rightmost_depth && leftmost_blocked_var == var_Undef; d++) { // TODO: Remove
-                if (quantifier_blocks_type[d] == other_type) {
-                    for (int i = 0; i < variables_at[d].size(); i++) {
-                        Var v = variables_at[d][i];
-                        if (level(v) == max_dl && (reason(v) == CRef_Undef || reasonType(v) != ct)) {
-                            leftmost_blocked_var = v;
-                            break;
-                        }
-                    }
-                }
             }
         }
     }
