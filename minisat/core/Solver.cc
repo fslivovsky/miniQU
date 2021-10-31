@@ -872,7 +872,7 @@ struct reduceDB_lt {
     ClauseAllocator& ca;
     reduceDB_lt(ClauseAllocator& ca_) : ca(ca_) {}
     bool operator () (CRef x, CRef y) { 
-        return ca[x].size() > 2 && (ca[y].size() == 2 || ca[x].activity() < ca[y].activity()); } 
+        return ca[x].size() > ca[y].size() || (ca[x].size() == ca[y].size() && ca[x].activity() < ca[y].activity()); }
 };
 void Solver::reduceDB()
 {
@@ -884,7 +884,7 @@ void Solver::reduceDB()
     // and clauses with activity smaller than 'extra_lim':
     for (i = j = 0; i < learnts.size(); i++){
         Clause& c = ca[learnts[i]];
-        if (c.size() > 2 && !locked(c) && (i < learnts.size() / 2 || c.activity() < extra_lim))
+        if (c.size() > 2 && !locked(c) && (i < learnts.size() / 2 )) //|| c.activity() < extra_lim))
             removeClause(learnts[i]);
         else
             learnts[j++] = learnts[i];
