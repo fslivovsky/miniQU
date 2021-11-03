@@ -103,10 +103,10 @@ void QCIRParser::initSolver(Minisat::Solver& solver) {
   // Create innermost quantifier blocks for Tseitin variables.
   for (unsigned int i = variable_gate_boundary; i < gates.size(); i++) {
     auto& gate = gates[i];
-    auto tseitin_var_universal = solver.newVar(i*2+1);
+    auto tseitin_var_universal = solver.newVar(i*2+1, Minisat::l_Undef, false);
     gate_alias_to_tseitin_universal[i] = tseitin_var_universal;
     tseitin_block_universal.push(tseitin_var_universal);
-    auto tseitin_var_existential = solver.newVar(i*2);
+    auto tseitin_var_existential = solver.newVar(i*2, Minisat::l_Undef, false);
     gate_alias_to_tseitin_existential[i] = tseitin_var_existential;
     tseitin_block_existential.push(tseitin_var_existential);
     solver.setVarType(tseitin_var_universal, false, quantifier_blocks.size());
