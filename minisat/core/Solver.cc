@@ -299,14 +299,15 @@ void Solver::cancelUntil(int level_to) {
             assigns [x] = l_Undef;
             if (!use_dependency_learning) {
                 quantifier_blocks_unassigned[variable_depth[x]]++;
-            } else {
-                dqhead = (dqhead < trail_lim[level_to]) ? dqhead : trail_lim[level_to];
             }
             if (phase_saving > 1 || (phase_saving == 1 && c > trail_lim.last()))
                 polarity[x] = sign(trail[c]);
             if (!use_dependency_learning || dependencies[x].size() == 0 || (assigns[dependencies[x][0]] != l_Undef && level(dependencies[x][0]) <= level_to)) {
                 insertVarOrder(x); 
             }
+        }
+        if (use_dependency_learning) {
+            dqhead = (dqhead < trail_lim[level_to]) ? dqhead : trail_lim[level_to];
         }
         qhead = trail_lim[level_to];
         trail.shrink(trail.size() - trail_lim[level_to]);
