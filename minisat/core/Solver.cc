@@ -84,7 +84,7 @@ Solver::Solver() :
     // Statistics: (formerly in 'SolverStats')
     //
   , solves(0), starts(0), decisions(0), rnd_decisions(0), propagations(0), conflicts(0), nr_dependencies(0)
-  , dec_vars(0), num_clauses(0), num_learnts(0), clauses_literals(0), learnts_literals(0), max_literals(0), tot_literals(0)
+  , dec_vars(0), num_clauses(0), num_learnts{0, 0}, clauses_literals(0), learnts_literals{0, 0}, max_literals(0), tot_literals(0)
 
 //  , watches {OccLists<Lit, vec<Watcher>, WatcherDeleted, MkIndexLit>(WatcherDeleted(ca)), OccLists<Lit, vec<Watcher>, WatcherDeleted, MkIndexLit>(WatcherDeleted(ca))}
   //, order_heap         (VarOrderLt(activity))
@@ -248,7 +248,7 @@ void Solver::attachClause(CRef cr) {
     assert(c.size() > 1);
     (*watches[ct])[ct == Terms ? c[0] : ~c[0]].push(Watcher(cr, c[1]));
     (*watches[ct])[ct == Terms ? c[1] : ~c[1]].push(Watcher(cr, c[0]));
-    if (c.learnt()) num_learnts++, learnts_literals += c.size();
+    if (c.learnt()) num_learnts[ct]++, learnts_literals[ct] += c.size();
     else            num_clauses++, clauses_literals += c.size();
 }
 
@@ -267,7 +267,7 @@ void Solver::detachClause(CRef cr, bool strict){
         watches[ct]->smudge(ct == Terms ? c[1] : ~c[1]);
     }
 
-    if (c.learnt()) num_learnts--, learnts_literals -= c.size();
+    if (c.learnt()) num_learnts[ct]--, learnts_literals[ct] -= c.size();
     else            num_clauses--, clauses_literals -= c.size();
 }
 
@@ -324,7 +324,6 @@ Lit Solver::pickBranchLit()
 {
     int i;
     if (!use_dependency_learning) {
-        //updateDecisionVars();
         i = getDecisionBlock();
     } else {
         i = 0;
@@ -338,23 +337,21 @@ Lit Solver::pickBranchLit()
     Var next = var_Undef;
 
     // Random decision:
-    /*if (drand(random_seed) < random_var_freq && !order_heap.empty()){
-        next = order_heap[irand(random_seed,order_heap.size())];
-        if (value(next) == l_Undef && decision[next])
-            rnd_decisions++; } */
+    bool make_random_decision = random_var_freq > 0 && (drand(random_seed) < random_var_freq && !order_heaps[i]->empty());
+    rnd_decisions += make_random_decision;
 
     // Activity based decision:
-
     while (next == var_Undef || value(next) != l_Undef || !decision[next])
         if (order_heaps[i]->empty()){
             next = var_Undef;
             break;
         } else {
-            next = order_heaps[i]->removeMin();
+            if (make_random_decision) {
+                next = (*order_heaps[i])[irand(random_seed, order_heaps[i]->size())];
+            } else {
+                next = order_heaps[i]->removeMin();
+            }
             if (!isEligibleDecision(next)) {
-                if (!use_dependency_learning) {
-                    // quantifier_blocks_decision_overflow[variable_depth[next]].push(next);
-                }
                 next = var_Undef;
             }
         }
@@ -666,6 +663,10 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool& l
         out_learnt[1]     = p;
         out_btlevel       = level(var(p));
     }
+
+    // for (int i = 0; i < out_learnt.size(); i++) {
+    //     varBumpActivity(var(out_learnt[i]), var_inc * ((double)learnts_literals[ct]/nLearnts(ct) - out_learnt.size()));
+    // }
 }
 
 
@@ -878,14 +879,11 @@ struct reduceDB_lt {
 void Solver::reduceDB()
 {
     int     i, j;
-    double  extra_lim = cla_inc / learnts.size();    // Remove any clause below this activity
-
     sort(learnts, reduceDB_lt(ca));
-    // Don't delete binary or locked clauses. From the rest, delete clauses from the first half
-    // and clauses with activity smaller than 'extra_lim':
+    // Don't delete binary or locked concstraints. From the rest, delete constraints from the first half:
     for (i = j = 0; i < learnts.size(); i++){
         Clause& c = ca[learnts[i]];
-        if (c.size() > 2 && !locked(c) && (i < learnts.size() / 2 )) //|| c.activity() < extra_lim))
+        if (c.size() > 2 && !locked(c) && (i < learnts.size() / 2 ))
             removeClause(learnts[i]);
         else
             learnts[j++] = learnts[i];
@@ -977,7 +975,7 @@ bool Solver::simplify()
     rebuildOrderHeap();
 
     simpDB_assigns = nAssigns();
-    simpDB_props   = clauses_literals + learnts_literals;   // (shouldn't depend on stats really, but it will do for now)
+    simpDB_props   = clauses_literals + learnts_literals[ConstraintTypes::Clauses];   // (shouldn't depend on stats really, but it will do for now)
 
     return true;
 }
@@ -1066,10 +1064,13 @@ lbool Solver::search(int nof_conflicts)
                     max_learnts             *= learntsize_inc;
 
                     if (verbosity >= 1)
-                        printf("| %9d | %7d %8d %8d | %8d %8d %6.0f | %6.3f %% |\n", 
-                            (int)conflicts, 
-                            (int)dec_vars - (trail_lim.size() == 0 ? trail.size() : trail_lim[0]), nClauses(), (int)clauses_literals, 
-                            (int)max_learnts, nLearnts(), (double)learnts_literals/nLearnts(), progressEstimate()*100);
+                        printf("| %9d | %12d | %8d %8d %6.0f %8d %6.0f | %6.3f %% |\n", 
+                            (int)conflicts,
+                            (int)nr_dependencies,
+                            (int)max_learnts,
+                            nLearnts(ConstraintTypes::Clauses), (double)learnts_literals[ConstraintTypes::Clauses]/ nLearnts(ConstraintTypes::Clauses),
+                            nLearnts(ConstraintTypes::Terms),   (double)learnts_literals[ConstraintTypes::Terms]  / nLearnts(ConstraintTypes::Terms),
+                            random_var_freq * 100);
                 }
             }
 
@@ -1190,10 +1191,10 @@ lbool Solver::solve_()
     lbool   status            = l_Undef;
 
     if (verbosity >= 1){
-        printf("============================[ Search Statistics ]==============================\n");
-        printf("| Conflicts |          ORIGINAL         |          LEARNT          | Progress |\n");
-        printf("|           |    Vars  Clauses Literals |    Limit  Clauses Lit/Cl |          |\n");
-        printf("===============================================================================\n");
+        printf("==============================[ Search Statistics ]===============================\n");
+        printf("| Conflicts | Dependencies |           LEARNT                         | rnd_freq |\n");
+        printf("|           |              |   Limit   Clauses Lit/Cl    Terms  Lit/T |          |\n");
+        printf("==================================================================================\n");
     }
 
     allocInitialTerm();
@@ -1210,10 +1211,11 @@ lbool Solver::solve_()
         if (!withinBudget()) break;
         curr_restarts++;
         if (use_dependency_learning && (curr_restarts + 1) % 20 == 0) resetDependencies();
+        random_var_freq *= 0.995;
     }
 
     if (verbosity >= 1)
-        printf("===============================================================================\n");
+        printf("==================================================================================\n");
 
 
     if (status == l_True){
@@ -1726,6 +1728,7 @@ void Solver::resetDependencies() {
         insertVarOrder(v);
     }
     dqhead = 0;
+    nr_dependencies = 0;
 }
 
 bool Solver::hasDependency(Var of, Var on) const {

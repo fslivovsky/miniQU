@@ -116,7 +116,7 @@ public:
     lbool   modelValue (Lit p) const;       // The value of a literal in the last model. The last call to solve must have been satisfiable.
     int     nAssigns   ()      const;       // The current number of assigned literals.
     int     nClauses   ()      const;       // The current number of original clauses.
-    int     nLearnts   ()      const;       // The current number of learnt clauses.
+    int     nLearnts   (bool ct) const;       // The current number of learnt clauses/terms.
     int     nVars      ()      const;       // The current number of variables.
     int     nFreeVars  ()      const;
     void    printStats ()      const;       // Print some current statistics to standard output.
@@ -168,7 +168,9 @@ public:
     // Statistics: (read-only member variable)
     //
     uint64_t solves, starts, decisions, rnd_decisions, propagations, conflicts, nr_dependencies;
-    uint64_t dec_vars, num_clauses, num_learnts, clauses_literals, learnts_literals, max_literals, tot_literals;
+    uint64_t dec_vars, num_clauses, clauses_literals, max_literals, tot_literals;
+    uint64_t num_learnts[2];
+    uint64_t learnts_literals[2];
 
 protected:
 
@@ -436,7 +438,7 @@ inline lbool    Solver::modelValue    (Var x) const   { return model[x]; }
 inline lbool    Solver::modelValue    (Lit p) const   { return model[var(p)] ^ sign(p); }
 inline int      Solver::nAssigns      ()      const   { return trail.size(); }
 inline int      Solver::nClauses      ()      const   { return num_clauses; }
-inline int      Solver::nLearnts      ()      const   { return num_learnts; }
+inline int      Solver::nLearnts      (bool ct) const   { return num_learnts[ct]; }
 inline int      Solver::nVars         ()      const   { return next_var; }
 // TODO: nFreeVars() is not quite correct, try to calculate right instead of adapting it like below:
 inline int      Solver::nFreeVars     ()      const   { return (int)dec_vars - (trail_lim.size() == 0 ? trail.size() : trail_lim[0]); }

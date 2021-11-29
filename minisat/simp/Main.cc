@@ -110,13 +110,12 @@ int main(int argc, char** argv)
         FILE* res = (argc >= 3) ? fopen(argv[2], "wb") : NULL;
 
         if (S.verbosity > 0){
-            printf("|  Number of variables:  %12d                                         |\n", S.nVars());
-            printf("|  Number of clauses:    %12d                                         |\n", S.nClauses()); }
-        
+            printf("|  Number of variables:  %12d                                            |\n", S.nVars());
+            printf("|  Number of clauses:    %12d                                            |\n", S.nClauses()); }
         double parsed_time = cpuTime();
         if (S.verbosity > 0)
-            printf("|  Parse time:           %12.2f s                                       |\n", parsed_time - initial_time);
-
+            printf("|  Parse time:           %12.2f s                                          |\n", parsed_time - initial_time);
+                    //==================================================================================
         // Change to signal-handlers that will only notify the solver and allow it to terminate
         // voluntarily:
         sigTerm(SIGINT_interrupt);
@@ -130,7 +129,7 @@ int main(int argc, char** argv)
         if (!S.okay()){
             if (res != NULL) fprintf(res, "UNSAT\n"), fclose(res);
             if (S.verbosity > 0){
-                printf("===============================================================================\n");
+                printf("==================================================================================\n");
                 printf("Solved by simplification\n");
                 S.printStats();
                 printf("\n"); }
@@ -144,7 +143,7 @@ int main(int argc, char** argv)
             vec<Lit> dummy;
             ret = S.solveLimited(dummy);
         }else if (S.verbosity > 0)
-            printf("===============================================================================\n");
+            printf("==================================================================================\n");
 
         if (dimacs && ret == l_Undef)
             S.toDimacs((const char*)dimacs);
@@ -173,7 +172,7 @@ int main(int argc, char** argv)
         return (ret == l_True ? 10 : ret == l_False ? 20 : 0);
 #endif
     } catch (OutOfMemoryException&){
-        printf("===============================================================================\n");
+        printf("==================================================================================\n");
         printf("INDETERMINATE\n");
         exit(0);
     }
