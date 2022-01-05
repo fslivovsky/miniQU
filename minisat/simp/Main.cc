@@ -20,6 +20,7 @@ OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWA
 
 #include <errno.h>
 #include <zlib.h>
+#include <string>
 
 #include "minisat/utils/System.h"
 #include "minisat/utils/ParseUtils.h"
@@ -53,6 +54,14 @@ static void SIGINT_exit(int) {
 //=================================================================================================
 // Main:
 
+bool hasEnding (std::string const &fullString, std::string const &ending) {
+    if (fullString.length() >= ending.length()) {
+        return (0 == fullString.compare (fullString.length() - ending.length(), ending.length(), ending));
+    } else {
+        return false;
+    }
+}
+
 int main(int argc, char** argv)
 {
     try {
@@ -75,8 +84,6 @@ int main(int argc, char** argv)
         Solver  S;
         double      initial_time = cpuTime();
 
-        //if (!pre) S.eliminate(true);
-
         S.use_dependency_learning = dl;
         S.verbosity = verb;
         
@@ -89,23 +96,21 @@ int main(int argc, char** argv)
         if (cpu_lim != 0) limitTime(cpu_lim);
         if (mem_lim != 0) limitMemory(mem_lim);
 
-        if (argc == 1)
-            printf("Reading from standard input... Use '--help' for help.\n");
+        if (argc == 2 && hasEnding(std::string(argv[1]), "qcir")) {
+            std::string filename_string(argv[1]);
+            QCIRParser qcir_parser(filename_string);
+            qcir_parser.initSolver(S);
+        } else {
+            if (argc == 1)
+                printf("Reading QDIMACS from standard input... Use '--help' for help.\n");
 
-        // gzFile in = (argc == 1) ? gzdopen(0, "rb") : gzopen(argv[1], "rb");
-        // if (in == NULL)
-        //     printf("ERROR! Could not open file: %s\n", argc == 1 ? "<stdin>" : argv[1]), exit(1);
-        
-        // if (S.verbosity > 0){
-        //     printf("============================[ Problem Statistics ]=============================\n");
-        //     printf("|                                                                             |\n"); }
-        
-        // parse_DIMACS(in, S, (bool)strictp);
-        // gzclose(in);
-
-        std::string filename_string(argv[1]);
-        QCIRParser qcir_parser(filename_string);
-        qcir_parser.initSolver(S);
+            gzFile in = (argc == 1) ? gzdopen(0, "rb") : gzopen(argv[1], "rb");
+            if (in == NULL)
+                printf("ERROR! Could not open file: %s\n", argc == 1 ? "<stdin>" : argv[1]), exit(1);
+            
+            parse_DIMACS(in, S, (bool)strictp);
+            gzclose(in);
+        }
 
         FILE* res = (argc >= 3) ? fopen(argv[2], "wb") : NULL;
 
@@ -119,12 +124,6 @@ int main(int argc, char** argv)
         // Change to signal-handlers that will only notify the solver and allow it to terminate
         // voluntarily:
         sigTerm(SIGINT_interrupt);
-
-        // S.eliminate(true);
-        // double simplified_time = cpuTime();
-        // if (S.verbosity > 0){
-        //     printf("|  Simplification time:  %12.2f s                                       |\n", simplified_time - parsed_time);
-        //     printf("|                                                                             |\n"); }
 
         if (!S.okay()){
             if (res != NULL) fprintf(res, "UNSAT\n"), fclose(res);
