@@ -1621,11 +1621,11 @@ lbool Solver::addTerm(const vec<Lit>& term) {
     }
     if (term.size() == 1){
         Lit p = term[0];
-        if (!variable_type[var(p)]) {
+        if (variable_type[var(p)] || value(p) == l_True) {
+            return input_status = l_True;
+        } else {
             uncheckedEnqueue(~p, cr, ConstraintTypes::Terms);
             return l_Undef;
-        } else {
-            return input_status = l_True;
         }
     } else {
         attachClause(cr);
