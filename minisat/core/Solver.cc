@@ -432,7 +432,7 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool& l
     }
 
     int max_dl = decisionLevel();
-    while (!decision_level_counts[max_dl]) max_dl--;
+    while (max_dl && !decision_level_counts[max_dl]) max_dl--;
     int index = trail.size() - 1;
     int dl_start = max_dl ? trail_lim[max_dl - 1] : 0;
     Var leftmost_blocked_var = var_Undef;
@@ -467,7 +467,7 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool& l
                 continue;
             }
         } else {
-            assert(leftmost_blocked_var != var_Undef); // Otherwise should be asserting.
+            assert(max_dl == 0 || leftmost_blocked_var != var_Undef); // Otherwise should be asserting.
             if (pivot < leftmost_blocked_var || variable_type[pivot] == other_type) continue;
         }
 
@@ -553,7 +553,7 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool& l
             }
             // Check if the maximum decision level present in the current clause/term has changed.
             if (!decision_level_counts[max_dl]) {
-                while (!decision_level_counts[max_dl]) max_dl--;
+                while (max_dl && !decision_level_counts[max_dl]) max_dl--;
                 index = trail_lim[max_dl] - 1;
                 dl_start = max_dl ? trail_lim[max_dl - 1] : 0;
                 leftmost_blocked_var = var_Undef;
