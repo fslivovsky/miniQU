@@ -405,9 +405,9 @@ void QBFParser::doWriteDIMACS(std::ostream& out) {
   printClauselist(definition_clauses, out);
 }
 
-void QBFParser::printClauselist(vector<vector<int>>& clause_list, std::ostream& out) {
-  for (auto& clause: clause_list) {
-    for (auto& literal: clause) {
+void QBFParser::printClauselist(const vector<vector<int>>& clause_list, std::ostream& out) {
+  for (const auto& clause: clause_list) {
+    for (const auto& literal: clause) {
       auto alias = abs(literal);
       auto sign = (literal > 0) ? "" : "-";
       out << sign << gates[alias].gate_id << " ";
