@@ -107,6 +107,7 @@ public:
     void    traceVector(vec<Lit>& lits);
     void    traceResolvent(Var rightmost_primary, Var pivot, Var r, bool primary_type);
     void    traceReduction(vec<Lit>& lits, bool primary_type);
+    int     computeLBD(vec<Lit>& lits);
 
     // Read state:
     //
@@ -273,6 +274,7 @@ protected:
     vec<CRef>           terms;
     Var                 max_alias;
     CMap<bool>          constraint_type;
+    CMap<int>           constraint_LBD;
 
     // Resource contraints:
     //

@@ -248,7 +248,7 @@ void Solver::attachClause(CRef cr) {
     assert(c.size() > 1);
     (*watches[ct])[ct == Terms ? c[0] : ~c[0]].push(Watcher(cr, c[1]));
     (*watches[ct])[ct == Terms ? c[1] : ~c[1]].push(Watcher(cr, c[0]));
-    if (c.learnt()) num_learnts[ct]++, learnts_literals[ct] += c.size();
+    if (c.learnt()) num_learnts[ct]++, learnts_literals[ct] += constraint_LBD[cr];
     else            num_clauses++, clauses_literals += c.size();
 }
 
@@ -267,7 +267,7 @@ void Solver::detachClause(CRef cr, bool strict){
         watches[ct]->smudge(ct == Terms ? c[1] : ~c[1]);
     }
 
-    if (c.learnt()) num_learnts[ct]--, learnts_literals[ct] -= c.size();
+    if (c.learnt()) num_learnts[ct]--, learnts_literals[ct] -= constraint_LBD[cr];
     else            num_clauses--, clauses_literals -= c.size();
 }
 
@@ -872,20 +872,27 @@ CRef Solver::propagate(bool& ct)
 |________________________________________________________________________________________________@*/
 struct reduceDB_lt { 
     ClauseAllocator& ca;
-    reduceDB_lt(ClauseAllocator& ca_) : ca(ca_) {}
+    CMap<int>& LBDs;
+    reduceDB_lt(ClauseAllocator& ca_, CMap<int>& LBDs_) : ca(ca_), LBDs(LBDs_) {}
     bool operator () (CRef x, CRef y) { 
-        return ca[x].size() > ca[y].size() || (ca[x].size() == ca[y].size() && ca[x].activity() < ca[y].activity()); }
+        return LBDs[x] > LBDs[y] || (LBDs[x] == LBDs[y] && (ca[x].activity() < ca[y].activity())); }
 };
 void Solver::reduceDB()
 {
     int     i, j;
-    sort(learnts, reduceDB_lt(ca));
-    // Don't delete binary or locked concstraints. From the rest, delete constraints from the first half:
-    for (i = j = 0; i < learnts.size(); i++){
+    sort(learnts, reduceDB_lt(ca, constraint_LBD));
+    int learnt_counts[2] = {0, 0};
+    for (int i = 0; i < learnts.size(); i++)
+        learnt_counts[constraint_type[learnts[i]]]++;
+    // Don't delete binary or locked constraints. From the rest, delete constraints from the first half:
+    int learnts_removed[2] = {0, 0};
+    for (i = j = 0; i < learnts.size(); i++) {
         Clause& c = ca[learnts[i]];
-        if (c.size() > 2 && !locked(c) && (i < learnts.size() / 2 ))
+        auto c_type = constraint_type[learnts[i]];
+        if (constraint_LBD[learnts[i]] > 2 && !locked(c) && (learnts_removed[c_type] < (learnt_counts[c_type] / 2))) {
             removeClause(learnts[i]);
-        else
+            learnts_removed[c_type]++;
+        } else
             learnts[j++] = learnts[i];
     }
     learnts.shrink(i - j);
@@ -1042,12 +1049,12 @@ lbool Solver::search(int nof_conflicts)
                     watched.shrink(1);
                 }
             } else {
+                int lbd = computeLBD(learnt_clause);
                 cancelUntil(backtrack_level);
                 CRef cr = ca.alloc(learnt_clause, true);
                 learnts.push(cr);
                 constraint_type.insert(cr, ct);
-                //constraint_type[cr] = ct;
-
+                constraint_LBD.insert(cr, lbd);
                 if (learnt_clause.size() > 1) {
                     attachClause(cr);
                     claBumpActivity(ca[cr]);
@@ -1384,6 +1391,7 @@ void Solver::relocAll(ClauseAllocator& to)
 
     // New constraint type map.
     CMap<bool> constraint_type_;
+    CMap<int>  constraint_LBD_;
     //std::unordered_map<unsigned int, bool> constraint_type_;
 
     // All learnt:
@@ -1392,8 +1400,10 @@ void Solver::relocAll(ClauseAllocator& to)
     for (i = j = 0; i < learnts.size(); i++)
         if (!isRemoved(learnts[i])){
             auto ct = constraint_type[learnts[i]];
+            auto lbd = constraint_LBD[learnts[i]];
             ca.reloc(learnts[i], to);
             constraint_type_.insert(learnts[i], ct);
+            constraint_LBD_.insert(learnts[i], lbd);
             //constraint_type_[learnts[i]] = ct;
             learnts[j++] = learnts[i];
         }
@@ -1429,6 +1439,7 @@ void Solver::relocAll(ClauseAllocator& to)
     terms.shrink(i - j);
 
     constraint_type_.moveTo(constraint_type);
+    constraint_LBD_.moveTo(constraint_LBD);
     //constraint_type_.swap(constraint_type);
 }
 
@@ -1736,4 +1747,12 @@ bool Solver::hasDependency(Var of, Var on) const {
         if (dependencies[of][i] == on) return true;
     }
     return false;
+}
+
+int Solver::computeLBD(vec<Lit>& lits) {
+    IntSet<int> levels_present;
+    for (int i = 0; i < lits.size(); i++) {
+        levels_present.insert(level(var(lits[i])));
+    }
+    return levels_present.size();
 }
