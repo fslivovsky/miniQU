@@ -100,6 +100,7 @@ Solver::Solver() :
   , next_var           (0)
   , dqhead             (0)
   , max_alias          (-1)
+  , use_qres           (true)
 
     // Resource constraints:
     //
@@ -436,10 +437,11 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool& l
     int index = trail.size() - 1;
     int dl_start = max_dl ? trail_lim[max_dl - 1] : 0;
     Var leftmost_blocked_var = var_Undef;
+    Var asserting_variable = (decision_level_counts[max_dl] > 1) ? var_Undef : getAssertingVar(rightmost_depth, max_dl);
 
     // Keep going while the clause/term is not asserting.
-    while (rightmost_depth > -1 && (max_dl == 0 || decision_level_counts[max_dl] > 1)) {
-        assert(leftmost_blocked_var == var_Undef || level(leftmost_blocked_var) == max_dl);
+    while (rightmost_depth > -1 && (max_dl == 0 || decision_level_counts[max_dl] > 1 || (use_qres && variable_type[asserting_variable] == other_type))) {
+        assert(leftmost_blocked_var == var_Undef || level(leftmost_blocked_var) == max_dl || (use_qres && variable_type[asserting_variable] == other_type));
 #ifndef NDEBUG
         printf("Maximum DL: %d\n", max_dl);
         printf("Current %s: ", primary_type ? "clause" : "term");
@@ -467,8 +469,11 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool& l
                 continue;
             }
         } else {
-            assert(max_dl == 0 || leftmost_blocked_var != var_Undef); // Otherwise should be asserting.
-            if (pivot < leftmost_blocked_var || variable_type[pivot] == other_type) continue;
+            assert(max_dl == 0 || leftmost_blocked_var != var_Undef || (use_qres && variable_type[asserting_variable] == other_type)); // Otherwise should be asserting.
+            if (use_qres && variable_type[pivot] == other_type && level(pivot) == max_dl && reason(pivot) == CRef_Undef) {
+                asserting_variable = pivot;
+            }
+            if (variable_type[pivot] == other_type || ((leftmost_blocked_var == var_Undef || pivot < leftmost_blocked_var) && (asserting_variable == var_Undef || pivot < asserting_variable))) continue;
         }
 
 #ifndef NDEBUG
@@ -485,11 +490,12 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool& l
         }
         if (confl == CRef_Undef) {
             assert(use_dependency_learning);
-            assert(leftmost_blocked_var != var_Undef);
+            assert(leftmost_blocked_var != var_Undef || asserting_variable != var_Undef);
+            Var var_dependency = (leftmost_blocked_var != var_Undef && leftmost_blocked_var < pivot) ? leftmost_blocked_var : asserting_variable;
             learn_dependency = true;
             out_learnt.clear();
             out_learnt.push(mkLit(pivot, false));
-            out_learnt.push(mkLit(leftmost_blocked_var, false));
+            out_learnt.push(mkLit(var_dependency, false));
             out_btlevel = level(pivot) - 1;
             assert(out_btlevel >= 0);
             clearSeenAt(rightmost_depth);
@@ -499,7 +505,7 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool& l
 #ifndef NDEBUG
         printf("Reason %s: ", primary_type ? "clause" : "term");
         printClause(confl);
-        if (primary_type) traceResolvent(quantifier_blocks[rightmost_depth].last(), pivot, r, primary_type);
+        //if (primary_type) traceResolvent(quantifier_blocks[rightmost_depth].last(), pivot, r, primary_type);
 #endif
         Var w = variables_at[variable_depth[pivot]].last();
         variables_at[variable_depth[pivot]][seen_at[pivot]] = w;
@@ -513,6 +519,10 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool& l
 
         if (c.learnt())
             claBumpActivity(c);
+
+        if (use_qres && pivot == asserting_variable) {
+            asserting_variable = var_Undef;
+        }
 
         // Account for new primary variables. Check whether one of them is right of the old rightmost primary variable.
         for (int j = 1; j < c.size(); j++) {
@@ -557,6 +567,11 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool& l
                 index = trail_lim[max_dl] - 1;
                 dl_start = max_dl ? trail_lim[max_dl - 1] : 0;
                 leftmost_blocked_var = var_Undef;
+                if (use_qres && decision_level_counts[max_dl] == 1) {
+                    asserting_variable = getAssertingVar(rightmost_depth, max_dl);
+                }
+            } else if (use_qres && decision_level_counts[max_dl] == 1 && (asserting_variable == var_Undef || rightmost_depth < variable_depth[asserting_variable])) {
+                asserting_variable = getAssertingVar(rightmost_depth, max_dl);
             }
         }
     }
@@ -795,6 +810,7 @@ void Solver::uncheckedEnqueue(Lit p, CRef from, bool constraint_type)
 CRef Solver::propagate(bool& ct)
 {
     CRef    confl     = CRef_Undef;
+    Lit     q         = lit_Undef;
     int     num_props = 0;
 
     while (qhead < trail.size()){
@@ -838,8 +854,9 @@ CRef Solver::propagate(bool& ct)
 
                 // Did not find watch -- clause is unit under assignment:
                 *j++ = w;
-                if (value(first) == l_vanishing) {
+                if (value(first) == l_vanishing || (use_qres && variable_type[var(first)] == (ct_ == ConstraintTypes::Terms))) {
                     // Clause falsified.
+                    q = first;
                     ct = ct_;
                     confl = cr;
                     qhead = trail.size();
@@ -857,6 +874,10 @@ CRef Solver::propagate(bool& ct)
     }
     propagations += num_props;
     simpDB_props -= num_props;
+
+    if (use_qres && q != lit_Undef && value(q) == l_Undef) {
+        uncheckedEnqueue(ct == Clauses ? ~q : q);
+    }
 
     return confl;
 }
@@ -1059,6 +1080,7 @@ lbool Solver::search(int nof_conflicts)
                     attachClause(cr);
                     claBumpActivity(ca[cr]);
                 }
+                assert(variable_type[var(learnt_clause[0])] == (ct == ConstraintTypes::Clauses));
                 uncheckedEnqueue((ct == Clauses) ? learnt_clause[0] : ~learnt_clause[0], cr, ct);
 
 

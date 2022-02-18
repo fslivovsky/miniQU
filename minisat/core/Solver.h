@@ -275,6 +275,7 @@ protected:
     Var                 max_alias;
     CMap<bool>          constraint_type;
     CMap<int>           constraint_LBD;
+    bool                use_qres;
 
     // Resource contraints:
     //
@@ -343,6 +344,7 @@ protected:
     void    initOrderHeaps();
     void    resetDependencies();
     void    clearSeenAt(int rightmost_depth);
+    Var     getAssertingVar(int rightmost_depth, int asserting_level);
 
     // Debugging
 
@@ -487,8 +489,8 @@ inline void     Solver::toDimacs     (const char* file, Lit p){ vec<Lit> as; as.
 inline void     Solver::toDimacs     (const char* file, Lit p, Lit q){ vec<Lit> as; as.push(p); as.push(q); toDimacs(file, as); }
 inline void     Solver::toDimacs     (const char* file, Lit p, Lit q, Lit r){ vec<Lit> as; as.push(p); as.push(q); as.push(r); toDimacs(file, as); }
 
-inline void    Solver::addQuantifierBlock(vec<Var>& variables, bool existential) { quantifier_blocks_decision_overflow.push(); quantifier_blocks.push(); variables_at.push(); variables.copyTo(quantifier_blocks.last()); quantifier_blocks_type.push(existential), quantifier_blocks_unassigned.push(variables.size()); }
-inline void    Solver::clearSeenAt(int rightmost_depth) {
+inline void     Solver::addQuantifierBlock(vec<Var>& variables, bool existential) { quantifier_blocks_decision_overflow.push(); quantifier_blocks.push(); variables_at.push(); variables.copyTo(quantifier_blocks.last()); quantifier_blocks_type.push(existential), quantifier_blocks_unassigned.push(variables.size()); }
+inline void     Solver::clearSeenAt(int rightmost_depth) {
     for (int d = 0; d <= rightmost_depth; d++) {
         for (int i = 0; i < variables_at[d].size(); i++) {
             Var v = variables_at[d][i];
@@ -496,6 +498,18 @@ inline void    Solver::clearSeenAt(int rightmost_depth) {
         }
         variables_at[d].clear();
     }
+}
+
+inline Var     Solver::getAssertingVar(int rightmost_depth, int asserting_level) {
+    for (int d = 0; d <= rightmost_depth; d++) {
+        for (int i = 0; i < variables_at[d].size(); i++) {
+            Var v = variables_at[d][i];
+            if (level(v) == asserting_level) {
+                return v;
+            }
+        }
+    }
+    return var_Undef;
 }
 
 //=================================================================================================
