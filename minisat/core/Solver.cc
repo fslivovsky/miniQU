@@ -194,7 +194,18 @@ bool Solver::addClause_(vec<Lit>& ps)
         ps[i] = mkLit(alias_to_internal[var(ps[i])], sign(ps[i]));
     }
 
-    return addClauseInternal(ps);
+    vec<Lit> ps_copy;
+    ps.copyTo(ps_copy);
+    sort(ps_copy);
+
+    // Remove tautologies
+    Lit p; int i, j;
+    for (i = j = 0, p = lit_Undef; i < ps_copy.size(); i++) 
+        if (ps_copy[i] != ~p)
+            ps_copy[j++] = p = ps_copy[i];
+    ps_copy.shrink(i - j);
+
+    return addClauseInternal(ps_copy);
 }
 
 bool Solver::addClauseInternal(const vec<Lit>& ps) {
@@ -690,26 +701,60 @@ void Solver::analyzeQ(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool& 
     learn_dependency = false;
     bool primary_type = (ct == ConstraintTypes::Clauses);
     bool other_type = !primary_type;
-    int asserting_index;
+    int asserting_index, second_watcher_index;
+    int iterations = 0;
 
     Clause& c = ca[confl];
     for (int i = 0; i < c.size(); i++) {
         out_learnt.push(c[i]);
     }
+    #ifndef NDEBUG
+    printTrail();
+    #endif
     reduce(out_learnt, primary_type);
-    while (out_learnt.size() && !isAsserting(out_learnt, primary_type, asserting_index)) {
-        Var v = lastFalsifiedPrimary(out_learnt, primary_type);
-        c = ca[reason(v)];
+    while (out_learnt.size() && !isAsserting(out_learnt, primary_type, asserting_index, second_watcher_index)) {
+        iterations++;
+        assert(iterations < 2*trail.size());
+        #ifndef NDEBUG
+        printf("Current %s: ", primary_type ? "clause" : "term");
+        printClause(out_learnt);
+        #endif
+        Var v = nextPivot(out_learnt, primary_type);
+        #ifndef NDEBUG
+        printf("Pivot: %d\n", variable_names[v]);
+        #endif
+        assert(reason(v) != CRef_Undef);
+        const Clause& c = ca[reason(v)];
+        #ifndef NDEBUG
+        printf("Reason: ");
+        printClause(reason(v));
+        #endif
         resolveWith(out_learnt, c, v);
-        reduce(out_learnt);
+        #ifndef NDEBUG
+        printf("Resolvent %s: ", primary_type ? "clause" : "term");
+        printClause(out_learnt);
+        #endif
+        reduce(out_learnt, primary_type);
     }
 
-    Lit asserting_literal = out_learnt[asserting_index];
-    out_learnt[asserting_index] = out_learnt[0];
-    out_learnt[0] = asserting_literal;
-    out_btlevel = computeBackTrackLevel(out_learnt, primary_type);
-}
+    if (out_learnt.size() > 1) {
+        Lit p = out_learnt[asserting_index];
+        out_learnt[asserting_index] = out_learnt[0];
+        out_learnt[0] = p;
+        second_watcher_index = (second_watcher_index == 0) ? asserting_index : second_watcher_index;
+        p = out_learnt[second_watcher_index];
+        out_learnt[second_watcher_index] = out_learnt[1];
+        out_learnt[1] = p;
+        out_btlevel = level(var(p));
+    } else {
+        out_btlevel = 0;
+    }
 
+    #ifndef NDEBUG
+    printf("Learnt %s: ", primary_type ? "clause" : "term");
+    printClause(out_learnt);
+    #endif
+}
 
 // Check if 'p' can be removed from a conflict clause.
 bool Solver::litRedundant(Lit p, bool ct)
@@ -945,6 +990,12 @@ CRef Solver::propagateQ(bool& ct)
                     continue;    
                 }
 
+                #ifndef NDEBUG
+                printTrail();
+                printf("Propagating %s: ", primary ? "clause": "term");
+                printClause(cr);
+                #endif
+
                 // If 0th watch is true, then clause is already satisfied.
                 Lit     first = c[0];
                 Watcher w     = Watcher(cr, first);
@@ -954,11 +1005,16 @@ CRef Solver::propagateQ(bool& ct)
                 }
 
                 // If a literal satisfies the clause, do not touch the watchers.
-                for (int k = 2; k < c.size(); k++)
+                int k;
+                for (k = 2; k < c.size(); k++) {
                     if (value(c[k]) == l_disabling) {
-                        *j++ = w;
-                        continue;
+                        break;
                     }
+                }
+                if (k < c.size()) {
+                    *j++ = w;
+                    continue;
+                }
 
                 // Every remaining literal is unassigned or falsified.
                 if (variable_type[var(first)] == primary) {
@@ -971,7 +1027,6 @@ CRef Solver::propagateQ(bool& ct)
                 } else {
                     // First literal is a secondary literal.
                     // Find a new primary to watch.
-                    int k;
                     for (k = 2; k < c.size(); k++)
                         if (value(c[k]) != l_vanishing && variable_type[var(c[k])] == primary)
                             break;
@@ -979,18 +1034,17 @@ CRef Solver::propagateQ(bool& ct)
                         // New primary found. Try to find a new primary or secondary that is blocked by var(c[0]);
                         c[0] = c[k];
                         c[k] = first;
+                        (*watches[ct_])[(ct_ == Clauses) ? ~c[0] : c[0]].push(w);
                         for (int h = 2; h < c.size(); h++)
                             if (value(c[h]) != l_vanishing && (variable_type[var(c[h])] == primary || var(c[h]) < var(c[0]))) {
                                 c[1] = c[h]; c[h] = false_lit;
                                 // Check if new watcher happens to be the original first literal. This clause is already on its watched list.
                                 if (first != c[h])
                                     (*watches[ct_])[(ct_ == Clauses) ? ~c[1] : c[1]].push(w);
-                                (*watches[ct_])[(ct_ == Clauses) ? ~c[0] : c[0]].push(w);
                                 goto NextClause;
                             }
-                        // No new watcher found. Restore original state.
-                        c[k] = c[0];
-                        c[0] = first;
+                        // No new second watcher found. Clause/term is unit and c[1] (primary) remains a watcher.
+                        first = c[0];
                     }
                 }
 
@@ -1171,7 +1225,7 @@ lbool Solver::search(int nof_conflicts)
     starts++;
 
     for (;;){
-        CRef confl = propagate(ct);
+        CRef confl = propagateQ(ct);
         if (confl != CRef_Undef){
             // CONFLICT
             conflict: // goto label
@@ -1179,7 +1233,7 @@ lbool Solver::search(int nof_conflicts)
             conflicts++; conflictC++;
 
             learnt_clause.clear();
-            analyze(confl, learnt_clause, backtrack_level, learn_dependency, ct);
+            analyzeQ(confl, learnt_clause, backtrack_level, learn_dependency, ct);
             if (learnt_clause.size() == 0) return (ct == Clauses) ? l_False : l_True;
             if (learn_dependency) {
                 nr_dependencies++;
@@ -1698,7 +1752,10 @@ void Solver::printClause(CRef cr) const {
     for (int i = 0; i < c.size(); i++) {
         Lit p = c[i];
         Var v = variable_names[var(p)];
-        printf("%c%d@%d ", variable_type[var(p)] ? 'e' : 'a', sign(p) ? -v : v, level(var(p)));
+        printf("%c%d", variable_type[var(p)] ? 'e' : 'a', sign(p) ? -v : v);
+        if (value(var(p)) != l_Undef)
+            printf("@%d", level(var(p)));
+        printf(" ");
     }
     printf("\n");
 }
@@ -1707,7 +1764,10 @@ void Solver::printClause(const vec<Lit>& literals) const {
     for (int i = 0; i < literals.size(); i++) {
         Lit p = literals[i];
         Var v = variable_names[var(p)];
-        printf("%c%d@%d ", variable_type[var(p)] ? 'e' : 'a', sign(p) ? -v : v, level(var(p)));
+        printf("%c%d", variable_type[var(p)] ? 'e' : 'a', sign(p) ? -v : v);
+        if (value(var(p)) != l_Undef)
+            printf("@%d", level(var(p)));
+        printf(" ");
     }
     printf("\n");
 }
@@ -1916,7 +1976,9 @@ bool Solver::hasDependency(Var of, Var on) const {
 int Solver::computeLBD(vec<Lit>& lits) {
     IntSet<int> levels_present;
     for (int i = 0; i < lits.size(); i++) {
-        levels_present.insert(level(var(lits[i])));
+        Var v = var(lits[i]);
+        if (value(v) != l_Undef)
+            levels_present.insert(level(var(lits[i])));
     }
     return levels_present.size();
 }
@@ -1924,47 +1986,78 @@ int Solver::computeLBD(vec<Lit>& lits) {
 void Solver::reduce(vec<Lit>& lits, bool primary_type) {
     sort(lits);
     int i;
-    for (i = lits.size(); i > 0; i--)
+    for (i = lits.size(); i > 0; i--) {
+        assert(i > 0);
         if (variable_type[var(lits[i-1])] == primary_type)
             break;
+    }
     lits.shrink(lits.size() - i);
 }
 
-int Solver::computeBackTrackLevel(vec<Lit>& lits, bool primary_type) {
-    // Assumption: lits[0] contains the asserting literal.
-    int bt_level = 0;
-    for (int i = 1; i < lits.size(); i++)
-        bt_level = (level(var(lits[i])) > bt_level) ? level(var(lits[i])) : bt_level;
-    return bt_level;
-}
-
-bool Solver::isAsserting(vec<Lit>& lits, bool primary_type, int& asserting_index) {
+bool Solver::isAsserting(vec<Lit>& lits, bool primary_type, int& asserting_index, int& second_watcher_index) {
+    // A clause is asserting if there is a unique existential of maximum dl (among existentials).
+    // And each universal that it depends on is assigned at a lower dl.
     asserting_index = -1;
     for (int i = 0; i < lits.size(); i++) {
-        if (asserting_index == -1 || level(var(lits[asserting_index])) < level(var(lits[i])))
+        Var v = var(lits[i]);
+        if (variable_type[v] == primary_type && level(v) > 0 && (asserting_index == -1 || (value(lits[asserting_index]) != l_Undef && level(var(lits[asserting_index])) < level(v))))
             asserting_index = i;
     }
+    if (asserting_index == -1) {
+        return false;
+    }
     for (int i = 0; i < lits.size(); i++) {
-        if (level(var(lits[asserting_index])) == level(var(lits[i])) && i != asserting_index) {
+        Var v = var(lits[i]);
+        if (variable_type[v] == primary_type && level(v) == level(var(lits[asserting_index])) && i != asserting_index) {
             return false;
         }
     }
+    // There is a unique existential of maximum dl > 0.
+    // Check for blocked secondaries.
     auto asserting_variable = var(lits[asserting_index]);
-    return level(asserting_variable) > 0 && variable_type[asserting_variable] == primary_type;
+    for (int i = 0; i < lits.size(); i++) {
+        Var v = var(lits[i]);
+        if (variable_type[v] != primary_type && v < asserting_variable && (value(v) == l_Undef || level(v) >= level(asserting_variable))) {
+            return false;
+        }
+    }
+    // Finally, we need a second watcher.
+    second_watcher_index = -1;
+    for (int i = 0; i < lits.size(); i++) {
+        Var v = var(lits[i]);
+        if ((variable_type[v] == primary_type || (v < asserting_variable && value(v) != l_Undef)) && level(v) < level(asserting_variable) && (second_watcher_index == -1 || level(var(lits[second_watcher_index])) < level(v)))
+            second_watcher_index = i;
+    }
+    return lits.size() == 1 || second_watcher_index != -1;
 }
 
-Var Solver::lastFalsifiedPrimary(vec<Lit>& lits, bool primary_type) {
+Var Solver::nextPivot(const vec<Lit>& lits, bool primary_type) const {
     IntSet<Var> seen;
     for (int i = 0; i < lits.size(); i++) {
-        if (variable_type[var(lits[i])] == primary_type)
-            seen.insert(var(lits[i]));
+        Var v = var(lits[i]);
+        assert(v <= nVars());
+        if (variable_type[v] == primary_type)
+            seen.insert(v);
     }
     int index;
-    for (index = trail.size() - 1; index >= 0 && !seen.has(var(trail[index])); index--);
+    for (index = trail.size() - 1; index >= 0 && (!seen.has(var(trail[index])) || reason(var(trail[index])) == CRef_Undef); index--);
     assert(index >= 0);
     return var(trail[index]);
 }
 
-void resolveWith(vec<Lit>& lits, Clause& c, Var pivot) {
-    
+void Solver::resolveWith(vec<Lit>& lits, const Clause& c, Var pivot) const {
+    vec<Lit> resolvent;
+    LSet lits_set;
+    for (int i = 0; i < lits.size(); i++) {
+        if (var(lits[i]) != pivot) {
+            lits_set.insert(lits[i]);
+            resolvent.push(lits[i]);
+        }
+    }
+    for (int i = 0; i < c.size(); i++) {
+        if (var(c[i]) != pivot && !lits_set.has(c[i])) {
+            resolvent.push(c[i]);
+        }
+    }
+    resolvent.moveTo(lits);
 }

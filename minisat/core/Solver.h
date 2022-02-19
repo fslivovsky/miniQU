@@ -349,10 +349,9 @@ protected:
     void    resetDependencies();
     void    clearSeenAt(int rightmost_depth);
     Var     getAssertingVar(int rightmost_depth, int asserting_level);
-    int     computeBackTrackLevel(vec<Lit>& lits, bool primary_type);
-    bool    isAsserting(vec<Lit>& lits, bool primary_type, int& asserting_index);
-    Var     lastFalsifiedPrimary(vec<Lit>& lits, bool primary_type);
-    void    resolveWith(vec<Lit>& lits, Clause& c, Var pivot);
+    bool    isAsserting(vec<Lit>& lits, bool primary_type, int& asserting_index, int& second_watcher_index);
+    Var     nextPivot(const vec<Lit>& lits, bool primary_type) const;
+    void    resolveWith(vec<Lit>& lits, const Clause& c, Var pivot) const;
 
     // Debugging
 
