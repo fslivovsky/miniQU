@@ -101,6 +101,7 @@ Solver::Solver() :
   , dqhead             (0)
   , max_alias          (-1)
   , use_qres           (true)
+  , use_ldq            (true)
 
     // Resource constraints:
     //
@@ -160,6 +161,9 @@ Var Solver::newVar(Var alias, lbool upol, bool dvar)
     activity .insert(v, rnd_init_act ? drand(random_seed) * 0.00001 : 0);
     seen_at.push(-1);
     seen.push(0);
+    if (use_ldq) {
+        seen_at.push(-1);
+    }
     polarity .insert(v, true);
     user_pol .insert(v, upol);
     decision .reserve(v);
@@ -701,41 +705,128 @@ void Solver::analyzeQ(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool& 
     learn_dependency = false;
     bool primary_type = (ct == ConstraintTypes::Clauses);
     bool other_type = !primary_type;
-    int asserting_index, second_watcher_index;
+    Var asserting_variable, second_watcher_variable;
     int iterations = 0;
 
+    vec<int> decision_level_counts(decisionLevel() + 1);
+    int rightmost_depth = -1;
+
+    #ifndef NDEBUG
+    printf("Conflict: ");
+    printClause(confl);
+    #endif
+
     Clause& c = ca[confl];
+
     for (int i = 0; i < c.size(); i++) {
-        out_learnt.push(c[i]);
+        Var v = var(c[i]);
+        assert(v < nVars());
+        if (variable_type[v] == primary_type) {
+            seen[v] = 1;
+            rightmost_depth = (rightmost_depth < variable_depth[v]) ? variable_depth[v] : rightmost_depth;
+            decision_level_counts[level(v)]++;
+        }
     }
+    if (rightmost_depth > -1) {
+        for (int i = 0; i < c.size(); i++) {
+            Var v = var(c[i]);
+            assert(v >= 0);
+            if (variable_depth[v] <= rightmost_depth) {
+                varBumpActivity(v);
+                assert(value(v) == l_Undef || level(v) >= 0);
+                seen_at[toInt(c[i])] = variables_at[variable_depth[v]].size();
+                variables_at[variable_depth[v]].push(toInt(c[i]));
+            }
+        }
+    }
+
+    int max_dl = decisionLevel();
+    while (max_dl && !decision_level_counts[max_dl]) max_dl--;
+    int index = trail.size();
+
     #ifndef NDEBUG
     printTrail();
     #endif
-    reduce(out_learnt, primary_type);
-    while (out_learnt.size() && !isAsserting(out_learnt, primary_type, asserting_index, second_watcher_index)) {
+    while (rightmost_depth > -1 && (max_dl == 0 || decision_level_counts[max_dl] > 1 || !isAsserting(rightmost_depth, asserting_variable, second_watcher_variable))) {
         iterations++;
         assert(iterations < 2*trail.size());
+        Var pivot = nextPivot(index);
         #ifndef NDEBUG
-        printf("Current %s: ", primary_type ? "clause" : "term");
-        printClause(out_learnt);
+        printf("Pivot: %d\n", variable_names[pivot]);
         #endif
-        Var v = nextPivot(out_learnt, primary_type);
-        #ifndef NDEBUG
-        printf("Pivot: %d\n", variable_names[v]);
-        #endif
-        assert(reason(v) != CRef_Undef);
-        const Clause& c = ca[reason(v)];
+        assert(reason(pivot) != CRef_Undef);
+        Clause& c = ca[reason(pivot)];
+        if (c.learnt())
+            claBumpActivity(c);
         #ifndef NDEBUG
         printf("Reason: ");
-        printClause(reason(v));
+        printClause(reason(pivot));
         #endif
-        resolveWith(out_learnt, c, v);
-        #ifndef NDEBUG
-        printf("Resolvent %s: ", primary_type ? "clause" : "term");
-        printClause(out_learnt);
-        #endif
-        reduce(out_learnt, primary_type);
+
+        // Remove pivot variable from current clause/term.
+        int pivot_int = toInt(mkLit(pivot, primary_type ^ toInt(value(pivot))));
+        int w = variables_at[variable_depth[pivot]].last();
+        variables_at[variable_depth[pivot]][seen_at[pivot_int]] = w;
+        variables_at[variable_depth[pivot]].pop();
+        seen_at[w] = seen_at[pivot_int];
+        seen_at[pivot_int] = -1;
+        decision_level_counts[level(pivot)]--;
+        seen[pivot] = 0;
+
+        for (int j = 1; j < c.size(); j++) {
+            Lit q = c[j];
+            Var v = var(c[j]);
+            if (variable_type[v] == primary_type && seen_at[toInt(q)] == -1) {
+                seen[v] = 1;
+                seen_at[toInt(q)] = variables_at[variable_depth[v]].size();
+                variables_at[variable_depth[v]].push(toInt(q));
+                varBumpActivity(v);
+                decision_level_counts[level(v)]++;
+                if (rightmost_depth < variable_depth[v]) {
+                    rightmost_depth = variable_depth[v];
+                }
+            }
+        }
+        if (level(pivot) == max_dl) {
+            while (max_dl && !decision_level_counts[max_dl]) max_dl--;
+        }
+
+        // If no new rightmost primary was found, search from the old rightmost primary, reducing along the way.
+        while (rightmost_depth > -1 && (quantifier_blocks_type[rightmost_depth] == other_type || !variables_at[rightmost_depth].size())) {
+            for (int i = 0; i < variables_at[rightmost_depth].size(); i++) {
+                seen_at[variables_at[rightmost_depth][i]] = -1;
+            }
+            variables_at[rightmost_depth].clear();
+            rightmost_depth--;
+        }
+        // Add blocked universal variables from reason clause.
+        if (rightmost_depth > -1) {
+            for (int j = 1; j < c.size(); j++) {
+                int lit_int = toInt(c[j]);
+                Var v = var(c[j]);
+                if (seen_at[lit_int] == -1 && variable_type[v] == other_type && variable_depth[v] < rightmost_depth) {
+                    seen_at[lit_int] = variables_at[variable_depth[v]].size();
+                    variables_at[variable_depth[v]].push(lit_int);
+                    varBumpActivity(v);
+                }
+            }
+        }
     }
+
+    int asserting_index = -1;
+    int second_watcher_index = -1;
+
+    for (int d = 0; d <= rightmost_depth; d++) {
+        for (int i = 0; i < variables_at[d].size(); i++) {
+            Lit p = toLit(variables_at[d][i]);
+            if (var(p) == asserting_variable)
+                asserting_index = out_learnt.size();
+            else if (var(p) == second_watcher_variable)
+                second_watcher_index = out_learnt.size();
+            out_learnt.push(p);
+        }
+    }
+    clearSeenAt(rightmost_depth);
 
     if (out_learnt.size() > 1) {
         Lit p = out_learnt[asserting_index];
@@ -754,6 +845,9 @@ void Solver::analyzeQ(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool& 
     printf("Learnt %s: ", primary_type ? "clause" : "term");
     printClause(out_learnt);
     #endif
+ 
+    for (int i = 0; i < out_learnt.size(); i++)
+        seen[var(out_learnt[i])] = 0;
 }
 
 // Check if 'p' can be removed from a conflict clause.
@@ -1994,53 +2088,49 @@ void Solver::reduce(vec<Lit>& lits, bool primary_type) {
     lits.shrink(lits.size() - i);
 }
 
-bool Solver::isAsserting(vec<Lit>& lits, bool primary_type, int& asserting_index, int& second_watcher_index) {
+bool Solver::isAsserting(int rightmost_depth, Var& asserting_variable, Var& second_watcher_variable) {
     // A clause is asserting if there is a unique existential of maximum dl (among existentials).
     // And each universal that it depends on is assigned at a lower dl.
-    asserting_index = -1;
-    for (int i = 0; i < lits.size(); i++) {
-        Var v = var(lits[i]);
-        if (variable_type[v] == primary_type && level(v) > 0 && (asserting_index == -1 || (value(lits[asserting_index]) != l_Undef && level(var(lits[asserting_index])) < level(v))))
-            asserting_index = i;
-    }
-    if (asserting_index == -1) {
-        return false;
-    }
-    for (int i = 0; i < lits.size(); i++) {
-        Var v = var(lits[i]);
-        if (variable_type[v] == primary_type && level(v) == level(var(lits[asserting_index])) && i != asserting_index) {
-            return false;
+    bool primary_type = quantifier_blocks_type[rightmost_depth];
+    asserting_variable = var_Undef;
+    for (int d = rightmost_depth; d >= 0; d--) {
+        if (quantifier_blocks_type[d] != primary_type)
+            continue;
+        for (int i = 0; i < variables_at[d].size(); i++) {
+            Var v = var(toLit(variables_at[d][i]));
+            if (level(v) > 0 && (asserting_variable == var_Undef || (value(v) != l_Undef && level(asserting_variable) < level(v))))
+                asserting_variable = v;
         }
     }
     // There is a unique existential of maximum dl > 0.
     // Check for blocked secondaries.
-    auto asserting_variable = var(lits[asserting_index]);
-    for (int i = 0; i < lits.size(); i++) {
-        Var v = var(lits[i]);
-        if (variable_type[v] != primary_type && v < asserting_variable && (value(v) == l_Undef || level(v) >= level(asserting_variable))) {
-            return false;
+    for (int d = 0; d < variable_depth[asserting_variable]; d++) {
+        if (quantifier_blocks_type[d] == primary_type)
+            continue;
+        for (int i = 0; i < variables_at[d].size(); i++) {
+            Var v = var(toLit(variables_at[d][i]));
+            if (value(v) == l_Undef || level(v) >= level(asserting_variable))
+                return false;
         }
     }
     // Finally, we need a second watcher.
-    second_watcher_index = -1;
-    for (int i = 0; i < lits.size(); i++) {
-        Var v = var(lits[i]);
-        if ((variable_type[v] == primary_type || (v < asserting_variable && value(v) != l_Undef)) && level(v) < level(asserting_variable) && (second_watcher_index == -1 || level(var(lits[second_watcher_index])) < level(v)))
-            second_watcher_index = i;
+    second_watcher_variable = var_Undef;
+    int k = 0;
+    for (int d = 0; d <= rightmost_depth; d++) {
+        for (int i = 0; i < variables_at[d].size(); i++) {
+            k++;
+            Var v = var(toLit(variables_at[d][i]));
+            if ((variable_type[v] == primary_type || (v < asserting_variable && value(v) != l_Undef)) && level(v) < level(asserting_variable) && (second_watcher_variable == var_Undef || level(second_watcher_variable) < level(v)))
+                second_watcher_variable = v;
+        }
     }
-    return lits.size() == 1 || second_watcher_index != -1;
+    return k == 1 || second_watcher_variable != var_Undef;
 }
 
-Var Solver::nextPivot(const vec<Lit>& lits, bool primary_type) const {
-    IntSet<Var> seen;
-    for (int i = 0; i < lits.size(); i++) {
-        Var v = var(lits[i]);
-        assert(v <= nVars());
-        if (variable_type[v] == primary_type)
-            seen.insert(v);
-    }
-    int index;
-    for (index = trail.size() - 1; index >= 0 && (!seen.has(var(trail[index])) || reason(var(trail[index])) == CRef_Undef); index--);
+Var Solver::nextPivot(int& index) const {
+    do {
+        index--;
+    } while (index >= 0 && (!seen[var(trail[index])] || reason(var(trail[index])) == CRef_Undef));
     assert(index >= 0);
     return var(trail[index]);
 }

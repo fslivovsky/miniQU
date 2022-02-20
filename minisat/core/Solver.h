@@ -277,6 +277,7 @@ protected:
     CMap<bool>          constraint_type;
     CMap<int>           constraint_LBD;
     bool                use_qres;
+    bool                use_ldq;
 
     // Resource contraints:
     //
@@ -349,8 +350,8 @@ protected:
     void    resetDependencies();
     void    clearSeenAt(int rightmost_depth);
     Var     getAssertingVar(int rightmost_depth, int asserting_level);
-    bool    isAsserting(vec<Lit>& lits, bool primary_type, int& asserting_index, int& second_watcher_index);
-    Var     nextPivot(const vec<Lit>& lits, bool primary_type) const;
+    bool    isAsserting(int rightmost_depth, Var& asserting_variable, Var& second_watcher_variable);
+    Var     nextPivot(int& index) const;
     void    resolveWith(vec<Lit>& lits, const Clause& c, Var pivot) const;
 
     // Debugging
