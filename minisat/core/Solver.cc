@@ -100,8 +100,6 @@ Solver::Solver() :
   , next_var           (0)
   , dqhead             (0)
   , max_alias          (-1)
-  , use_qres           (true)
-  , use_ldq            (true)
 
     // Resource constraints:
     //
@@ -161,7 +159,7 @@ Var Solver::newVar(Var alias, lbool upol, bool dvar)
     activity .insert(v, rnd_init_act ? drand(random_seed) * 0.00001 : 0);
     seen_at.push(-1);
     seen.push(0);
-    if (use_ldq) {
+    if (mode == 2) {
         seen_at.push(-1);
     }
     polarity .insert(v, true);
@@ -457,22 +455,21 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool& l
     Var asserting_variable = (decision_level_counts[max_dl] > 1) ? var_Undef : getAssertingVar(rightmost_depth, max_dl);
 
     // Keep going while the clause/term is not asserting.
-    while (rightmost_depth > -1 && (max_dl == 0 || decision_level_counts[max_dl] > 1 || (use_qres && variable_type[asserting_variable] == other_type))) {
-        assert(leftmost_blocked_var == var_Undef || level(leftmost_blocked_var) == max_dl || (use_qres && variable_type[asserting_variable] == other_type));
+    while (rightmost_depth > -1 && (max_dl == 0 || decision_level_counts[max_dl] > 1 || (mode == 0 && variable_type[asserting_variable] == other_type))) {
+        assert(leftmost_blocked_var == var_Undef || level(leftmost_blocked_var) == max_dl || (mode == 0 && variable_type[asserting_variable] == other_type));
 #ifndef NDEBUG
         printf("Maximum DL: %d\n", max_dl);
         printf("Current %s: ", primary_type ? "clause" : "term");
         printVariablesAt(rightmost_depth);
-        //printSeen(quantifier_blocks[rightmost_depth].last());
-        //printf("Rightmost var: %d\n", variable_names[quantifier_blocks[rightmost_depth].last()]);
-        // if (reason(rightmost_primary) != CRef_Undef) {
-        //     printf("Reason: %d (%s)\n", reason(rightmost_primary), (reasonType(rightmost_primary) == Terms) ? "term" : "clause");
-        // }
         if (leftmost_blocked_var != var_Undef) {
             printf("Leftmost blocked: %d\n", variable_names[leftmost_blocked_var]);
         }
+        if (decision_level_counts[max_dl] == 1) {
+            printf("(Potentially) asserting: %d\n", variable_names[asserting_variable]);
+        }
 #endif
-        // While at max_dl (except decision), take next variable.
+        assert(mode == 1 || decision_level_counts[max_dl] > 1 || asserting_variable == getAssertingVar(rightmost_depth, max_dl));
+        // While at max_dl, take next variable.
         // If leftmost blocking, update.
         // Afterwards:
         // - Resolve out blocking primaries 
@@ -480,17 +477,22 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool& l
         while(seen_at[var(trail[index--])] < 0);
         Var pivot = var(trail[index + 1]);
 
-        if (index >= dl_start) {
+        if (index + 1 >= dl_start) {
             if (variable_type[pivot] == other_type && (reason(pivot) == CRef_Undef || reasonType(pivot) != ct)) {
                 leftmost_blocked_var = (leftmost_blocked_var == var_Undef || pivot < leftmost_blocked_var) ? pivot : leftmost_blocked_var;
                 continue;
-            }
+            } else if (variable_type[pivot] == primary_type && reason(pivot) == CRef_Undef && pivot < leftmost_blocked_var)
+                continue;
         } else {
-            assert(max_dl == 0 || leftmost_blocked_var != var_Undef || (use_qres && variable_type[asserting_variable] == other_type)); // Otherwise should be asserting.
-            if (use_qres && variable_type[pivot] == other_type && level(pivot) == max_dl && reason(pivot) == CRef_Undef) {
-                asserting_variable = pivot;
-            }
-            if (variable_type[pivot] == other_type || ((leftmost_blocked_var == var_Undef || pivot < leftmost_blocked_var) && (asserting_variable == var_Undef || pivot < asserting_variable))) continue;
+            assert(max_dl == 0 || leftmost_blocked_var != var_Undef); // || (mode == 0 && variable_type[asserting_variable] == other_type)); // Otherwise should be asserting.
+            // if (mode == 0) {
+            //     if (variable_type[pivot] == other_type && level(pivot) == max_dl && reason(pivot) == CRef_Undef) {
+            //         asserting_variable = pivot;
+            //     }
+            // } else {
+                if (variable_type[pivot] == other_type || (max_dl > 0 && pivot < leftmost_blocked_var))
+                    continue;
+            //if (variable_type[pivot] == other_type || ((leftmost_blocked_var == var_Undef || pivot < leftmost_blocked_var) && (asserting_variable == var_Undef || pivot < asserting_variable))) continue;
         }
 
 #ifndef NDEBUG
@@ -537,7 +539,7 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool& l
         if (c.learnt())
             claBumpActivity(c);
 
-        if (use_qres && pivot == asserting_variable) {
+        if (mode == 0 && pivot == asserting_variable) {
             asserting_variable = var_Undef;
         }
 
@@ -584,11 +586,9 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool& l
                 index = trail_lim[max_dl] - 1;
                 dl_start = max_dl ? trail_lim[max_dl - 1] : 0;
                 leftmost_blocked_var = var_Undef;
-                if (use_qres && decision_level_counts[max_dl] == 1) {
-                    asserting_variable = getAssertingVar(rightmost_depth, max_dl);
-                }
-            } else if (use_qres && decision_level_counts[max_dl] == 1 && (asserting_variable == var_Undef || rightmost_depth < variable_depth[asserting_variable])) {
-                asserting_variable = getAssertingVar(rightmost_depth, max_dl);
+            }
+            if (mode == 0 && (asserting_variable == var_Undef || rightmost_depth < variable_depth[asserting_variable])) {
+                asserting_variable = (decision_level_counts[max_dl] > 1)? var_Undef: getAssertingVar(rightmost_depth, max_dl);
             }
         }
     }
@@ -701,7 +701,7 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool& l
     // }
 }
 
-void Solver::analyzeQ(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool& learn_dependency, bool& ct) {
+void Solver::analyzeLDQ(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool& learn_dependency, bool& ct) {
     learn_dependency = false;
     bool primary_type = (ct == ConstraintTypes::Clauses);
     bool other_type = !primary_type;
@@ -747,7 +747,7 @@ void Solver::analyzeQ(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool& 
     #ifndef NDEBUG
     printTrail();
     #endif
-    while (rightmost_depth > -1 && (max_dl == 0 || decision_level_counts[max_dl] > 1 || !isAsserting(rightmost_depth, asserting_variable, second_watcher_variable))) {
+    while (rightmost_depth > -1 && (max_dl == 0 || decision_level_counts[max_dl] > 1 || !isAsserting(rightmost_depth, asserting_variable = getAssertingVarLDQ(rightmost_depth, max_dl), second_watcher_variable))) {
         iterations++;
         assert(iterations < 2*trail.size());
         Var pivot = nextPivot(index);
@@ -1019,7 +1019,7 @@ CRef Solver::propagate(bool& ct)
 
                 // Did not find watch -- clause is unit under assignment:
                 *j++ = w;
-                if (value(first) == l_vanishing || (use_qres && variable_type[var(first)] == (ct_ == ConstraintTypes::Terms))) {
+                if (value(first) == l_vanishing || (mode == 0 && variable_type[var(first)] == (ct_ == ConstraintTypes::Terms))) {
                     // Clause falsified.
                     q = first;
                     ct = ct_;
@@ -1040,14 +1040,14 @@ CRef Solver::propagate(bool& ct)
     propagations += num_props;
     simpDB_props -= num_props;
 
-    if (use_qres && q != lit_Undef && value(q) == l_Undef) {
+    if (mode == 0 && q != lit_Undef && value(q) == l_Undef) {
         uncheckedEnqueue(ct == Clauses ? ~q : q);
     }
 
     return confl;
 }
 
-CRef Solver::propagateQ(bool& ct)
+CRef Solver::propagateLDQ(bool& ct)
 {
     CRef    confl     = CRef_Undef;
     Lit     q         = lit_Undef;
@@ -1319,7 +1319,7 @@ lbool Solver::search(int nof_conflicts)
     starts++;
 
     for (;;){
-        CRef confl = propagateQ(ct);
+        CRef confl = (mode == 2) ? propagateLDQ(ct) : propagate(ct);
         if (confl != CRef_Undef){
             // CONFLICT
             conflict: // goto label
@@ -1327,7 +1327,11 @@ lbool Solver::search(int nof_conflicts)
             conflicts++; conflictC++;
 
             learnt_clause.clear();
-            analyzeQ(confl, learnt_clause, backtrack_level, learn_dependency, ct);
+            if (mode == 2) {
+                analyzeLDQ(confl, learnt_clause, backtrack_level, learn_dependency, ct);
+            } else {
+                analyze(confl, learnt_clause, backtrack_level, learn_dependency, ct);
+            }
             if (learnt_clause.size() == 0) return (ct == Clauses) ? l_False : l_True;
             if (learn_dependency) {
                 nr_dependencies++;
@@ -1366,7 +1370,7 @@ lbool Solver::search(int nof_conflicts)
                     attachClause(cr);
                     claBumpActivity(ca[cr]);
                 }
-                assert(variable_type[var(learnt_clause[0])] == (ct == ConstraintTypes::Clauses));
+                assert(mode == 1 || variable_type[var(learnt_clause[0])] == (ct == ConstraintTypes::Clauses));
                 uncheckedEnqueue((ct == Clauses) ? learnt_clause[0] : ~learnt_clause[0], cr, ct);
 
 
@@ -2088,20 +2092,11 @@ void Solver::reduce(vec<Lit>& lits, bool primary_type) {
     lits.shrink(lits.size() - i);
 }
 
-bool Solver::isAsserting(int rightmost_depth, Var& asserting_variable, Var& second_watcher_variable) {
+
+bool Solver::isAsserting(int rightmost_depth, Var asserting_variable, Var& second_watcher_variable) {
     // A clause is asserting if there is a unique existential of maximum dl (among existentials).
     // And each universal that it depends on is assigned at a lower dl.
     bool primary_type = quantifier_blocks_type[rightmost_depth];
-    asserting_variable = var_Undef;
-    for (int d = rightmost_depth; d >= 0; d--) {
-        if (quantifier_blocks_type[d] != primary_type)
-            continue;
-        for (int i = 0; i < variables_at[d].size(); i++) {
-            Var v = var(toLit(variables_at[d][i]));
-            if (level(v) > 0 && (asserting_variable == var_Undef || (value(v) != l_Undef && level(asserting_variable) < level(v))))
-                asserting_variable = v;
-        }
-    }
     // There is a unique existential of maximum dl > 0.
     // Check for blocked secondaries.
     for (int d = 0; d < variable_depth[asserting_variable]; d++) {

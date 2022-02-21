@@ -146,6 +146,7 @@ public:
     // Mode of operation:
     //
     bool      use_dependency_learning;
+    int       mode;
     int       verbosity;
     double    var_decay;
     double    clause_decay;
@@ -276,8 +277,6 @@ protected:
     Var                 max_alias;
     CMap<bool>          constraint_type;
     CMap<int>           constraint_LBD;
-    bool                use_qres;
-    bool                use_ldq;
 
     // Resource contraints:
     //
@@ -294,11 +293,11 @@ protected:
                                bool constraint_type = ConstraintTypes::Clauses);       // Enqueue a literal. Assumes value of literal is undefined.
     bool     enqueue          (Lit p, CRef from = CRef_Undef);                         // Test if fact 'p' contradicts current state, enqueue otherwise.
     CRef     propagate        (bool& ct);                                              // Perform unit propagation. Returns possibly conflicting clause.
-    CRef     propagateQ       (bool& ct);
+    CRef     propagateLDQ     (bool& ct);
     void     cancelUntil      (int level_to);                                          // Backtrack until a certain level.
     void     analyze          (CRef confl, vec<Lit>& out_learnt, int& out_btlevel, 
                                bool& learn_dependency, bool& ct);                      // (bt = backtrack)
-    void     analyzeQ         (CRef confl, vec<Lit>& out_learnt, int& out_btlevel, 
+    void     analyzeLDQ       (CRef confl, vec<Lit>& out_learnt, int& out_btlevel, 
                                bool& learn_dependency, bool& ct); 
     void     analyzeFinal     (Lit p, LSet& out_conflict);                             // COULD THIS BE IMPLEMENTED BY THE ORDINARIY "analyze" BY SOME REASONABLE GENERALIZATION?
     bool     litRedundant     (Lit p, bool ct);                                        // (helper method for 'analyze()')
@@ -350,7 +349,8 @@ protected:
     void    resetDependencies();
     void    clearSeenAt(int rightmost_depth);
     Var     getAssertingVar(int rightmost_depth, int asserting_level);
-    bool    isAsserting(int rightmost_depth, Var& asserting_variable, Var& second_watcher_variable);
+    Var     getAssertingVarLDQ(int rightmost_depth, int asserting_level);
+    bool    isAsserting(int rightmost_depth, Var asserting_variable, Var& second_watcher_variable);
     Var     nextPivot(int& index) const;
     void    resolveWith(vec<Lit>& lits, const Clause& c, Var pivot) const;
 
@@ -508,7 +508,22 @@ inline void     Solver::clearSeenAt(int rightmost_depth) {
     }
 }
 
-inline Var     Solver::getAssertingVar(int rightmost_depth, int asserting_level) {
+inline Var Solver::getAssertingVarLDQ(int rightmost_depth, int asserting_level) {
+    bool primary_type = quantifier_blocks_type[rightmost_depth];
+    for (int d = 0; d <= rightmost_depth; d++) {
+        if (quantifier_blocks_type[d] != primary_type)
+            continue;
+        for (int i = 0; i < variables_at[d].size(); i++) {
+            Var v = (mode == 2) ? var(toLit(variables_at[d][i])) : variables_at[d][i];
+            if (level(v) == asserting_level) {
+                return v;
+            }
+        }
+    }
+    return var_Undef;
+}
+
+inline Var Solver::getAssertingVar(int rightmost_depth, int asserting_level) {
     for (int d = 0; d <= rightmost_depth; d++) {
         for (int i = 0; i < variables_at[d].size(); i++) {
             Var v = variables_at[d][i];

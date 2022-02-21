@@ -78,6 +78,7 @@ int main(int argc, char** argv)
         IntOption    mem_lim("MAIN", "mem-lim","Limit on memory usage in megabytes.\n", 0, IntRange(0, INT32_MAX));
         BoolOption   strictp("MAIN", "strict", "Validate DIMACS header during parsing.", false);
         BoolOption   dl     ("MAIN", "dl",     "Turn on/off dependency learning.", false);
+        IntOption    mode   ("MAIN", "mode",   "Propagation mode (0=Q, 1=QU, 2=LDQ).", 0, IntRange(0, 2));
 
         parseOptions(argc, argv, true);
         
@@ -86,11 +87,16 @@ int main(int argc, char** argv)
 
         S.use_dependency_learning = dl;
         S.verbosity = verb;
+        S.mode = mode;
         
         solver = &S;
         // Use signal handlers that forcibly quit until the solver will be able to respond to
         // interrupts:
         sigTerm(SIGINT_exit);
+        if (dl && mode == 2) {
+            printf("Dependency learning not available in LDQ mode.\n");
+            exit(1);
+        }
 
         // Try to set resource limits:
         if (cpu_lim != 0) limitTime(cpu_lim);
