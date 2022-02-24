@@ -65,22 +65,23 @@ bool hasEnding (std::string const &fullString, std::string const &ending) {
 int main(int argc, char** argv)
 {
     try {
-        setUsageHelp("USAGE: %s [options] <input-file> <result-output-file>\n\n  where input may be either in plain or gzipped DIMACS.\n");
+        setUsageHelp("USAGE: %s [options] <input-file> <result-output-file>\n\n  where input may be either in QDIMACS or QCIR.\n");
         setX86FPUPrecision();
         
         // Extra options:
         //
         IntOption    verb   ("MAIN", "verb",   "Verbosity level (0=silent, 1=some, 2=more).", 1, IntRange(0, 2));
-        BoolOption   pre    ("MAIN", "pre",    "Completely turn on/off any preprocessing.", false);
-        BoolOption   solve  ("MAIN", "solve",  "Completely turn on/off solving after preprocessing.", true);
-        StringOption dimacs ("MAIN", "dimacs", "If given, stop after preprocessing and write the result to this file.");
+        //BoolOption   pre    ("MAIN", "pre",    "Completely turn on/off any preprocessing.", false);
+        //BoolOption   solve  ("MAIN", "solve",  "Completely turn on/off solving after preprocessing.", true);
+        //StringOption dimacs ("MAIN", "dimacs", "If given, stop after preprocessing and write the result to this file.");
         IntOption    cpu_lim("MAIN", "cpu-lim","Limit on CPU time allowed in seconds.\n", 0, IntRange(0, INT32_MAX));
         IntOption    mem_lim("MAIN", "mem-lim","Limit on memory usage in megabytes.\n", 0, IntRange(0, INT32_MAX));
-        BoolOption   strictp("MAIN", "strict", "Validate DIMACS header during parsing.", false);
+        //BoolOption   strictp("MAIN", "strict", "Validate DIMACS header during parsing.", false);
         BoolOption   dl     ("MAIN", "dl",     "Turn on/off dependency learning.", false);
         IntOption    mode   ("MAIN", "mode",   "Propagation mode (0=Q, 1=QU, 2=LDQ).", 0, IntRange(0, 2));
 
         parseOptions(argc, argv, true);
+
         
         Solver  S;
         double      initial_time = cpuTime();
@@ -114,7 +115,7 @@ int main(int argc, char** argv)
             if (in == NULL)
                 printf("ERROR! Could not open file: %s\n", argc == 1 ? "<stdin>" : argv[1]), exit(1);
             
-            parse_DIMACS(in, S, (bool)strictp);
+            parse_DIMACS(in, S, (bool) false);
             gzclose(in);
         }
 
@@ -144,14 +145,8 @@ int main(int argc, char** argv)
 
         lbool ret = l_Undef;
 
-        if (solve){
-            vec<Lit> dummy;
-            ret = S.solveLimited(dummy);
-        }else if (S.verbosity > 0)
-            printf("==================================================================================\n");
-
-        if (dimacs && ret == l_Undef)
-            S.toDimacs((const char*)dimacs);
+        vec<Lit> dummy;
+        ret = S.solveLimited(dummy);
 
         if (S.verbosity > 0){
             S.printStats();
