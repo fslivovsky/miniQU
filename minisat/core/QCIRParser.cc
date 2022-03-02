@@ -117,7 +117,11 @@ void QCIRParser::initSolver(Minisat::Solver& solver) {
   gate_alias_to_tseitin_existential.insert(alias_to_solver_internal.begin(), alias_to_solver_internal.end());
   gate_alias_to_tseitin_universal.insert(alias_to_solver_internal.begin(), alias_to_solver_internal.end());
 
-  for (auto& clause: getClausalEncoding(false)) {
+  Preprocessor pre(getClausalEncoding(false), getClausalEncoding(true));
+  pre.preprocess();
+  auto [clauses, terms] = pre.getClausesTerms();
+
+  for (auto& clause: clauses) {
     Minisat::vec<Minisat::Lit> minisat_clause;
     for (auto l: clause) {
       int v = abs(l);
@@ -127,7 +131,7 @@ void QCIRParser::initSolver(Minisat::Solver& solver) {
     solver.addClauseInternal(minisat_clause);
   }
 
-  for (auto& term: getClausalEncoding(true)) {
+  for (auto& term: terms) {
     Minisat::vec<Minisat::Lit> minisat_term;
     for (auto l: term) {
       int v = abs(l);

@@ -5,6 +5,7 @@
 #include <string>
 
 #include "QBFParser.h"
+#include "Preprocessor.h"
 #include "Solver.h"
 
 using std::vector;
