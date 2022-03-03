@@ -24,6 +24,7 @@ class QCIRParser: virtual public QBFParser {
     void getVarAliases(Minisat::Solver& solver);
     std::vector<std::vector<int>> getClausalEncoding(bool get_terms);
     std::vector<std::vector<int>> getClausalEncoding(int gate_alias, bool get_terms);
+    void mapFormula(std::vector<std::vector<int>>& formula, const std::unordered_map<int, Minisat::Var>& var_map, bool ctype);
 
     std::vector<GatePolarity> polarities;
 

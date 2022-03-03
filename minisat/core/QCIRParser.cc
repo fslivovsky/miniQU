@@ -117,16 +117,29 @@ void QCIRParser::initSolver(Minisat::Solver& solver) {
   gate_alias_to_tseitin_existential.insert(alias_to_solver_internal.begin(), alias_to_solver_internal.end());
   gate_alias_to_tseitin_universal.insert(alias_to_solver_internal.begin(), alias_to_solver_internal.end());
 
-  Preprocessor pre(getClausalEncoding(false), getClausalEncoding(true));
+  auto clauses_pre = getClausalEncoding(false);
+  auto terms_pre = getClausalEncoding(true);
+
+  mapFormula(clauses_pre, gate_alias_to_tseitin_existential, false);
+  mapFormula(terms_pre, gate_alias_to_tseitin_universal, true);
+
+  Preprocessor pre(clauses_pre, terms_pre);
+
   pre.preprocess();
   auto [clauses, terms] = pre.getClausesTerms();
+
+  if (clauses.empty()) {
+    terms.emplace_back();
+  } else if (terms.empty()) {
+    clauses.emplace_back();
+  }
 
   for (auto& clause: clauses) {
     Minisat::vec<Minisat::Lit> minisat_clause;
     for (auto l: clause) {
-      int v = abs(l);
+      int v = abs(l) / 2 - 1;
       bool negated = (l < 0);
-      minisat_clause.push(Minisat::mkLit(gate_alias_to_tseitin_existential[v], negated));
+      minisat_clause.push(Minisat::mkLit(v, negated));
     }
     solver.addClauseInternal(minisat_clause);
   }
@@ -134,9 +147,9 @@ void QCIRParser::initSolver(Minisat::Solver& solver) {
   for (auto& term: terms) {
     Minisat::vec<Minisat::Lit> minisat_term;
     for (auto l: term) {
-      int v = abs(l);
+      int v = abs(l) / 2 - 1;
       bool negated = (l < 0);
-      minisat_term.push(Minisat::mkLit(gate_alias_to_tseitin_universal[v], negated));
+      minisat_term.push(Minisat::mkLit(v, negated));
     }
     solver.addTerm(minisat_term);
   }
@@ -178,3 +191,14 @@ std::vector<std::vector<int>> QCIRParser::getClausalEncoding(int gate_alias, boo
   }
   return clauses;
 }
+
+ void QCIRParser::mapFormula(std::vector<std::vector<int>>& formula, const std::unordered_map<int, Minisat::Var>& var_map, bool ctype) {
+   for (auto& c: formula) {
+     for (auto& l: c) {
+       auto v = abs(l);
+       bool is_universal = (v < variable_gate_boundary && gates[v].gate_type == GateType::Universal) || (variable_gate_boundary <= v && ctype);
+       int w = (var_map.at(v) + 1) * 2 + is_universal;
+       l = (l > 0) ? w: -w;
+     }
+   }
+ }
