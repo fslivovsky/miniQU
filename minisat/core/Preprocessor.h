@@ -24,22 +24,31 @@ class Preprocessor {
   void checkAndPushUnit(int index, bool ctype);
   bool isPure(int l);
   bool enqueue(int l);
+  template<class T> bool resolventTautological(const T& c, int pivot_variable) const;
+  bool seenBlockedByLit(int pivot_literal, bool ctype) const;
+  template<class T> bool isBlocked(const T& c, bool ctype) const;
+  void removeBlocked(bool ctype);
 
   std::unordered_map<int, std::unordered_set<int>> index_to_litset[2];
   std::unordered_map<int, std::unordered_set<int>> lit_to_occurrences[2];
 
-  int qhead;
+  unsigned int qhead;
   std::vector<int> trail;
   std::vector<bool> assigned;
   int maxvar;
   bool empty_seen;
 
-  int nr_units, nr_pure;
+  int nr_units, nr_pure, nr_blocked;
+  std::vector<bool> seen;
 
 };
 
 inline bool isUniversal(int variable) {
   return variable % 2;
+}
+
+inline int lit2Index(int lit) {
+  return 2 * (abs(lit) - 1) + (lit < 0);
 }
 
 #endif

@@ -5,7 +5,7 @@
 
 #include <assert.h>
 
-Preprocessor::Preprocessor(const CDNF_formula& clauses, const CDNF_formula& terms): qhead(0), maxvar(0), empty_seen(false), nr_units(0), nr_pure(0) {
+Preprocessor::Preprocessor(const CDNF_formula& clauses, const CDNF_formula& terms): qhead(0), maxvar(0), empty_seen(false), nr_units(0), nr_pure(0), nr_blocked(0) {
   int nr_clauses = 0;
   for (const auto& clause: clauses) {
     index_to_litset[false][nr_clauses++] = std::unordered_set<int>(clause.begin(), clause.end());
@@ -20,12 +20,18 @@ Preprocessor::Preprocessor(const CDNF_formula& clauses, const CDNF_formula& term
   }
   assigned.resize(maxvar);
   std::fill(assigned.begin(), assigned.end(), false);
+  seen.resize(2*maxvar);
+  std::fill(seen.begin(), seen.end(), false);
 }
 
 void Preprocessor::preprocess() {
   createOccurrenceLists();
   propagate();
+  removeBlocked(false);
+  removeBlocked(true);
+  propagate();
   std::cerr << "Propagated " << nr_units << " unit and " << nr_pure << " pure literals." << std::endl;
+  std::cerr << "Removed " << nr_blocked << " blocked clauses and terms." << std::endl;
 }
 
 std::pair<CDNF_formula, CDNF_formula> Preprocessor::getClausesTerms() {
@@ -140,3 +146,63 @@ bool Preprocessor::enqueue(int l) {
   }
 }
 
+template<class T> bool Preprocessor::resolventTautological(const T& c, int pivot_variable) const {
+  bool resolvent_tautological = false;
+  for (const auto& l: c) {
+    if (abs(l) == pivot_variable) {
+      continue;
+    }
+    if (seen[lit2Index(-l)]) {
+      auto v = abs(l);
+      if (isUniversal(pivot_variable) == isUniversal(v) || v < pivot_variable) {
+        resolvent_tautological = true;
+        break;
+      }
+    }
+  }
+  return resolvent_tautological;
+}
+
+bool Preprocessor::seenBlockedByLit(int pivot_literal, bool ctype) const {
+  bool blocked = true;
+  if (lit_to_occurrences[ctype].find(-pivot_literal) != lit_to_occurrences[ctype].end()) {
+    for (int index: lit_to_occurrences[ctype].at(-pivot_literal)) {
+      auto&c = index_to_litset;
+      if (!resolventTautological(c, abs(pivot_literal))) {
+        blocked = false;
+        break;
+      }
+    }
+  }
+  return blocked;
+}
+
+template<class T> bool Preprocessor::isBlocked(const T& c, bool ctype) const {
+  for (const auto& l: c) {
+    seen[lit2Index(l)] = true;
+  }
+  blocked = false;
+  for (const auto& l: c) {
+    if (ctype == isUniversal(abs(l)) && seenBlockedByLit(l)) {
+      blocked = true;
+      break;
+    }
+  }
+  for (const auto& l: c) {
+    seen[lit2Index(l)] = false;
+  }
+  return blocked;
+}
+
+void Preprocessor::removeBlocked(bool ctype) {
+  std::vector<int> indices_to_remove;
+  for (const auto& [i, c]: index_to_litset[ctype]) {
+    if (isBlocked(c, ctype)) {
+      indices_to_remove.push_back(i);
+    }
+  }
+  for (int i: indices_to_remove) {
+    removeConstraint(i, ctype);
+  }
+  nr_blocked += indices_to_remove.size();
+}
