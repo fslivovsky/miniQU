@@ -127,7 +127,6 @@ void Preprocessor::checkAndPushUnit(int index, bool ctype) {
   if (c.size() == 1) {
     auto l = *c.begin();
     nr_units += enqueue(isUniversal(abs(l)) ? -l : l);
-    //std::cerr << "Found unit: " << units.back() << std::endl;
   }
 }
 
@@ -138,6 +137,7 @@ bool Preprocessor::isPure(int l) {
 bool Preprocessor::enqueue(int l) {
   bool is_assigned = assigned[abs(l) - 1];
   if (!is_assigned) {
+    //std::cerr << "Assigning: " << l << std::endl;
     trail.push_back(l);
     assigned[abs(l) - 1] = true;
     return true;
@@ -152,12 +152,9 @@ template<class T> bool Preprocessor::resolventTautological(const T& c, int pivot
     if (abs(l) == pivot_variable) {
       continue;
     }
-    if (seen[lit2Index(-l)]) {
-      auto v = abs(l);
-      if (isUniversal(pivot_variable) == isUniversal(v) || v < pivot_variable) {
-        resolvent_tautological = true;
-        break;
-      }
+    if (seen[lit2Index(-l)] && abs(l) < pivot_variable) {
+      resolvent_tautological = true;
+      break;
     }
   }
   return resolvent_tautological;
@@ -167,7 +164,7 @@ bool Preprocessor::seenBlockedByLit(int pivot_literal, bool ctype) const {
   bool blocked = true;
   if (lit_to_occurrences[ctype].find(-pivot_literal) != lit_to_occurrences[ctype].end()) {
     for (int index: lit_to_occurrences[ctype].at(-pivot_literal)) {
-      auto&c = index_to_litset;
+      auto&c = index_to_litset[ctype].at(index);
       if (!resolventTautological(c, abs(pivot_literal))) {
         blocked = false;
         break;
@@ -177,13 +174,13 @@ bool Preprocessor::seenBlockedByLit(int pivot_literal, bool ctype) const {
   return blocked;
 }
 
-template<class T> bool Preprocessor::isBlocked(const T& c, bool ctype) const {
+template<class T> bool Preprocessor::isBlocked(const T& c, bool ctype) {
   for (const auto& l: c) {
     seen[lit2Index(l)] = true;
   }
-  blocked = false;
+  bool blocked = false;
   for (const auto& l: c) {
-    if (ctype == isUniversal(abs(l)) && seenBlockedByLit(l)) {
+    if (ctype == isUniversal(abs(l)) && lit_to_occurrences[!ctype][l].empty() && seenBlockedByLit(l, ctype)) {
       blocked = true;
       break;
     }

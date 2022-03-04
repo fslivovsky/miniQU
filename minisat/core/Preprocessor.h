@@ -26,7 +26,7 @@ class Preprocessor {
   bool enqueue(int l);
   template<class T> bool resolventTautological(const T& c, int pivot_variable) const;
   bool seenBlockedByLit(int pivot_literal, bool ctype) const;
-  template<class T> bool isBlocked(const T& c, bool ctype) const;
+  template<class T> bool isBlocked(const T& c, bool ctype);
   void removeBlocked(bool ctype);
 
   std::unordered_map<int, std::unordered_set<int>> index_to_litset[2];
