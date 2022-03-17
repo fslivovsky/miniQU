@@ -80,7 +80,7 @@ void QCIRParser::readOutput(const string& line) {
 void QCIRParser::initSolver(Minisat::Solver& solver) {
   std::unordered_map<int, Minisat::Var> alias_to_solver_internal;
   for (unsigned int i = 1; i < variable_gate_boundary; i++) {
-    Gate& g = gates[i];
+    const Gate& g = gates[i];
     bool is_existential = (g.gate_type == GateType::Existential);
     auto solver_var = solver.newVar(i);
     alias_to_solver_internal[i] = solver_var;
@@ -102,7 +102,7 @@ void QCIRParser::initSolver(Minisat::Solver& solver) {
 
   // Create innermost quantifier blocks for Tseitin variables.
   for (unsigned int i = variable_gate_boundary; i < gates.size(); i++) {
-    auto& gate = gates[i];
+    const auto& gate = gates[i];
     auto tseitin_var_universal = solver.newVar(i*2+1, Minisat::l_Undef, false);
     gate_alias_to_tseitin_universal[i] = tseitin_var_universal;
     tseitin_block_universal.push(tseitin_var_universal);
@@ -146,8 +146,10 @@ std::vector<std::vector<int>> QCIRParser::getClausalEncoding(bool get_terms) {
   std::vector<std::vector<int>> clauses;
   for (unsigned int i = variable_gate_boundary; i < gates.size(); i++) {
     auto& gate = gates[i];
-    auto gate_clauses = getClausalEncoding(i, get_terms);
-    clauses.insert(clauses.end(), gate_clauses.begin(), gate_clauses.end());
+    if (gate.gate_type == GateType::And || gate.gate_type == GateType::Or) {
+      auto gate_clauses = getClausalEncoding(i, get_terms);
+      clauses.insert(clauses.end(), gate_clauses.begin(), gate_clauses.end());
+    }
   }
   // Output term.
   auto output_alias = id_to_alias[output_id];
