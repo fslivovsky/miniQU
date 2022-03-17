@@ -280,6 +280,7 @@ protected:
     Var                 max_alias;
     CMap<bool>          constraint_type;
     CMap<int>           constraint_LBD;
+    vec<Lit>            outermost_assignment;
 
     // Resource contraints:
     //
@@ -356,6 +357,7 @@ protected:
     bool    isAsserting(int rightmost_depth, Var asserting_variable, Var& second_watcher_variable);
     Var     nextPivot(int& index) const;
     void    resolveWith(vec<Lit>& lits, const Clause& c, Var pivot) const;
+    void    saveOutermostAssignment();
 
     // Debugging
 
