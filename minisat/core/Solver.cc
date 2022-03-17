@@ -2146,3 +2146,15 @@ void Solver::resolveWith(vec<Lit>& lits, const Clause& c, Var pivot) const {
     }
     resolvent.moveTo(lits);
 }
+
+void Solver::getPartialCertificate(vec<Lit>& certificate) const {
+    // Certificate is empty unless first quantifier block is existential.
+    if (variable_type[quantifier_blocks[0].last()]) {
+        for (int i = 0; i < quantifier_blocks[0].size(); i++) {
+            Var internal_var = quantifier_blocks[0][i];
+            Var original_var = variable_names[internal_var];
+            bool last_sign = assigns[internal_var] == l_False || !polarity[original_var];
+            certificate.push(mkLit(original_var, last_sign));
+        }
+    }
+}

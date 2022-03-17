@@ -138,6 +138,10 @@ void QCIRParser::initSolver(Minisat::Solver& solver) {
   }
 }
 
+string QCIRParser::getOriginalName(int alias) const {
+  return gates.at(alias).gate_id;
+}
+
 std::vector<std::vector<int>> QCIRParser::getClausalEncoding(bool get_terms) {
   std::vector<std::vector<int>> clauses;
   for (unsigned int i = variable_gate_boundary; i < gates.size(); i++) {

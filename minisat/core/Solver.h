@@ -137,6 +137,9 @@ public:
     void    checkGarbage(double gf);
     void    checkGarbage();
 
+    // Partial certificate for QBF.
+    void getPartialCertificate(vec<Lit>& certificate) const;
+
     // Extra results: (read-only member variable)
     //
     vec<lbool> model;             // If problem is satisfiable, this vector contains the model (if any).

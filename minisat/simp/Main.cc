@@ -21,6 +21,7 @@ OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWA
 #include <errno.h>
 #include <zlib.h>
 #include <string>
+#include <memory>
 
 #include "minisat/utils/System.h"
 #include "minisat/utils/ParseUtils.h"
@@ -79,6 +80,7 @@ int main(int argc, char** argv)
         //BoolOption   strictp("MAIN", "strict", "Validate DIMACS header during parsing.", false);
         BoolOption   dl     ("MAIN", "dl",     "Turn on/off dependency learning.", false);
         IntOption    mode   ("MAIN", "mode",   "Propagation mode (0=Q, 1=QU, 2=LDQ).", 0, IntRange(0, 2));
+        BoolOption   cert   ("MAIN", "cert",   "Output partial certificate (assignment of first block).", false);
 
         parseOptions(argc, argv, true);
 
@@ -103,10 +105,12 @@ int main(int argc, char** argv)
         if (cpu_lim != 0) limitTime(cpu_lim);
         if (mem_lim != 0) limitMemory(mem_lim);
 
+        std::unique_ptr<QCIRParser> qcir_parser;
+
         if (argc == 2 && hasEnding(std::string(argv[1]), "qcir")) {
             std::string filename_string(argv[1]);
-            QCIRParser qcir_parser(filename_string);
-            qcir_parser.initSolver(S);
+            qcir_parser = std::make_unique<QCIRParser>(filename_string);
+            qcir_parser->initSolver(S);
         } else {
             if (argc == 1)
                 printf("Reading QDIMACS from standard input... Use '--help' for help.\n");
@@ -152,18 +156,21 @@ int main(int argc, char** argv)
             S.printStats();
             printf("\n"); }
         printf(ret == l_True ? "SATISFIABLE\n" : ret == l_False ? "UNSATISFIABLE\n" : "INDETERMINATE\n");
-        if (res != NULL){
-            if (ret == l_True){
-                fprintf(res, "SAT\n");
-                for (int i = 0; i < S.nVars(); i++)
-                    if (S.model[i] != l_Undef)
-                        fprintf(res, "%s%s%d", (i==0)?"":" ", (S.model[i]==l_True)?"":"-", i+1);
-                fprintf(res, " 0\n");
-            }else if (ret == l_False)
-                fprintf(res, "UNSAT\n");
-            else
-                fprintf(res, "INDET\n");
-            fclose(res);
+        if (cert && ret == l_True) {
+            vec<Lit> partial_certificate;
+            S.getPartialCertificate(partial_certificate);
+            std::cout << "V";
+            for (int i = 0; i < partial_certificate.size(); i++) {
+                auto l = partial_certificate[i];
+                std::cout << " ";
+                if (qcir_parser) {
+                    std::string name = qcir_parser->getOriginalName(var(l));
+                    std::cout << (sign(l) ? "-": "") << name;
+                } else {
+                    std::cout << (sign(l) ? "-": "") << var(l);
+                }
+            }
+            std::cout << " 0" << std::endl;
         }
 
 #ifdef NDEBUG
