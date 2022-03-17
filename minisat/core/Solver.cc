@@ -1544,6 +1544,7 @@ lbool Solver::solve_()
     }else if (status == l_False && conflict.size() == 0)
         ok = false;
 
+    saveOutermostAssignment();
     cancelUntil(0);
     return status;
 }
@@ -2145,4 +2146,17 @@ void Solver::resolveWith(vec<Lit>& lits, const Clause& c, Var pivot) const {
         }
     }
     resolvent.moveTo(lits);
+}
+
+void Solver::getPartialCertificate(vec<Lit>& certificate) const {
+    outermost_assignment.copyTo(certificate);
+}
+
+void Solver::saveOutermostAssignment() {
+    for (int i = 0; i < quantifier_blocks[0].size(); i++) {
+        Var internal_var = quantifier_blocks[0][i];
+        Var original_var = variable_names[internal_var];
+        bool last_sign = assigns[internal_var] == l_False;
+        outermost_assignment.push(mkLit(original_var, last_sign));
+    }
 }

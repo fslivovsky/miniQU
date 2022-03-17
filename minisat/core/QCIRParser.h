@@ -15,6 +15,7 @@ class QCIRParser: virtual public QBFParser {
   public:
     QCIRParser(const string& filename);
     void initSolver(Minisat::Solver& solver);
+    string getOriginalName(int alias) const;
 
   protected:
     QCIRParser();
