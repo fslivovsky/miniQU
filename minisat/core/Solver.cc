@@ -22,6 +22,7 @@ OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWA
 
 #include <algorithm>
 
+
 #include "minisat/mtl/Alg.h"
 #include "minisat/mtl/Sort.h"
 #include "minisat/utils/System.h"
@@ -57,7 +58,8 @@ Solver::Solver() :
 
     // Parameters (user settable):
     //
-    verbosity        (0)
+    trace            (true)
+  , verbosity        (0)
   , var_decay        (opt_var_decay)
   , clause_decay     (opt_clause_decay)
   , random_var_freq  (opt_random_var_freq)
@@ -100,6 +102,7 @@ Solver::Solver() :
   , next_var           (0)
   , dqhead             (0)
   , max_alias          (-1)
+  , constraint_counter (1)
 
     // Resource constraints:
     //
@@ -200,12 +203,11 @@ bool Solver::addClause_(vec<Lit>& ps)
     ps.copyTo(ps_copy);
     sort(ps_copy);
 
-    // Remove tautologies
+    // Do not add tautological clauses.
     Lit p; int i, j;
-    for (i = j = 0, p = lit_Undef; i < ps_copy.size(); i++) 
-        if (ps_copy[i] != ~p)
-            ps_copy[j++] = p = ps_copy[i];
-    ps_copy.shrink(i - j);
+    for (i = 0; i < ps_copy.size(); i++) 
+        if (i > 0 && ps_copy[i] == ~ps_copy[i-1])
+            return true;
 
     return addClauseInternal(ps_copy);
 }
@@ -213,47 +215,65 @@ bool Solver::addClause_(vec<Lit>& ps)
 bool Solver::addClauseInternal(const vec<Lit>& ps) {
     vec<Lit> ps_copy;
     ps.copyTo(ps_copy);
-    // Check if clause is satisfied and remove false/duplicate literals:
+    // Check if clause is satisfied and remove duplicate literals:
     sort(ps_copy);
     Lit p; int i, j;
+
+    for (i = j = 0, p = lit_Undef; i < ps_copy.size(); i++)
+        if (value(ps_copy[i]) == l_True)
+            return true;
+        else if (ps_copy[i] != p)
+            ps_copy[j++] = p = ps_copy[i];
+    ps_copy.shrink(i - j);
+    int original_size = ps_copy.size();
 
     #ifndef NDEBUG
     printf("Adding clause: ");
     printClause(ps_copy);
     #endif
 
-    for (i = j = 0, p = lit_Undef; i < ps_copy.size(); i++)
-        if (value(ps_copy[i]) == l_True)
-            return true;
-        else if (value(ps_copy[i]) != l_False && ps_copy[i] != p)
-            ps_copy[j++] = p = ps_copy[i];
+    vec<unsigned int> premise_ids;
+
+    if (trace) {
+        traceConstraint(ps_copy, premise_ids, ConstraintTypes::Clauses);
+    }
+
+    // Remove falsified literals.
+    for (i = j = 0, p = lit_Undef; i < ps_copy.size(); i++) {
+        if (value(ps_copy[i]) != l_False) {
+            ps_copy[j++] = ps_copy[i];
+        } else if (trace) {
+            // Literal falsified. Need to add reason to premise_ids for tracing.
+            auto v_reason = reason(var(ps_copy[i]));
+            assert(v_reason != CRef_Undef);
+            premise_ids.push(constraint_id[v_reason]);
+        }
+    }
     ps_copy.shrink(i - j);
 
     reduce(ps_copy, true);
 
+    if (trace && ps_copy.size() < original_size) {
+        constraint_counter++;
+        traceConstraint(ps_copy, premise_ids, ConstraintTypes::Clauses);
+    }
+
     if (ps_copy.size() == 0) {
         input_status = l_False;
-        return ok = false;
+        return false;
     }
     else {
         CRef cr = ca.alloc(ps_copy, false);
         clauses.push(cr);
         constraint_type.insert(cr, Clauses);
-        //constraint_type[cr] = Clauses;
+        if (trace)
+            constraint_id.insert(cr, constraint_counter++);
         if (ps_copy.size() == 1){
-            p = ps_copy[0];
-            if (variable_type[var(p)]) {
-                uncheckedEnqueue(ps_copy[0], cr, ConstraintTypes::Clauses);
-                return ok = true;
-            } else {
-                input_status = l_False;
-                return ok = false;
-            }
+            uncheckedEnqueue(ps_copy[0], cr, ConstraintTypes::Clauses);
         } else { // ps_copy.size > 1
             attachClause(cr);
         }
     }
-
     return true;
 }
 
@@ -410,6 +430,10 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool& l
     learn_dependency = false;
     bool primary_type = (ct == ConstraintTypes::Clauses);
     bool other_type = !primary_type;
+    vec<unsigned int> premise_ids;
+
+    if (trace)
+        premise_ids.push(constraint_id[confl]);
 
     #ifndef NDEBUG
     printf("Conflict %s: ", primary_type ? "clause" : "term");
@@ -521,6 +545,10 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool& l
             return;
         }
         assert(constraint_type[confl] == ct);
+
+        if (trace)
+            premise_ids.push(constraint_id[confl]);
+
 #ifndef NDEBUG
         printf("Reason %s: ", primary_type ? "clause" : "term");
         printClause(confl);
@@ -696,9 +724,8 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool& l
         out_btlevel       = level(var(p));
     }
 
-    // for (int i = 0; i < out_learnt.size(); i++) {
-    //     varBumpActivity(var(out_learnt[i]), var_inc * ((double)learnts_literals[ct]/nLearnts(ct) - out_learnt.size()));
-    // }
+    if (trace)
+        traceConstraint(out_learnt, premise_ids, ct);
 }
 
 void Solver::analyzeLDQ(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool& learn_dependency, bool& ct) {
@@ -1366,6 +1393,7 @@ lbool Solver::search(int nof_conflicts)
                 learnts.push(cr);
                 constraint_type.insert(cr, ct);
                 constraint_LBD.insert(cr, lbd);
+                constraint_id.insert(cr, constraint_counter++);
                 if (learnt_clause.size() > 1) {
                     attachClause(cr);
                     claBumpActivity(ca[cr]);
@@ -1497,7 +1525,6 @@ lbool Solver::solve_()
 {
     model.clear();
     conflict.clear();
-    if (!ok) return l_False;
 
     solves++;
 
@@ -1518,7 +1545,6 @@ lbool Solver::solve_()
 
     allocInitialTerm();
     initOrderHeaps();
-    //addInitialTerms();
 
     status = input_status;
 
@@ -1536,16 +1562,11 @@ lbool Solver::solve_()
     if (verbosity >= 1)
         printf("==================================================================================\n");
 
-
-    if (status == l_True){
-        // Extend & copy model:
-        model.growTo(nVars());
-        for (int i = 0; i < nVars(); i++) model[i] = value(i);
-    }else if (status == l_False && conflict.size() == 0)
-        ok = false;
-
     saveOutermostAssignment();
     cancelUntil(0);
+
+    if (trace)
+        printQuantifierPrefix();
     return status;
 }
 
@@ -1705,6 +1726,7 @@ void Solver::relocAll(ClauseAllocator& to)
     // New constraint type map.
     CMap<bool> constraint_type_;
     CMap<int>  constraint_LBD_;
+    CMap<unsigned int> constraint_id_;
     //std::unordered_map<unsigned int, bool> constraint_type_;
 
     // All learnt:
@@ -1714,10 +1736,12 @@ void Solver::relocAll(ClauseAllocator& to)
         if (!isRemoved(learnts[i])){
             auto ct = constraint_type[learnts[i]];
             auto lbd = constraint_LBD[learnts[i]];
+            auto id = trace ? constraint_id[learnts[i]] : 0;
             ca.reloc(learnts[i], to);
             constraint_type_.insert(learnts[i], ct);
             constraint_LBD_.insert(learnts[i], lbd);
-            //constraint_type_[learnts[i]] = ct;
+            if (trace)
+                constraint_id_.insert(learnts[i], id);
             learnts[j++] = learnts[i];
         }
     learnts.shrink(i - j);
@@ -1726,9 +1750,11 @@ void Solver::relocAll(ClauseAllocator& to)
     //
     for (i = j = 0; i < clauses.size(); i++)
         if (!isRemoved(clauses[i])){
+            auto id = trace ? constraint_id[clauses[i]] : 0;
             ca.reloc(clauses[i], to);
             constraint_type_.insert(clauses[i], Clauses);
-            //constraint_type_[clauses[i]] = Clauses;
+            if (trace)
+                constraint_id_.insert(clauses[i], id);
             clauses[j++] = clauses[i];
         }
     clauses.shrink(i - j);
@@ -1738,22 +1764,24 @@ void Solver::relocAll(ClauseAllocator& to)
     initial_term.setSize(nVars());
     ca.reloc(initial_term_ref, to);
     constraint_type_.insert(initial_term_ref, ConstraintTypes::Terms);
-    //constraint_type_[initial_term_ref] = ConstraintTypes::Terms;
+    constraint_id_.insert(initial_term_ref, 0); // Will be overwritten.
 
     // All terms:
     //
     for (i = j = 0; i < terms.size(); i++)
         if (!isRemoved(terms[i])){
             ca.reloc(terms[i], to);
-            //constraint_type_[terms[i]] = Terms;
+            auto id = trace? constraint_id[terms[i]] : 0;
             constraint_type_.insert(terms[i], Terms);
+            if (trace)
+                constraint_id_.insert(clauses[i], id);
             terms[j++] = terms[i];
         }
     terms.shrink(i - j);
 
     constraint_type_.moveTo(constraint_type);
     constraint_LBD_.moveTo(constraint_LBD);
-    //constraint_type_.swap(constraint_type);
+    constraint_id_.moveTo(constraint_id);
 }
 
 
@@ -1829,11 +1857,15 @@ void Solver::getInitialTerm() {
             max_universal = v;
         }
     }
+    initial_term.setSize(initial_term_size);
+
     #ifndef NDEBUG
     printf("Unreduced initial term: ");
-    initial_term.setSize(initial_term_size);
     printClause(initial_term_ref);
     #endif
+
+    traceInputConstraint(initial_term_ref, ConstraintTypes::Terms);
+
     int i, j;
     for (i = j = 0; i < initial_term_size; i++) {
         Var v = var(initial_term[i]);
@@ -1844,6 +1876,13 @@ void Solver::getInitialTerm() {
         }
     }
     initial_term.setSize(j);
+    if (trace) {
+        if (j < i) {
+            constraint_counter++;
+            traceInputConstraint(initial_term_ref, ConstraintTypes::Terms);
+        }
+        constraint_id[initial_term_ref] = constraint_counter++;
+    }
 }
 
 void Solver::printClause(CRef cr) const {
@@ -1934,33 +1973,58 @@ void Solver::allocInitialTerm() {
     vec<Lit> all_variables(nVars());
     initial_term_ref = ca.alloc(all_variables, false);
     constraint_type.insert(initial_term_ref, Terms);
-    //constraint_type[initial_term_ref] = Terms;
+    constraint_id.insert(initial_term_ref, 0);
 }
 
 lbool Solver::addTerm(const vec<Lit>& term) {
+    vec<unsigned int> premise_ids;
+
+    if (trace)
+        traceConstraint(term, premise_ids, ConstraintTypes::Terms);
     vec<Lit> term_copy;
     term.copyTo(term_copy);
+
+    int i, j;
+    for (i = j = 0; i < term_copy.size(); i++) {
+        Lit l = term_copy[i];
+        if (value(l) == l_False) {
+            return l_Undef;
+        } else if (value(l) != l_True) {
+            term_copy[j++] = l;
+        } else if (trace) {
+            // l is true.
+            assert(reason(var(l)) != CRef_Undef);
+            premise_ids.push(constraint_id[reason(var(l))]);
+        }
+    }
+    term_copy.shrink(i - j);
+
     reduce(term_copy, false);
 
-    CRef cr = ca.alloc(term_copy, false);
-#ifndef NDEBUG
+    #ifndef NDEBUG
     printf("Adding term: ");
     printClause(term_copy);
-#endif
+    #endif
+
+    CRef cr = ca.alloc(term_copy, false);
     terms.push(cr);
-    //constraint_type[cr] = Terms;
     constraint_type.insert(cr, Terms);
+
+    if (trace && term_copy.size() < term.size()) {
+        constraint_counter++;
+        traceConstraint(term_copy, premise_ids, ConstraintTypes::Terms);
+    }
+
+    if (trace) {
+        constraint_id.insert(cr, constraint_counter++);
+    }
+
     if (term_copy.size() == 0) {
         return input_status = l_True;
     }
-    if (term_copy.size() == 1){
+    if (term_copy.size() == 1) {
         Lit p = term_copy[0];
-        if (variable_type[var(p)] || value(p) == l_True) {
-            return input_status = l_True;
-        } else {
-            uncheckedEnqueue(~p, cr, ConstraintTypes::Terms);
-            return l_Undef;
-        }
+        uncheckedEnqueue(~p, cr, ConstraintTypes::Terms);
     } else {
         attachClause(cr);
     }
@@ -2158,5 +2222,36 @@ void Solver::saveOutermostAssignment() {
         Var original_var = variable_names[internal_var];
         bool last_sign = assigns[internal_var] == l_False;
         outermost_assignment.push(mkLit(original_var, last_sign));
+    }
+}
+
+void Solver::traceConstraint(const vec<Lit>& lits, vec<unsigned int>& premise_ids, bool ct) const {
+    fprintf(stderr, "%u %d ", constraint_counter, ct);
+    for (int i = 0; i < lits.size(); i++) {
+        fprintf(stderr, "%s%d ", sign(lits[i]) ? "-" : "", variable_names[var(lits[i])]);
+    }
+    fprintf(stderr, "0 ");
+    for (int i = 0; i < premise_ids.size(); i++) {
+        fprintf(stderr, "%u ", premise_ids[i]);
+    }
+    fprintf(stderr, "0\n");
+}
+
+void Solver::traceInputConstraint(CRef cr, bool ct) const {
+    fprintf(stderr, "%u %d ", constraint_counter, ct);
+    auto& c = ca[cr];
+    for (int i = 0; i < c.size(); i++) {
+        fprintf(stderr, "%s%d ", sign(c[i]) ? "-" : "", variable_names[var(c[i])]);
+    }
+    fprintf(stderr, "0 0\n");
+}
+
+void Solver::printQuantifierPrefix() const {
+    for (int i = 0; i < quantifier_blocks.size(); i++) {
+        fprintf(stderr, "%c ", quantifier_blocks_type[i] ? 'e' : 'a');
+        for (int j = 0; j < quantifier_blocks[i].size(); j++) {
+            fprintf(stderr, "%d ", variable_names[quantifier_blocks[i][j]]);
+        }
+        fprintf(stderr, "0\n");
     }
 }

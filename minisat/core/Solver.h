@@ -109,6 +109,7 @@ public:
     void    traceReduction(vec<Lit>& lits, bool primary_type);
     int     computeLBD(vec<Lit>& lits);
     void    reduce(vec<Lit>& lits, bool primary_type);
+    void    printQuantifierPrefix() const;
 
     // Read state:
     //
@@ -149,6 +150,7 @@ public:
     // Mode of operation:
     //
     bool      use_dependency_learning;
+    bool      trace;
     int       mode;
     int       verbosity;
     double    var_decay;
@@ -280,7 +282,9 @@ protected:
     Var                 max_alias;
     CMap<bool>          constraint_type;
     CMap<int>           constraint_LBD;
+    CMap<unsigned int>  constraint_id;
     vec<Lit>            outermost_assignment;
+    unsigned int        constraint_counter;
 
     // Resource contraints:
     //
@@ -358,6 +362,8 @@ protected:
     Var     nextPivot(int& index) const;
     void    resolveWith(vec<Lit>& lits, const Clause& c, Var pivot) const;
     void    saveOutermostAssignment();
+    void    traceConstraint(const vec<Lit>& lits, vec<unsigned int>& premise_ids, bool ct) const;
+    void    traceInputConstraint(CRef cr, bool ct) const;
 
     // Debugging
 
