@@ -1771,11 +1771,11 @@ void Solver::relocAll(ClauseAllocator& to)
     //
     for (i = j = 0; i < terms.size(); i++)
         if (!isRemoved(terms[i])){
-            ca.reloc(terms[i], to);
             auto id = trace? constraint_id[terms[i]] : 0;
+            ca.reloc(terms[i], to);
             constraint_type_.insert(terms[i], Terms);
             if (trace)
-                constraint_id_.insert(clauses[i], id);
+                constraint_id_.insert(terms[i], id);
             terms[j++] = terms[i];
         }
     terms.shrink(i - j);
