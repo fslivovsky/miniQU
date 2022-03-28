@@ -467,6 +467,7 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool& l
                 decision_level_counts[level(v)]++;
                 seen_at[v] = variables_at[variable_depth[v]].size();
                 variables_at[variable_depth[v]].push(v);
+                varBumpActivity(v);
             }
         }
     }
