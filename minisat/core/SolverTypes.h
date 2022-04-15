@@ -143,8 +143,10 @@ class Clause {
         unsigned learnt    : 1;
         unsigned has_extra : 1;
         unsigned reloced   : 1;
-        unsigned size      : 27; }                        header;
-    union { Lit lit; float act; uint32_t abs; CRef rel; } data[0];
+        unsigned keep      : 1;
+        unsigned used      : 2;
+        unsigned size      : 24; }                        header;
+    union { Lit lit; uint32_t glue; uint32_t abs; CRef rel; } data[0];
 
     friend class ClauseAllocator;
 
@@ -154,6 +156,8 @@ class Clause {
         header.learnt    = learnt;
         header.has_extra = use_extra;
         header.reloced   = 0;
+        header.keep      = 0;
+        header.used      = 0;
         header.size      = ps.size();
 
         for (int i = 0; i < ps.size(); i++) 
@@ -161,7 +165,7 @@ class Clause {
 
         if (header.has_extra){
             if (header.learnt)
-                data[header.size].act = 0;
+                data[header.size].glue = ps.size() + 1;
             else
                 calcAbstraction();
     }
@@ -177,7 +181,7 @@ class Clause {
 
         if (header.has_extra){
             if (header.learnt)
-                data[header.size].act = from.data[header.size].act;
+                data[header.size].glue = from.data[header.size].glue;
             else 
                 data[header.size].abs = from.data[header.size].abs;
     }
@@ -202,6 +206,10 @@ public:
     const Lit&   last        ()      const   { return data[header.size-1].lit; }
 
     bool         reloced     ()      const   { return header.reloced; }
+    bool         keep        ()      const   { return header.keep; }
+    void         markKeep    ()              { header.keep = 1; }
+    int          used        ()      const   { return header.used; }
+    void         setUsed     (int i)         { header.used = i; }
     CRef         relocation  ()      const   { return data[0].rel; }
     void         relocate    (CRef c)        { header.reloced = 1; data[0].rel = c; }
 
@@ -211,7 +219,7 @@ public:
     Lit          operator [] (int i) const   { return data[i].lit; }
     operator const Lit* (void) const         { return (Lit*)data; }
 
-    float&       activity    ()              { assert(header.has_extra); return data[header.size].act; }
+    uint32_t&    glue        ()              { assert(header.has_extra); return data[header.size].glue; }
     uint32_t     abstraction () const        { assert(header.has_extra); return data[header.size].abs; }
 
     Lit          subsumes    (const Clause& other) const;

@@ -84,7 +84,9 @@ Solver::Solver() :
     // Statistics: (formerly in 'SolverStats')
     //
   , solves(0), starts(0), decisions(0), rnd_decisions(0), propagations(0), conflicts(0), nr_dependencies(0)
-  , dec_vars(0), num_clauses(0), num_learnts{0, 0}, clauses_literals(0), learnts_literals{0, 0}, max_literals(0), tot_literals(0)
+  , dec_vars(0), num_clauses(0), clauses_literals(0), max_literals(0), tot_literals(0)
+  , num_learnts{0, 0}, learnts_sizes{0, 0}
+  , glues_recomputed(0)
 
 //  , watches {OccLists<Lit, vec<Watcher>, WatcherDeleted, MkIndexLit>(WatcherDeleted(ca)), OccLists<Lit, vec<Watcher>, WatcherDeleted, MkIndexLit>(WatcherDeleted(ca))}
   //, order_heap         (VarOrderLt(activity))
@@ -264,7 +266,7 @@ void Solver::attachClause(CRef cr) {
     assert(c.size() > 1);
     (*watches[ct])[ct == Terms ? c[0] : ~c[0]].push(Watcher(cr, c[1]));
     (*watches[ct])[ct == Terms ? c[1] : ~c[1]].push(Watcher(cr, c[0]));
-    if (c.learnt()) num_learnts[ct]++, learnts_literals[ct] += constraint_LBD[cr];
+    if (c.learnt()) num_learnts[ct]++, learnts_sizes[ct] += c.size();
     else            num_clauses++, clauses_literals += c.size();
 }
 
@@ -283,7 +285,7 @@ void Solver::detachClause(CRef cr, bool strict){
         watches[ct]->smudge(ct == Terms ? c[1] : ~c[1]);
     }
 
-    if (c.learnt()) num_learnts[ct]--, learnts_literals[ct] -= constraint_LBD[cr];
+    if (c.learnt()) num_learnts[ct]--, learnts_sizes[ct] -= c.size();
     else            num_clauses--, clauses_literals -= c.size();
 }
 
@@ -537,7 +539,7 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool& l
         assert(var(c[0]) == pivot);
 
         if (c.learnt())
-            claBumpActivity(c);
+            bumpClause(c);
 
         if (mode == 0 && pivot == asserting_variable) {
             asserting_variable = var_Undef;
@@ -757,7 +759,7 @@ void Solver::analyzeLDQ(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool
         assert(reason(pivot) != CRef_Undef);
         Clause& c = ca[reason(pivot)];
         if (c.learnt())
-            claBumpActivity(c);
+            bumpClause(c);
         #ifndef NDEBUG
         printf("Reason: ");
         printClause(reason(pivot));
@@ -1179,28 +1181,51 @@ CRef Solver::propagateLDQ(bool& ct)
 |________________________________________________________________________________________________@*/
 struct reduceDB_lt { 
     ClauseAllocator& ca;
-    CMap<int>& LBDs;
-    reduceDB_lt(ClauseAllocator& ca_, CMap<int>& LBDs_) : ca(ca_), LBDs(LBDs_) {}
+    reduceDB_lt(ClauseAllocator& ca_) : ca(ca_) {}
     bool operator () (CRef x, CRef y) { 
-        return LBDs[x] > LBDs[y] || (LBDs[x] == LBDs[y] && (ca[x].activity() < ca[y].activity())); }
+        return ca[x].glue() > ca[y].glue() || (ca[x].glue() == ca[y].glue() && ca[x].size() > ca[y].size()); }
 };
 void Solver::reduceDB()
 {
-    int     i, j;
-    sort(learnts, reduceDB_lt(ca, constraint_LBD));
-    int learnt_counts[2] = {0, 0};
-    for (int i = 0; i < learnts.size(); i++)
-        learnt_counts[constraint_type[learnts[i]]]++;
-    // Don't delete binary or locked constraints. From the rest, delete constraints from the first half:
-    int learnts_removed[2] = {0, 0};
-    for (i = j = 0; i < learnts.size(); i++) {
-        Clause& c = ca[learnts[i]];
-        auto c_type = constraint_type[learnts[i]];
-        if (constraint_LBD[learnts[i]] > 2 && !locked(c) && (learnts_removed[c_type] < (learnt_counts[c_type] / 2))) {
-            removeClause(learnts[i]);
+    // Collect clauses not used recently.
+    vec<CRef> crefs_not_used_recently;
+    for (int i = 0; i < learnts.size(); i++) {
+        CRef cr = learnts[i];
+        Clause& c = ca[cr];
+        if (locked(c) || c.keep()) continue;
+        unsigned used = c.used();
+        if (used) {
+            c.setUsed(--used);
+            continue;
+        } else {
+            crefs_not_used_recently.push(cr);
+        }
+    }
+
+    sort(crefs_not_used_recently, reduceDB_lt(ca));
+    size_t learnt_counts[2] = {0, 0};
+    for (int i = 0; i < crefs_not_used_recently.size(); i++)
+        learnt_counts[constraint_type[crefs_not_used_recently[i]]]++;
+
+    // Remove a certain fraction (75% by default) of clauses and terms from
+    size_t target[2] = {(size_t)(0.75 * learnt_counts[ConstraintTypes::Clauses]),
+                        (size_t)(0.75 * learnt_counts[ConstraintTypes::Terms])};
+    size_t learnts_removed[2] = {0, 0};
+    for (int i = 0; i < crefs_not_used_recently.size(); i++) {
+        auto c_type = constraint_type[crefs_not_used_recently[i]];
+        if (learnts_removed[c_type] < target[c_type]) {
+            removeClause(crefs_not_used_recently[i]);
             learnts_removed[c_type]++;
-        } else
+        }
+    }
+    //printf("Removed %lu unused clauses and %lu unused terms.\n", target[ConstraintTypes::Clauses], target[ConstraintTypes::Terms]);
+    int i, j;
+    for (i = j = 0; i < learnts.size(); i++) {
+        CRef cr = learnts[i];
+        Clause& c = ca[cr];
+        if (!c.mark()) {
             learnts[j++] = learnts[i];
+        }
     }
     learnts.shrink(i - j);
     checkGarbage();
@@ -1289,7 +1314,7 @@ bool Solver::simplify()
     rebuildOrderHeap();
 
     simpDB_assigns = nAssigns();
-    simpDB_props   = clauses_literals + learnts_literals[ConstraintTypes::Clauses];   // (shouldn't depend on stats really, but it will do for now)
+    simpDB_props   = clauses_literals + learnts_sizes[ConstraintTypes::Clauses];   // (shouldn't depend on stats really, but it will do for now)
 
     return true;
 }
@@ -1360,15 +1385,13 @@ lbool Solver::search(int nof_conflicts)
                     watched.shrink(1);
                 }
             } else {
-                int lbd = computeLBD(learnt_clause);
-                cancelUntil(backtrack_level);
                 CRef cr = ca.alloc(learnt_clause, true);
                 learnts.push(cr);
                 constraint_type.insert(cr, ct);
-                constraint_LBD.insert(cr, lbd);
+                bumpClause(ca[cr]);
+                cancelUntil(backtrack_level);
                 if (learnt_clause.size() > 1) {
                     attachClause(cr);
-                    claBumpActivity(ca[cr]);
                 }
                 assert(mode == 1 || variable_type[var(learnt_clause[0])] == (ct == ConstraintTypes::Clauses));
                 uncheckedEnqueue((ct == Clauses) ? learnt_clause[0] : ~learnt_clause[0], cr, ct);
@@ -1387,8 +1410,8 @@ lbool Solver::search(int nof_conflicts)
                             (int)conflicts,
                             (int)nr_dependencies,
                             (int)max_learnts,
-                            nLearnts(ConstraintTypes::Clauses), (double)learnts_literals[ConstraintTypes::Clauses]/ nLearnts(ConstraintTypes::Clauses),
-                            nLearnts(ConstraintTypes::Terms),   (double)learnts_literals[ConstraintTypes::Terms]  / nLearnts(ConstraintTypes::Terms),
+                            nLearnts(ConstraintTypes::Clauses), (double)learnts_sizes[ConstraintTypes::Clauses]/ nLearnts(ConstraintTypes::Clauses),
+                            nLearnts(ConstraintTypes::Terms),   (double)learnts_sizes[ConstraintTypes::Terms]  / nLearnts(ConstraintTypes::Terms),
                             random_var_freq * 100);
                 }
             }
@@ -1521,6 +1544,7 @@ lbool Solver::solve_()
     //addInitialTerms();
 
     status = input_status;
+    glue_tab.growTo(nVars() + 1, 0);
 
     // Search:
     int curr_restarts = 0;
@@ -1704,7 +1728,6 @@ void Solver::relocAll(ClauseAllocator& to)
 
     // New constraint type map.
     CMap<bool> constraint_type_;
-    CMap<int>  constraint_LBD_;
     //std::unordered_map<unsigned int, bool> constraint_type_;
 
     // All learnt:
@@ -1713,10 +1736,8 @@ void Solver::relocAll(ClauseAllocator& to)
     for (i = j = 0; i < learnts.size(); i++)
         if (!isRemoved(learnts[i])){
             auto ct = constraint_type[learnts[i]];
-            auto lbd = constraint_LBD[learnts[i]];
             ca.reloc(learnts[i], to);
             constraint_type_.insert(learnts[i], ct);
-            constraint_LBD_.insert(learnts[i], lbd);
             //constraint_type_[learnts[i]] = ct;
             learnts[j++] = learnts[i];
         }
@@ -1752,8 +1773,6 @@ void Solver::relocAll(ClauseAllocator& to)
     terms.shrink(i - j);
 
     constraint_type_.moveTo(constraint_type);
-    constraint_LBD_.moveTo(constraint_LBD);
-    //constraint_type_.swap(constraint_type);
 }
 
 
@@ -2072,14 +2091,19 @@ bool Solver::hasDependency(Var of, Var on) const {
     return false;
 }
 
-int Solver::computeLBD(vec<Lit>& lits) {
-    IntSet<int> levels_present;
-    for (int i = 0; i < lits.size(); i++) {
-        Var v = var(lits[i]);
-        if (value(v) != l_Undef)
-            levels_present.insert(level(var(lits[i])));
+uint32_t Solver::computeGlue(Clause& c) {
+    // Taken from Armin Biere's solver Cadical.
+    uint32_t res = 0;
+    const uint64_t stamp = ++glues_recomputed;
+    for (int i = 0; i < c.size(); i++) {
+        Lit l = c[i];
+        int decision_level = level(var(l));
+        assert (glue_tab[decision_level] <= stamp);
+        if (glue_tab[decision_level] == stamp) continue;
+        glue_tab[decision_level] = stamp;
+        res++;
     }
-    return levels_present.size();
+    return res;
 }
 
 void Solver::reduce(vec<Lit>& lits, bool primary_type) {
@@ -2159,4 +2183,16 @@ void Solver::saveOutermostAssignment() {
         bool last_sign = assigns[internal_var] == l_False;
         outermost_assignment.push(mkLit(original_var, last_sign));
     }
+}
+
+void Solver::promoteClause (Clause& c, uint32_t new_glue) {
+    if (c.keep()) return;
+    uint32_t old_glue = c.glue();
+    if (new_glue >= old_glue) return;
+    else if (new_glue <= 2) {
+        c.markKeep();
+    } else if (new_glue <= 6) {
+        c.setUsed(2);
+    }
+    c.glue() = new_glue;
 }

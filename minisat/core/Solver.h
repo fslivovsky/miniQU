@@ -107,7 +107,7 @@ public:
     void    traceVector(vec<Lit>& lits);
     void    traceResolvent(Var rightmost_primary, Var pivot, Var r, bool primary_type);
     void    traceReduction(vec<Lit>& lits, bool primary_type);
-    int     computeLBD(vec<Lit>& lits);
+    uint32_t computeGlue(Clause& c);
     void    reduce(vec<Lit>& lits, bool primary_type);
 
     // Read state:
@@ -176,7 +176,8 @@ public:
     uint64_t solves, starts, decisions, rnd_decisions, propagations, conflicts, nr_dependencies;
     uint64_t dec_vars, num_clauses, clauses_literals, max_literals, tot_literals;
     uint64_t num_learnts[2];
-    uint64_t learnts_literals[2];
+    uint64_t learnts_sizes[2];
+    uint64_t glues_recomputed;
 
 protected:
 
@@ -228,6 +229,7 @@ protected:
     VMap<VarData>       vardata;          // Stores reason and level for each variable.
     OccLists<Lit, vec<Watcher>, WatcherDeleted, MkIndexLit>*
                         watches[2];       // 'watches[lit]' is a list of constraints watching 'lit' (will go there if literal becomes true).
+    vec<uint64_t>        glue_tab;
 
     Heap<Var,VarOrderLt> **order_heaps;    // A priority queue of variables ordered with respect to the variable activity.
 
@@ -279,7 +281,6 @@ protected:
     vec<CRef>           terms;
     Var                 max_alias;
     CMap<bool>          constraint_type;
-    CMap<int>           constraint_LBD;
     vec<Lit>            outermost_assignment;
 
     // Resource contraints:
@@ -317,7 +318,8 @@ protected:
     void     varBumpActivity  (Var v, double inc);     // Increase a variable with the current 'bump' value.
     void     varBumpActivity  (Var v);                 // Increase a variable with the current 'bump' value.
     void     claDecayActivity ();                      // Decay all clauses with the specified factor. Implemented by increasing the 'bump' value instead.
-    void     claBumpActivity  (Clause& c);             // Increase a clause with the current 'bump' value.
+    void     bumpClause  (Clause& c);             // Increase a clause with the current 'bump' value.
+    void     promoteClause (Clause& c, uint32_t new_glue);
 
     // Operations on clauses:
     //
@@ -422,12 +424,13 @@ inline void Solver::varBumpActivity(Var v, double inc) {
 }
 
 inline void Solver::claDecayActivity() { cla_inc *= (1 / clause_decay); }
-inline void Solver::claBumpActivity (Clause& c) {
-        if ( (c.activity() += cla_inc) > 1e20 ) {
-            // Rescale:
-            for (int i = 0; i < learnts.size(); i++)
-                ca[learnts[i]].activity() *= 1e-20;
-            cla_inc *= 1e-20; } }
+inline void Solver::bumpClause (Clause& c) {
+    if (c.keep()) return;
+    c.setUsed(1);
+    uint32_t new_glue = computeGlue(c);
+    if (new_glue < c.glue()) promoteClause(c, new_glue);
+    else if (c.glue() <= 6) c.setUsed(2);
+}
 
 inline void Solver::checkGarbage(void){ return checkGarbage(garbage_frac); }
 inline void Solver::checkGarbage(double gf){
