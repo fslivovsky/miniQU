@@ -264,7 +264,7 @@ void Solver::attachClause(CRef cr) {
     assert(c.size() > 1);
     (*watches[ct])[ct == Terms ? c[0] : ~c[0]].push(Watcher(cr, c[1]));
     (*watches[ct])[ct == Terms ? c[1] : ~c[1]].push(Watcher(cr, c[0]));
-    if (c.learnt()) num_learnts[ct]++, learnts_literals[ct] += constraint_LBD[cr];
+    if (c.learnt()) num_learnts[ct]++, learnts_literals[ct] += c.size();
     else            num_clauses++, clauses_literals += c.size();
 }
 
@@ -283,7 +283,7 @@ void Solver::detachClause(CRef cr, bool strict){
         watches[ct]->smudge(ct == Terms ? c[1] : ~c[1]);
     }
 
-    if (c.learnt()) num_learnts[ct]--, learnts_literals[ct] -= constraint_LBD[cr];
+    if (c.learnt()) num_learnts[ct]--, learnts_literals[ct] -= c.size();
     else            num_clauses--, clauses_literals -= c.size();
 }
 
