@@ -20,6 +20,8 @@ OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWA
 
 #include <errno.h>
 #include <zlib.h>
+#include <string>
+#include <memory>
 
 #include "minisat/utils/System.h"
 #include "minisat/utils/ParseUtils.h"
@@ -53,84 +55,92 @@ static void SIGINT_exit(int) {
 //=================================================================================================
 // Main:
 
+bool hasEnding (std::string const &fullString, std::string const &ending) {
+    if (fullString.length() >= ending.length()) {
+        return (0 == fullString.compare (fullString.length() - ending.length(), ending.length(), ending));
+    } else {
+        return false;
+    }
+}
+
 int main(int argc, char** argv)
 {
     try {
-        setUsageHelp("USAGE: %s [options] <input-file> <result-output-file>\n\n  where input may be either in plain or gzipped DIMACS.\n");
+        setUsageHelp("USAGE: %s [options] <input-file> <result-output-file>\n\n  where input may be either in QDIMACS or QCIR.\n");
         setX86FPUPrecision();
         
         // Extra options:
         //
         IntOption    verb   ("MAIN", "verb",   "Verbosity level (0=silent, 1=some, 2=more).", 1, IntRange(0, 2));
-        BoolOption   pre    ("MAIN", "pre",    "Completely turn on/off any preprocessing.", false);
-        BoolOption   solve  ("MAIN", "solve",  "Completely turn on/off solving after preprocessing.", true);
-        StringOption dimacs ("MAIN", "dimacs", "If given, stop after preprocessing and write the result to this file.");
+        //BoolOption   pre    ("MAIN", "pre",    "Completely turn on/off any preprocessing.", false);
+        //BoolOption   solve  ("MAIN", "solve",  "Completely turn on/off solving after preprocessing.", true);
+        //StringOption dimacs ("MAIN", "dimacs", "If given, stop after preprocessing and write the result to this file.");
         IntOption    cpu_lim("MAIN", "cpu-lim","Limit on CPU time allowed in seconds.\n", 0, IntRange(0, INT32_MAX));
         IntOption    mem_lim("MAIN", "mem-lim","Limit on memory usage in megabytes.\n", 0, IntRange(0, INT32_MAX));
-        BoolOption   strictp("MAIN", "strict", "Validate DIMACS header during parsing.", false);
+        //BoolOption   strictp("MAIN", "strict", "Validate DIMACS header during parsing.", false);
         BoolOption   dl     ("MAIN", "dl",     "Turn on/off dependency learning.", false);
+        IntOption    mode   ("MAIN", "mode",   "Propagation mode (0=Q, 1=QU, 2=LDQ).", 0, IntRange(0, 2));
+        BoolOption   cert   ("MAIN", "cert",   "Output partial certificate (assignment of first block).", false);
+        BoolOption   qcir   ("MAIN", "qcir",   "Use QCIR parser.", false);
 
         parseOptions(argc, argv, true);
+
         
         Solver  S;
         double      initial_time = cpuTime();
 
-        //if (!pre) S.eliminate(true);
-
         S.use_dependency_learning = dl;
         S.verbosity = verb;
+        S.mode = mode;
         
         solver = &S;
         // Use signal handlers that forcibly quit until the solver will be able to respond to
         // interrupts:
         sigTerm(SIGINT_exit);
+        if (dl && mode == 2) {
+            printf("Dependency learning not available in LDQ mode.\n");
+            exit(1);
+        }
 
         // Try to set resource limits:
         if (cpu_lim != 0) limitTime(cpu_lim);
         if (mem_lim != 0) limitMemory(mem_lim);
 
-        if (argc == 1)
-            printf("Reading from standard input... Use '--help' for help.\n");
+        std::unique_ptr<QCIRParser> qcir_parser;
 
-        // gzFile in = (argc == 1) ? gzdopen(0, "rb") : gzopen(argv[1], "rb");
-        // if (in == NULL)
-        //     printf("ERROR! Could not open file: %s\n", argc == 1 ? "<stdin>" : argv[1]), exit(1);
-        
-        // if (S.verbosity > 0){
-        //     printf("============================[ Problem Statistics ]=============================\n");
-        //     printf("|                                                                             |\n"); }
-        
-        // parse_DIMACS(in, S, (bool)strictp);
-        // gzclose(in);
+        if (argc == 2 && (hasEnding(std::string(argv[1]), "qcir") || qcir)) {
+            std::string filename_string(argv[1]);
+            qcir_parser = std::make_unique<QCIRParser>(filename_string);
+            qcir_parser->initSolver(S);
+        } else {
+            if (argc == 1)
+                printf("Reading QDIMACS from standard input... Use '--help' for help.\n");
 
-        std::string filename_string(argv[1]);
-        QCIRParser qcir_parser(filename_string);
-        qcir_parser.initSolver(S);
+            gzFile in = (argc == 1) ? gzdopen(0, "rb") : gzopen(argv[1], "rb");
+            if (in == NULL)
+                printf("ERROR! Could not open file: %s\n", argc == 1 ? "<stdin>" : argv[1]), exit(1);
+            
+            parse_DIMACS(in, S, (bool) false);
+            gzclose(in);
+        }
 
         FILE* res = (argc >= 3) ? fopen(argv[2], "wb") : NULL;
 
         if (S.verbosity > 0){
-            printf("|  Number of variables:  %12d                                         |\n", S.nVars());
-            printf("|  Number of clauses:    %12d                                         |\n", S.nClauses()); }
-        
+            printf("|  Number of variables:  %12d                                            |\n", S.nVars());
+            printf("|  Number of clauses:    %12d                                            |\n", S.nClauses()); }
         double parsed_time = cpuTime();
         if (S.verbosity > 0)
-            printf("|  Parse time:           %12.2f s                                       |\n", parsed_time - initial_time);
-
+            printf("|  Parse time:           %12.2f s                                          |\n", parsed_time - initial_time);
+                    //==================================================================================
         // Change to signal-handlers that will only notify the solver and allow it to terminate
         // voluntarily:
         sigTerm(SIGINT_interrupt);
 
-        // S.eliminate(true);
-        // double simplified_time = cpuTime();
-        // if (S.verbosity > 0){
-        //     printf("|  Simplification time:  %12.2f s                                       |\n", simplified_time - parsed_time);
-        //     printf("|                                                                             |\n"); }
-
         if (!S.okay()){
             if (res != NULL) fprintf(res, "UNSAT\n"), fclose(res);
             if (S.verbosity > 0){
-                printf("===============================================================================\n");
+                printf("==================================================================================\n");
                 printf("Solved by simplification\n");
                 S.printStats();
                 printf("\n"); }
@@ -140,31 +150,28 @@ int main(int argc, char** argv)
 
         lbool ret = l_Undef;
 
-        if (solve){
-            vec<Lit> dummy;
-            ret = S.solveLimited(dummy);
-        }else if (S.verbosity > 0)
-            printf("===============================================================================\n");
-
-        if (dimacs && ret == l_Undef)
-            S.toDimacs((const char*)dimacs);
+        vec<Lit> dummy;
+        ret = S.solveLimited(dummy);
 
         if (S.verbosity > 0){
             S.printStats();
             printf("\n"); }
         printf(ret == l_True ? "SATISFIABLE\n" : ret == l_False ? "UNSATISFIABLE\n" : "INDETERMINATE\n");
-        if (res != NULL){
-            if (ret == l_True){
-                fprintf(res, "SAT\n");
-                for (int i = 0; i < S.nVars(); i++)
-                    if (S.model[i] != l_Undef)
-                        fprintf(res, "%s%s%d", (i==0)?"":" ", (S.model[i]==l_True)?"":"-", i+1);
-                fprintf(res, " 0\n");
-            }else if (ret == l_False)
-                fprintf(res, "UNSAT\n");
-            else
-                fprintf(res, "INDET\n");
-            fclose(res);
+        if (cert) {
+            vec<Lit> partial_certificate;
+            S.getPartialCertificate(partial_certificate);
+            std::cout << "V";
+            for (int i = 0; i < partial_certificate.size(); i++) {
+                auto l = partial_certificate[i];
+                std::cout << " ";
+                if (qcir_parser) {
+                    std::string name = qcir_parser->getOriginalName(var(l));
+                    std::cout << (sign(l) ? "-": "") << name;
+                } else {
+                    std::cout << (sign(l) ? "-": "") << var(l);
+                }
+            }
+            std::cout << " 0" << std::endl;
         }
 
 #ifdef NDEBUG
@@ -173,7 +180,7 @@ int main(int argc, char** argv)
         return (ret == l_True ? 10 : ret == l_False ? 20 : 0);
 #endif
     } catch (OutOfMemoryException&){
-        printf("===============================================================================\n");
+        printf("==================================================================================\n");
         printf("INDETERMINATE\n");
         exit(0);
     }

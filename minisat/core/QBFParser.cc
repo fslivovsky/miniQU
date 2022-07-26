@@ -24,10 +24,14 @@ GatePolarity operator-(const GatePolarity& polarity) {
 }
 
 GatePolarity operator+(const GatePolarity& first, const GatePolarity& second) {
-  int first_int = static_cast<int>(first);
-  int second_int = static_cast<int>(second);
-  int return_int = std::min(first_int + second_int, 3);
-  return static_cast<GatePolarity>(return_int);
+  if (first == second) {
+    return first;
+  } else {
+    int first_int = static_cast<int>(first);
+    int second_int = static_cast<int>(second);
+    int return_int = std::min(first_int + second_int, 3);
+    return static_cast<GatePolarity>(return_int);
+  }
 }
 
 QBFParser::QBFParser(): max_alias(0), output_id(""), variable_gate_boundary(1), number_variables{0, 0}, max_id_number(0) {
@@ -46,7 +50,7 @@ int QBFParser::getAlias(const string& gate_id) {
     max_alias++;
     id_to_alias[gate_id] = max_alias;
     gates.push_back(Gate(gate_id));
-    assert(max_alias == gates.size() - 1);
+    assert((unsigned int)(max_alias) == gates.size() - 1);
   }
   return id_to_alias[gate_id];
 }
@@ -79,7 +83,7 @@ void QBFParser::addGate(const string& id, const GateType& gate_type, const vecto
     max_id_number = std::max(max_id_number, std::stoi(id));
   }
   int alias = getAlias(id);
-  assert(alias < gates.size());
+  assert((unsigned int)(alias) < gates.size());
   assert(gates[alias].gate_inputs == nullptr);
   assert(gates[alias].gate_type == GateType::None);
   gates[alias].gate_type = gate_type;
@@ -156,7 +160,7 @@ void QBFParser::getGatePolarities(vector<GatePolarity>& polarity, GatePolarity o
         auto& input_literal = gate.gate_inputs[i];
         auto variable_alias = abs(input_literal);
         auto child_polarity = input_literal > 0 ? polarity[alias] : -polarity[alias];
-        assert(variable_alias < polarity.size());
+        assert((unsigned int)(variable_alias) < polarity.size());
         polarity[variable_alias] = polarity[variable_alias] + child_polarity;
         assert(polarity[variable_alias] != GatePolarity::None);
         nr_output_gates[variable_alias]--;
@@ -268,7 +272,7 @@ void QBFParser::addDefinitions(vector<tuple<vector<int>,int>>& definitions, vect
 tuple<vector<int>, vector<int>, vector<bool>> QBFParser::getQueryVariableSets(VariableType type) {
   vector<int> defining_variables;
   GateType variable_type = (type == VariableType::Universal) ? GateType::Universal : GateType::Existential;
-  unsigned int alias = 1;
+  int alias = 1;
   if (type == VariableType::Universal) {
     // Don't look for unique Herbrand functions of outermost universals.
     for (; alias < variable_gate_boundary && gates[alias].gate_type == GateType::Universal; alias++) {
@@ -315,7 +319,7 @@ vector<string> QBFParser::split(const string& s, char delimiter)
 void QBFParser::addDefinition(vector<int>& input_literals, int output_alias) {
   definition_aliases.push_back(output_alias);
   auto gate_type = GateType::And;
-  if (output_alias >= gates.size()) {
+  if ((unsigned int) output_alias >= gates.size()) {
     gates.resize(output_alias + 1, Gate(""));
   }
   auto& gate = gates[output_alias];
@@ -401,9 +405,9 @@ void QBFParser::doWriteDIMACS(std::ostream& out) {
   printClauselist(definition_clauses, out);
 }
 
-void QBFParser::printClauselist(vector<vector<int>>& clause_list, std::ostream& out) {
-  for (auto& clause: clause_list) {
-    for (auto& literal: clause) {
+void QBFParser::printClauselist(const vector<vector<int>>& clause_list, std::ostream& out) {
+  for (const auto& clause: clause_list) {
+    for (const auto& literal: clause) {
       auto alias = abs(literal);
       auto sign = (literal > 0) ? "" : "-";
       out << sign << gates[alias].gate_id << " ";
@@ -415,7 +419,7 @@ void QBFParser::printClauselist(vector<vector<int>>& clause_list, std::ostream& 
 void QBFParser::printQDIMACSPrefix(std::ostream& out) {
   GateType last_block_type = GateType::None;
   bool first_variable_seen = false;
-  for (unsigned i = 1; i < variable_gate_boundary; i++) {
+  for (int i = 1; i < variable_gate_boundary; i++) {
     auto& gate = gates[i];
     if (gate.gate_type == GateType::Existential || gate.gate_type == GateType::Universal) {
       if (gate.gate_type != last_block_type) { 
@@ -475,7 +479,7 @@ void QBFParser::printQCIRPrefix(std::ostream& out) {
   out << "#QCIR-G14" << std::endl; // Print "preamble".
   GateType last_block_type = GateType::None;
   bool first_variable_seen = false;
-  for (unsigned i = 1; i < variable_gate_boundary; i++) {
+  for (int i = 1; i < variable_gate_boundary; i++) {
     auto& gate = gates[i];
     if (gate.gate_type == GateType::Existential || gate.gate_type == GateType::Universal) {
       if (gate.gate_type != last_block_type) { 
@@ -542,7 +546,7 @@ void QBFParser::writeVerilog() {
 void QBFParser::doWriteVerilog(std::ostream& out) {
   // Only works for 2QBF at the moment.
   vector<string> input_ids, output_ids, auxiliary_ids;
-  for (unsigned i = 1; i < variable_gate_boundary; i++) {
+  for (int i = 1; i < variable_gate_boundary; i++) {
     const auto& gate = gates[i];
     if (gate.gate_type == GateType::Universal || gate.gate_type == GateType::Existential) {
       input_ids.push_back("v_" + gate.gate_id);

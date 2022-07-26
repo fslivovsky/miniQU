@@ -41,6 +41,7 @@ static void readClause(B& in, Solver& S, vec<Lit>& lits) {
         var = abs(parsed_lit);
         lits.push( (parsed_lit > 0) ? mkLit(var) : ~mkLit(var) );
     }
+    S.addClause_(lits);
 }
 
 template<class B, class Solver>
@@ -65,7 +66,6 @@ template<class B, class Solver>
 static void parse_DIMACS_main(B& in, Solver& S, bool strictp = false) {
     vec<Lit> lits;
     VMap<Var> alias_to_interal;
-    int vars    = 0;
     int clauses = 0;
     int cnt     = 0;
     int depth   = 0;
@@ -74,11 +74,11 @@ static void parse_DIMACS_main(B& in, Solver& S, bool strictp = false) {
         if (*in == EOF) break;
         else if (*in == 'p'){
             if (eagerMatch(in, "p cnf")){
-                vars    = parseInt(in);
+                int vars = parseInt(in);
                 clauses = parseInt(in);
-                // SATRACE'06 hack
-                // if (clauses > 4000000)
-                //     S.eliminate(true);
+                if (vars < 0 || clauses < 0) {
+                    printf("Number of variables and clauses in header must be positive. \n"), exit(3);
+                }
             }else{
                 printf("PARSE ERROR! Unexpected char: %c\n", *in), exit(3);
             }
@@ -90,8 +90,7 @@ static void parse_DIMACS_main(B& in, Solver& S, bool strictp = false) {
             readQuantifierBlock(in, S, true, depth++);
         } else {
             cnt++;
-            readClause(in, S, lits);
-            S.addClause_(lits); }
+            readClause(in, S, lits); }
     }
     if (strictp && cnt != clauses)
         printf("PARSE ERROR! DIMACS header mismatch: wrong number of clauses\n");

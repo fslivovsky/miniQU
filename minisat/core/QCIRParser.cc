@@ -8,12 +8,20 @@
 
 using std::make_tuple;
 
+std::string str_tolower(std::string s) {
+    std::transform(s.begin(), s.end(), s.begin(), 
+                   [](unsigned char c){ return std::tolower(c); }
+                  );
+    return s;
+}
+
 QCIRParser::QCIRParser() {};
 
 QCIRParser::QCIRParser(const string& filename) {
   std::ifstream file(filename.c_str());
   string line;
   while (std::getline(file, line)) {
+    line = str_tolower(line);
     line.erase(remove_if(line.begin(), line.end(), [] (char c) { return isspace(int(c)); }), line.end()); // Remove whitespaces.
     if (line.length() == 0 || line.front() == '#') {
       continue;
@@ -31,6 +39,7 @@ QCIRParser::QCIRParser(const string& filename) {
 
   /* Remove redundant gates (optional). */
   std::cerr << "Removed " << removeRedundant() << " redundant gates." << std::endl;
+  getGatePolarities(polarities, GatePolarity::Positive);
 }
 
 void QCIRParser::readQuantifierBlock(const string& line) {
@@ -69,10 +78,9 @@ void QCIRParser::readOutput(const string& line) {
 }
 
 void QCIRParser::initSolver(Minisat::Solver& solver) {
-  removeRedundant();
   std::unordered_map<int, Minisat::Var> alias_to_solver_internal;
-  for (unsigned int i = 1; i < variable_gate_boundary; i++) {
-    Gate& g = gates[i];
+  for (int i = 1; i < variable_gate_boundary; i++) {
+    const Gate& g = gates[i];
     bool is_existential = (g.gate_type == GateType::Existential);
     auto solver_var = solver.newVar(i);
     alias_to_solver_internal[i] = solver_var;
@@ -94,11 +102,10 @@ void QCIRParser::initSolver(Minisat::Solver& solver) {
 
   // Create innermost quantifier blocks for Tseitin variables.
   for (unsigned int i = variable_gate_boundary; i < gates.size(); i++) {
-    auto& gate = gates[i];
-    auto tseitin_var_universal = solver.newVar(i*2+1);
+    auto tseitin_var_universal = solver.newVar(i*2+1, Minisat::l_Undef, false);
     gate_alias_to_tseitin_universal[i] = tseitin_var_universal;
     tseitin_block_universal.push(tseitin_var_universal);
-    auto tseitin_var_existential = solver.newVar(i*2);
+    auto tseitin_var_existential = solver.newVar(i*2, Minisat::l_Undef, false);
     gate_alias_to_tseitin_existential[i] = tseitin_var_existential;
     tseitin_block_existential.push(tseitin_var_existential);
     solver.setVarType(tseitin_var_universal, false, quantifier_blocks.size());
@@ -108,81 +115,67 @@ void QCIRParser::initSolver(Minisat::Solver& solver) {
   solver.addQuantifierBlock(tseitin_block_existential, true);
   gate_alias_to_tseitin_existential.insert(alias_to_solver_internal.begin(), alias_to_solver_internal.end());
   gate_alias_to_tseitin_universal.insert(alias_to_solver_internal.begin(), alias_to_solver_internal.end());
-  // TODO: Compute gate polarities for Plaisted-Greenbaum encoding.
+
+  for (auto& clause: getClausalEncoding(false)) {
+    Minisat::vec<Minisat::Lit> minisat_clause;
+    for (auto l: clause) {
+      int v = abs(l);
+      bool negated = (l < 0);
+      minisat_clause.push(Minisat::mkLit(gate_alias_to_tseitin_existential[v], negated));
+    }
+    solver.addClauseInternal(minisat_clause);
+  }
+
+  for (auto& term: getClausalEncoding(true)) {
+    Minisat::vec<Minisat::Lit> minisat_term;
+    for (auto l: term) {
+      int v = abs(l);
+      bool negated = (l < 0);
+      minisat_term.push(Minisat::mkLit(gate_alias_to_tseitin_universal[v], negated));
+    }
+    solver.addTerm(minisat_term);
+  }
+}
+
+string QCIRParser::getOriginalName(int alias) const {
+  return gates.at(alias).gate_id;
+}
+
+std::vector<std::vector<int>> QCIRParser::getClausalEncoding(bool get_terms) {
+  std::vector<std::vector<int>> clauses;
   for (unsigned int i = variable_gate_boundary; i < gates.size(); i++) {
     auto& gate = gates[i];
-    if (gate.gate_type == GateType::And) {
-      // Clauses.
-      Minisat::vec<Minisat::Lit> small_clause;
-      Minisat::vec<Minisat::Lit> long_clause;
-      small_clause.push(~Minisat::mkLit(gate_alias_to_tseitin_existential[i], false));
-      long_clause.push(Minisat::mkLit(gate_alias_to_tseitin_existential[i], false));
-      for (unsigned int j = 0; j < gate.nr_inputs; j++) {
-        int l = gate.gate_inputs[j];
-        int v = abs(l);
-        bool negated = (l < 0);
-        small_clause.push(Minisat::mkLit(gate_alias_to_tseitin_existential[v], negated));
-        solver.addClauseInternal(small_clause);
-        small_clause.pop();
-        long_clause.push(~Minisat::mkLit(gate_alias_to_tseitin_existential[v], negated));
-      }
-      solver.addClauseInternal(long_clause);
-      // Terms.
-      Minisat::vec<Minisat::Lit> small_term;
-      Minisat::vec<Minisat::Lit> long_term;
-      small_term.push(Minisat::mkLit(gate_alias_to_tseitin_universal[i], false));
-      long_term.push(~Minisat::mkLit(gate_alias_to_tseitin_universal[i], false));
-      for (unsigned int j = 0; j < gate.nr_inputs; j++) {
-        int l = gate.gate_inputs[j];
-        int v = abs(l);
-        bool negated = (l < 0);
-        small_term.push(~Minisat::mkLit(gate_alias_to_tseitin_universal[v], negated));
-        solver.addTerm(small_term);
-        small_term.pop();
-        long_term.push(Minisat::mkLit(gate_alias_to_tseitin_universal[v], negated));
-      }
-      solver.addTerm(long_term);
-    } else {
-      assert(gate.gate_type == GateType::Or);
-      // Clauses.
-      Minisat::vec<Minisat::Lit> small_clause;
-      Minisat::vec<Minisat::Lit> long_clause;
-      small_clause.push(Minisat::mkLit(gate_alias_to_tseitin_existential[i], false));
-      long_clause.push(~Minisat::mkLit(gate_alias_to_tseitin_existential[i], false));
-      for (unsigned int j = 0; j < gate.nr_inputs; j++) {
-        int l = gate.gate_inputs[j];
-        int v = abs(l);
-        bool negated = (l < 0);
-        small_clause.push(~Minisat::mkLit(gate_alias_to_tseitin_existential[v], negated));
-        solver.addClauseInternal(small_clause);
-        small_clause.pop();
-        long_clause.push(Minisat::mkLit(gate_alias_to_tseitin_existential[v], negated));
-      }
-      solver.addClauseInternal(long_clause);
-      // Terms.
-      Minisat::vec<Minisat::Lit> small_term;
-      Minisat::vec<Minisat::Lit> long_term;
-      small_term.push(~Minisat::mkLit(gate_alias_to_tseitin_universal[i], false));
-      long_term.push(Minisat::mkLit(gate_alias_to_tseitin_universal[i], false));
-      for (unsigned int j = 0; j < gate.nr_inputs; j++) {
-        int l = gate.gate_inputs[j];
-        int v = abs(l);
-        bool negated = (l < 0);
-        small_term.push(Minisat::mkLit(gate_alias_to_tseitin_universal[v], negated));
-        solver.addTerm(small_term);
-        small_term.pop();
-        long_term.push(~Minisat::mkLit(gate_alias_to_tseitin_universal[v], negated));
-      }
-      solver.addTerm(long_term);
+    if (gate.gate_type == GateType::And || gate.gate_type == GateType::Or) {
+      auto gate_clauses = getClausalEncoding(i, get_terms);
+      clauses.insert(clauses.end(), gate_clauses.begin(), gate_clauses.end());
     }
   }
   // Output term.
   auto output_alias = id_to_alias[output_id];
-  Minisat::vec<Minisat::Lit> ps;
-  ps.push(Minisat::mkLit(gate_alias_to_tseitin_universal[output_alias], false));
-  solver.addTerm(ps);
-  // Output clause.
-  ps.clear();
-  ps.push(Minisat::mkLit(gate_alias_to_tseitin_existential[output_alias], false));
-  solver.addClauseInternal(ps);
+  clauses.push_back( {output_alias});
+  return clauses;
+}
+
+std::vector<std::vector<int>> QCIRParser::getClausalEncoding(int gate_alias, bool get_terms) {
+  std::vector<std::vector<int>> clauses;
+  auto& gate = gates[gate_alias];
+  assert(gate.gate_type == GateType::And || gate.gate_type == GateType::Or);
+  bool modifier = get_terms ^ gate.gate_type == GateType::Or;
+  int sign = modifier ? -1: 1;
+  std::vector<int> small_clause, long_clause;
+  small_clause.push_back(-gate_alias * sign);
+  long_clause.push_back(gate_alias * sign);
+  for (unsigned int j = 0; j < gate.nr_inputs; j++) {
+    int l = gate.gate_inputs[j];
+    small_clause.push_back(l * sign);
+    if (polarities[gate_alias] != (modifier ? GatePolarity::Positive : GatePolarity::Negative)) {
+      clauses.push_back(small_clause);
+    }
+    small_clause.pop_back(); // Remove l.
+    long_clause.push_back(-l * sign);
+  }
+  if (polarities[gate_alias] != (modifier ? GatePolarity::Negative : GatePolarity::Positive)) {
+    clauses.push_back(long_clause);
+  }
+  return clauses;
 }

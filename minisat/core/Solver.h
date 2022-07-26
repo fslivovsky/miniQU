@@ -107,6 +107,8 @@ public:
     void    traceVector(vec<Lit>& lits);
     void    traceResolvent(Var rightmost_primary, Var pivot, Var r, bool primary_type);
     void    traceReduction(vec<Lit>& lits, bool primary_type);
+    int     computeLBD(vec<Lit>& lits);
+    void    reduce(vec<Lit>& lits, bool primary_type);
 
     // Read state:
     //
@@ -116,7 +118,7 @@ public:
     lbool   modelValue (Lit p) const;       // The value of a literal in the last model. The last call to solve must have been satisfiable.
     int     nAssigns   ()      const;       // The current number of assigned literals.
     int     nClauses   ()      const;       // The current number of original clauses.
-    int     nLearnts   ()      const;       // The current number of learnt clauses.
+    int     nLearnts   (bool ct) const;       // The current number of learnt clauses/terms.
     int     nVars      ()      const;       // The current number of variables.
     int     nFreeVars  ()      const;
     void    printStats ()      const;       // Print some current statistics to standard output.
@@ -135,6 +137,9 @@ public:
     void    checkGarbage(double gf);
     void    checkGarbage();
 
+    // Partial certificate for QBF.
+    void getPartialCertificate(vec<Lit>& certificate) const;
+
     // Extra results: (read-only member variable)
     //
     vec<lbool> model;             // If problem is satisfiable, this vector contains the model (if any).
@@ -144,6 +149,7 @@ public:
     // Mode of operation:
     //
     bool      use_dependency_learning;
+    int       mode;
     int       verbosity;
     double    var_decay;
     double    clause_decay;
@@ -168,7 +174,9 @@ public:
     // Statistics: (read-only member variable)
     //
     uint64_t solves, starts, decisions, rnd_decisions, propagations, conflicts, nr_dependencies;
-    uint64_t dec_vars, num_clauses, num_learnts, clauses_literals, learnts_literals, max_literals, tot_literals;
+    uint64_t dec_vars, num_clauses, clauses_literals, max_literals, tot_literals;
+    uint64_t num_learnts[2];
+    uint64_t learnts_literals[2];
 
 protected:
 
@@ -253,6 +261,8 @@ protected:
     // QBF specific member variables.
     vec<vec<Var>>       quantifier_blocks;
     vec<vec<Var>>       quantifier_blocks_decision_overflow;
+    vec<vec<Var>>       variables_at;
+    vec<int>            seen_at;
     //vec<char>           quantifier_blocks_type;
     vec<char>           quantifier_blocks_type;
     vec<int>            quantifier_blocks_unassigned;
@@ -269,6 +279,8 @@ protected:
     vec<CRef>           terms;
     Var                 max_alias;
     CMap<bool>          constraint_type;
+    CMap<int>           constraint_LBD;
+    vec<Lit>            outermost_assignment;
 
     // Resource contraints:
     //
@@ -285,9 +297,12 @@ protected:
                                bool constraint_type = ConstraintTypes::Clauses);       // Enqueue a literal. Assumes value of literal is undefined.
     bool     enqueue          (Lit p, CRef from = CRef_Undef);                         // Test if fact 'p' contradicts current state, enqueue otherwise.
     CRef     propagate        (bool& ct);                                              // Perform unit propagation. Returns possibly conflicting clause.
+    CRef     propagateLDQ     (bool& ct);
     void     cancelUntil      (int level_to);                                          // Backtrack until a certain level.
     void     analyze          (CRef confl, vec<Lit>& out_learnt, int& out_btlevel, 
                                bool& learn_dependency, bool& ct);                      // (bt = backtrack)
+    void     analyzeLDQ       (CRef confl, vec<Lit>& out_learnt, int& out_btlevel, 
+                               bool& learn_dependency, bool& ct); 
     void     analyzeFinal     (Lit p, LSet& out_conflict);                             // COULD THIS BE IMPLEMENTED BY THE ORDINARIY "analyze" BY SOME REASONABLE GENERALIZATION?
     bool     litRedundant     (Lit p, bool ct);                                        // (helper method for 'analyze()')
     lbool    search           (int nof_conflicts);                                     // Search for a given number of conflicts.
@@ -336,15 +351,23 @@ protected:
     lbool   addInitialTerms();
     void    initOrderHeaps();
     void    resetDependencies();
+    void    clearSeenAt(int rightmost_depth);
+    Var     getAssertingVar(int rightmost_depth, int asserting_level);
+    Var     getAssertingVarLDQ(int rightmost_depth, int asserting_level);
+    bool    isAsserting(int rightmost_depth, Var asserting_variable, Var& second_watcher_variable);
+    Var     nextPivot(int& index) const;
+    void    resolveWith(vec<Lit>& lits, const Clause& c, Var pivot) const;
+    void    saveOutermostAssignment();
 
     // Debugging
 
-    void     printClause    (CRef cr)            const;
-    void     printClause    (const vec<Lit>& literals) const;
-    void     printTrail     ()                   const;
-    void     printSeen      (Var rightmost)      const;
+    void     printClause      (CRef cr)            const;
+    void     printClause      (const vec<Lit>& literals) const;
+    void     printTrail       ()                    const;
+    void     printSeen        (Var rightmost)       const;
+    void     printVariablesAt (int rightmost_depth) const;
     Lt_Lits             lt_lits;
-    bool     hasDependency  (Var of, Var on)     const;
+    bool     hasDependency    (Var of, Var on)     const;
 
     // Static helpers:
     //
@@ -432,7 +455,7 @@ inline lbool    Solver::modelValue    (Var x) const   { return model[x]; }
 inline lbool    Solver::modelValue    (Lit p) const   { return model[var(p)] ^ sign(p); }
 inline int      Solver::nAssigns      ()      const   { return trail.size(); }
 inline int      Solver::nClauses      ()      const   { return num_clauses; }
-inline int      Solver::nLearnts      ()      const   { return num_learnts; }
+inline int      Solver::nLearnts      (bool ct) const   { return num_learnts[ct]; }
 inline int      Solver::nVars         ()      const   { return next_var; }
 // TODO: nFreeVars() is not quite correct, try to calculate right instead of adapting it like below:
 inline int      Solver::nFreeVars     ()      const   { return (int)dec_vars - (trail_lim.size() == 0 ? trail.size() : trail_lim[0]); }
@@ -479,7 +502,43 @@ inline void     Solver::toDimacs     (const char* file, Lit p){ vec<Lit> as; as.
 inline void     Solver::toDimacs     (const char* file, Lit p, Lit q){ vec<Lit> as; as.push(p); as.push(q); toDimacs(file, as); }
 inline void     Solver::toDimacs     (const char* file, Lit p, Lit q, Lit r){ vec<Lit> as; as.push(p); as.push(q); as.push(r); toDimacs(file, as); }
 
-inline void    Solver::addQuantifierBlock(vec<Var>& variables, bool existential) { quantifier_blocks_decision_overflow.push(); quantifier_blocks.push(); variables.copyTo(quantifier_blocks.last()); quantifier_blocks_type.push(existential), quantifier_blocks_unassigned.push(variables.size()); }
+inline void     Solver::addQuantifierBlock(vec<Var>& variables, bool existential) { quantifier_blocks_decision_overflow.push(); quantifier_blocks.push(); variables_at.push(); variables.copyTo(quantifier_blocks.last()); quantifier_blocks_type.push(existential), quantifier_blocks_unassigned.push(variables.size()); }
+inline void     Solver::clearSeenAt(int rightmost_depth) {
+    for (int d = 0; d <= rightmost_depth; d++) {
+        for (int i = 0; i < variables_at[d].size(); i++) {
+            Var v = variables_at[d][i];
+            seen_at[v] = - 1;
+        }
+        variables_at[d].clear();
+    }
+}
+
+inline Var Solver::getAssertingVarLDQ(int rightmost_depth, int asserting_level) {
+    bool primary_type = quantifier_blocks_type[rightmost_depth];
+    for (int d = 0; d <= rightmost_depth; d++) {
+        if (quantifier_blocks_type[d] != primary_type)
+            continue;
+        for (int i = 0; i < variables_at[d].size(); i++) {
+            Var v = (mode == 2) ? var(toLit(variables_at[d][i])) : variables_at[d][i];
+            if (level(v) == asserting_level) {
+                return v;
+            }
+        }
+    }
+    return var_Undef;
+}
+
+inline Var Solver::getAssertingVar(int rightmost_depth, int asserting_level) {
+    for (int d = 0; d <= rightmost_depth; d++) {
+        for (int i = 0; i < variables_at[d].size(); i++) {
+            Var v = variables_at[d][i];
+            if (level(v) == asserting_level) {
+                return v;
+            }
+        }
+    }
+    return var_Undef;
+}
 
 //=================================================================================================
 // Debug etc:

@@ -48,7 +48,7 @@ protected:
   virtual void doWriteVerilog(std::ostream& out);
   void doWriteQDIMACS(std::ostream& out);
   void doWriteDIMACS(std::ostream& out);
-  void printClauselist(vector<vector<int>>& clause_list, std::ostream& out);
+  void printClauselist(const vector<vector<int>>& clause_list, std::ostream& out);
   void printQCIRPrefix(std::ostream& out);
   void printQCIRGate(Gate& gate, std::ostream& out);
   void printQCIRGates(std::ostream& out);

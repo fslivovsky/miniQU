@@ -39,7 +39,7 @@ static DoubleOption  opt_var_decay         (_cat, "var-decay",   "The variable a
 static DoubleOption  opt_clause_decay      (_cat, "cla-decay",   "The clause activity decay factor",              0.999,    DoubleRange(0, false, 1, false));
 static DoubleOption  opt_random_var_freq   (_cat, "rnd-freq",    "The frequency with which the decision heuristic tries to choose a random variable", 0, DoubleRange(0, true, 1, true));
 static DoubleOption  opt_random_seed       (_cat, "rnd-seed",    "Used by the random variable selection",         91648253, DoubleRange(0, false, HUGE_VAL, false));
-static IntOption     opt_ccmin_mode        (_cat, "ccmin-mode",  "Controls conflict clause minimization (0=none, 1=basic, 2=deep)", 2, IntRange(0, 2));
+static IntOption     opt_ccmin_mode        (_cat, "ccmin-mode",  "Controls conflict clause minimization (0=none, 1=basic, 2=deep)", 0, IntRange(0, 2));
 static IntOption     opt_phase_saving      (_cat, "phase-saving", "Controls the level of phase saving (0=none, 1=limited, 2=full)", 2, IntRange(0, 2));
 static BoolOption    opt_rnd_init_act      (_cat, "rnd-init",    "Randomize the initial activity", false);
 static BoolOption    opt_luby_restart      (_cat, "luby",        "Use the Luby restart sequence", true);
@@ -84,7 +84,7 @@ Solver::Solver() :
     // Statistics: (formerly in 'SolverStats')
     //
   , solves(0), starts(0), decisions(0), rnd_decisions(0), propagations(0), conflicts(0), nr_dependencies(0)
-  , dec_vars(0), num_clauses(0), num_learnts(0), clauses_literals(0), learnts_literals(0), max_literals(0), tot_literals(0)
+  , dec_vars(0), num_clauses(0), num_learnts{0, 0}, clauses_literals(0), learnts_literals{0, 0}, max_literals(0), tot_literals(0)
 
 //  , watches {OccLists<Lit, vec<Watcher>, WatcherDeleted, MkIndexLit>(WatcherDeleted(ca)), OccLists<Lit, vec<Watcher>, WatcherDeleted, MkIndexLit>(WatcherDeleted(ca))}
   //, order_heap         (VarOrderLt(activity))
@@ -157,8 +157,11 @@ Var Solver::newVar(Var alias, lbool upol, bool dvar)
     assigns  .insert(v, l_Undef);
     vardata  .insert(v, mkVarData(CRef_Undef, 0, ConstraintTypes::Clauses));
     activity .insert(v, rnd_init_act ? drand(random_seed) * 0.00001 : 0);
-    //seen     .insert(v, 0);
+    seen_at.push(-1);
     seen.push(0);
+    if (mode == 2) {
+        seen_at.push(-1);
+    }
     polarity .insert(v, true);
     user_pol .insert(v, upol);
     decision .reserve(v);
@@ -193,7 +196,18 @@ bool Solver::addClause_(vec<Lit>& ps)
         ps[i] = mkLit(alias_to_internal[var(ps[i])], sign(ps[i]));
     }
 
-    return addClauseInternal(ps);
+    vec<Lit> ps_copy;
+    ps.copyTo(ps_copy);
+    sort(ps_copy);
+
+    // Remove tautologies
+    Lit p; int i, j;
+    for (i = j = 0, p = lit_Undef; i < ps_copy.size(); i++) 
+        if (ps_copy[i] != ~p)
+            ps_copy[j++] = p = ps_copy[i];
+    ps_copy.shrink(i - j);
+
+    return addClauseInternal(ps_copy);
 }
 
 bool Solver::addClauseInternal(const vec<Lit>& ps) {
@@ -209,11 +223,13 @@ bool Solver::addClauseInternal(const vec<Lit>& ps) {
     #endif
 
     for (i = j = 0, p = lit_Undef; i < ps_copy.size(); i++)
-        if (value(ps_copy[i]) == l_True || ps_copy[i] == ~p)
+        if (value(ps_copy[i]) == l_True)
             return true;
         else if (value(ps_copy[i]) != l_False && ps_copy[i] != p)
             ps_copy[j++] = p = ps_copy[i];
     ps_copy.shrink(i - j);
+
+    reduce(ps_copy, true);
 
     if (ps_copy.size() == 0) {
         input_status = l_False;
@@ -248,7 +264,7 @@ void Solver::attachClause(CRef cr) {
     assert(c.size() > 1);
     (*watches[ct])[ct == Terms ? c[0] : ~c[0]].push(Watcher(cr, c[1]));
     (*watches[ct])[ct == Terms ? c[1] : ~c[1]].push(Watcher(cr, c[0]));
-    if (c.learnt()) num_learnts++, learnts_literals += c.size();
+    if (c.learnt()) num_learnts[ct]++, learnts_literals[ct] += c.size();
     else            num_clauses++, clauses_literals += c.size();
 }
 
@@ -267,7 +283,7 @@ void Solver::detachClause(CRef cr, bool strict){
         watches[ct]->smudge(ct == Terms ? c[1] : ~c[1]);
     }
 
-    if (c.learnt()) num_learnts--, learnts_literals -= c.size();
+    if (c.learnt()) num_learnts[ct]--, learnts_literals[ct] -= c.size();
     else            num_clauses--, clauses_literals -= c.size();
 }
 
@@ -299,14 +315,15 @@ void Solver::cancelUntil(int level_to) {
             assigns [x] = l_Undef;
             if (!use_dependency_learning) {
                 quantifier_blocks_unassigned[variable_depth[x]]++;
-            } else {
-                dqhead = (dqhead < trail_lim[level_to]) ? dqhead : trail_lim[level_to];
             }
             if (phase_saving > 1 || (phase_saving == 1 && c > trail_lim.last()))
                 polarity[x] = sign(trail[c]);
             if (!use_dependency_learning || dependencies[x].size() == 0 || (assigns[dependencies[x][0]] != l_Undef && level(dependencies[x][0]) <= level_to)) {
                 insertVarOrder(x); 
             }
+        }
+        if (use_dependency_learning) {
+            dqhead = (dqhead < trail_lim[level_to]) ? dqhead : trail_lim[level_to];
         }
         qhead = trail_lim[level_to];
         trail.shrink(trail.size() - trail_lim[level_to]);
@@ -323,7 +340,6 @@ Lit Solver::pickBranchLit()
 {
     int i;
     if (!use_dependency_learning) {
-        //updateDecisionVars();
         i = getDecisionBlock();
     } else {
         i = 0;
@@ -337,23 +353,21 @@ Lit Solver::pickBranchLit()
     Var next = var_Undef;
 
     // Random decision:
-    /*if (drand(random_seed) < random_var_freq && !order_heap.empty()){
-        next = order_heap[irand(random_seed,order_heap.size())];
-        if (value(next) == l_Undef && decision[next])
-            rnd_decisions++; } */
+    bool make_random_decision = random_var_freq > 0 && (drand(random_seed) < random_var_freq && !order_heaps[i]->empty());
+    rnd_decisions += make_random_decision;
 
     // Activity based decision:
-
     while (next == var_Undef || value(next) != l_Undef || !decision[next])
         if (order_heaps[i]->empty()){
             next = var_Undef;
             break;
         } else {
-            next = order_heaps[i]->removeMin();
+            if (make_random_decision) {
+                next = (*order_heaps[i])[irand(random_seed, order_heaps[i]->size())];
+            } else {
+                next = order_heaps[i]->removeMin();
+            }
             if (!isEligibleDecision(next)) {
-                if (!use_dependency_learning) {
-                    // quantifier_blocks_decision_overflow[variable_depth[next]].push(next);
-                }
                 next = var_Undef;
             }
         }
@@ -389,131 +403,6 @@ Lit Solver::pickBranchLit()
 |________________________________________________________________________________________________@*/
 void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool& learn_dependency, bool& ct)
 {
-    //if (ca[confl].size() == 0) return; // Initial terms can be empty.
-    
-    //vec<Var> seen_stack;
-
-    // lbool l_disabling;
-    // Lit p = lit_Undef;
-    // Lit r = lit_Undef;
-
-    // analyzeStart:
-    // bool primary_type = (ct == ConstraintTypes::Clauses);
-    // bool other_type = !primary_type;
-    // learn_dependency = false;
-    // int pathC = 0;
-    
-    // l_disabling = (ct == Clauses) ? l_True : l_False;
-    // p = lit_Undef;
-    // r = lit_Undef;
-    // int max_dl = -1;
-    // Clause& c = ca[confl];
-
-    // if (value(c[0]) == l_disabling) {
-    //     // Secondary type was propagated, r has to be reduced eventually (if possible).
-    //     r = p = c[0];
-    //     max_dl = level(var(p));
-    // } else {
-    //     for (int i = 0; i < c.size(); i++)
-    //        max_dl = std::max(max_dl, level(var(c[i])));
-    // }
-
-    /* if (assigns[var(first)] == l_Undef) {
-        assert(variable_type[var(first)] == other_type);
-        uncheckedEnqueue(first, CRef_Undef);
-    } */
-
-
-    // Generate conflict clause:
-    //
-    //out_learnt.push();      // (leave room for the asserting literal)
-    //int index = trail.size() - 1;
-
-    // do {
-    //     assert(confl != CRef_Undef); // (otherwise should be UIP)
-
-    //     if (constraint_type[confl] != ct) {
-    //         ct = constraint_type[confl];
-    //         out_learnt.clear();
-    //         for (int i = 0; i < seen_stack.size(); i++) seen[seen_stack[i]] = 0;
-    //         seen_stack.clear();
-    //         goto analyzeStart;
-    //     }
-
-    //     c = ca[confl];
-
-    //     if (c.learnt())
-    //         claBumpActivity(c);
-
-    //     for (int j = (p == lit_Undef) ? 0 : 1; j < c.size(); j++){
-    //         Lit q = c[j];
-
-    //         if (!seen[var(q)]) {
-    //             seen_stack.push(var(q));
-    //             varBumpActivity(var(q));
-    //             seen[var(q)] = 1;
-    //             if (level(var(q)) >= max_dl)
-    //                 pathC++;
-    //             else
-    //                 out_learnt.push(q);
-    //         }
-    //     }
-        
-    //    // Select next clause to look at:
-    //     while (!seen[var(trail[index--])]);
-    //     p     = trail[index+1];
-    //     confl = reason(var(p));
-    //     seen[var(p)] = 0;
-    //     pathC--;
-
-    // } while (pathC > 0);
-
-    // out_learnt[0] = ~p;
-
-    // int i = 0;
-    // int j = 0;
-    // if (out_learnt.size()) {
-    //     out_learnt[0] = primary_type ? ~p : p;
-
-    //     // Simplify conflict clause:
-    //     //
-    //     if (ccmin_mode == 2){
-    //         for (i = j = 1; i < out_learnt.size(); i++)
-    //             if (reason(var(out_learnt[i])) == CRef_Undef || !litRedundant(out_learnt[i]))
-    //                 out_learnt[j++] = out_learnt[i];
-            
-    //     }else if (ccmin_mode == 1){
-    //         for (i = j = 1; i < out_learnt.size(); i++){
-    //             Var x = var(out_learnt[i]);
-
-    //             if (reason(x) == CRef_Undef)
-    //                 out_learnt[j++] = out_learnt[i];
-    //             else{
-    //                 Clause& c = ca[reason(var(out_learnt[i]))];
-    //                 for (int k = 1; k < c.size(); k++)
-    //                     if (!seen[var(c[k])] && level(var(c[k])) > 0){
-    //                         out_learnt[j++] = out_learnt[i];
-    //                         break; }
-    //             }
-    //         }
-    //     } else
-    //     i = j = out_learnt.size();
-    // }
-
-    // max_literals += out_learnt.size();
-    // out_learnt.shrink(i - j);
-    // tot_literals += out_learnt.size();
-
-    // for (int j = 0; j < seen_stack.size(); j++) seen[seen_stack[j]] = 0;
-    // for (int j = 0; j < analyze_toclear.size(); j++) seen[var(analyze_toclear[j])] = 0;    // ('seen[]' is now cleared)
-
-    // #ifndef NDEBUG
-    //     printf("MiniSAT %s: ", primary_type ? "clause" : "term");
-    //     printClause(out_learnt);
-    // #endif
-    
-    // Begin QBF-specific conflict analysis.
-
     Var r = var_Undef;
 
     analyzeStart:
@@ -533,60 +422,79 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool& l
     }
     #endif
 
-    Var rightmost_primary = var_Undef;
     vec<int> decision_level_counts(decisionLevel() + 1);
+    int rightmost_depth = -1;
 
     Clause& c = ca[confl];
 
     for (int i = 0; i < c.size(); i++) {
         Var v = var(c[i]);
         assert(v < nVars());
-        if (variable_type[v] == primary_type && (rightmost_primary == var_Undef || rightmost_primary < v)) {
-            rightmost_primary = v;
+        if (variable_type[v] == primary_type && rightmost_depth < variable_depth[v]) {
+            rightmost_depth = variable_depth[v];
         }
     }
-    if (rightmost_primary != var_Undef) {
+    if (rightmost_depth > -1) {
         for (int i = 0; i < c.size(); i++) {
             Var v = var(c[i]);
             assert(v >= 0);
-            if (v <= rightmost_primary) {
-                seen[v] = 1;
+            if (variable_depth[v] <= rightmost_depth) {
                 assert(level(v) >= 0);
                 decision_level_counts[level(v)]++;
+                seen_at[v] = variables_at[variable_depth[v]].size();
+                variables_at[variable_depth[v]].push(v);
+                varBumpActivity(v);
             }
         }
     }
 
     int max_dl = decisionLevel();
-    while (!decision_level_counts[max_dl]) max_dl--;
+    while (max_dl && !decision_level_counts[max_dl]) max_dl--;
     int index = trail.size() - 1;
+    int dl_start = max_dl ? trail_lim[max_dl - 1] : 0;
     Var leftmost_blocked_var = var_Undef;
-    for (Var v = rightmost_primary - 1; v >= 0; v--) {
-        if (seen[v] && variable_type[v] == other_type && level(v) == max_dl && (reason(v) == CRef_Undef || reasonType(v) != ct)) { // TODO: More efficiently.
-            leftmost_blocked_var = v;
-        }
-    }
+    Var asserting_variable = (decision_level_counts[max_dl] > 1) ? var_Undef : getAssertingVar(rightmost_depth, max_dl);
 
     // Keep going while the clause/term is not asserting.
-    while (rightmost_primary != var_Undef && (max_dl == 0 || decision_level_counts[max_dl] > 1)) {
-        assert(leftmost_blocked_var == var_Undef || level(leftmost_blocked_var) == max_dl);
+    while (rightmost_depth > -1 && (max_dl == 0 || decision_level_counts[max_dl] > 1 || (mode == 0 && variable_type[asserting_variable] == other_type))) {
+        assert(leftmost_blocked_var == var_Undef || level(leftmost_blocked_var) == max_dl || (mode == 0 && variable_type[asserting_variable] == other_type));
 #ifndef NDEBUG
         printf("Maximum DL: %d\n", max_dl);
         printf("Current %s: ", primary_type ? "clause" : "term");
-        printSeen(rightmost_primary);
-        printf("Rightmost var: %d\n", variable_names[rightmost_primary]);
-        if (reason(rightmost_primary) != CRef_Undef) {
-            printf("Reason: %d (%s)\n", reason(rightmost_primary), (reasonType(rightmost_primary) == Terms) ? "term" : "clause");
-        }
+        printVariablesAt(rightmost_depth);
         if (leftmost_blocked_var != var_Undef) {
             printf("Leftmost blocked: %d\n", variable_names[leftmost_blocked_var]);
         }
+        if (decision_level_counts[max_dl] == 1) {
+            printf("(Potentially) asserting: %d\n", variable_names[asserting_variable]);
+        }
 #endif
-        while(index >= 0 && 
-             (!seen[var(trail[index])] || 
-              !((level(var(trail[index])) == max_dl && reason(var(trail[index]))!= CRef_Undef && (variable_type[var(trail[index])] == primary_type || reasonType(var(trail[index])) == ct)) ||
-                (leftmost_blocked_var != var_Undef && variable_type[var(trail[index])] == primary_type && leftmost_blocked_var < var(trail[index]) && reason(var(trail[index]))!= CRef_Undef && reasonType(var(trail[index])) == ct)))) index--;
-        Var pivot = (index >= 0) ? var(trail[index]) : rightmost_primary;
+        assert(mode == 1 || decision_level_counts[max_dl] > 1 || asserting_variable == getAssertingVar(rightmost_depth, max_dl));
+        // While at max_dl, take next variable.
+        // If leftmost blocking, update.
+        // Afterwards:
+        // - Resolve out blocking primaries 
+
+        while(seen_at[var(trail[index--])] < 0);
+        Var pivot = var(trail[index + 1]);
+
+        if (index + 1 >= dl_start) {
+            if (variable_type[pivot] == other_type && (reason(pivot) == CRef_Undef || reasonType(pivot) != ct)) {
+                leftmost_blocked_var = (leftmost_blocked_var == var_Undef || pivot < leftmost_blocked_var) ? pivot : leftmost_blocked_var;
+                continue;
+            } else if (variable_type[pivot] == primary_type && reason(pivot) == CRef_Undef && pivot < leftmost_blocked_var)
+                continue;
+        } else {
+            assert(max_dl == 0 || leftmost_blocked_var != var_Undef); // || (mode == 0 && variable_type[asserting_variable] == other_type)); // Otherwise should be asserting.
+            // if (mode == 0) {
+            //     if (variable_type[pivot] == other_type && level(pivot) == max_dl && reason(pivot) == CRef_Undef) {
+            //         asserting_variable = pivot;
+            //     }
+            // } else {
+                if (variable_type[pivot] == other_type || (max_dl > 0 && pivot < leftmost_blocked_var))
+                    continue;
+            //if (variable_type[pivot] == other_type || ((leftmost_blocked_var == var_Undef || pivot < leftmost_blocked_var) && (asserting_variable == var_Undef || pivot < asserting_variable))) continue;
+        }
 
 #ifndef NDEBUG
         printf("Pivot: %d\n", variable_names[pivot]);
@@ -595,101 +503,109 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool& l
         confl = reason(pivot);
         if (confl != CRef_Undef && reasonType(pivot) != ct) {
             ct = reasonType(pivot);
-            for (int v = 0; v <= rightmost_primary; v++) {
-                seen[v] = 0;
-            }
+            clearSeenAt(rightmost_depth);
             r = pivot;
             vardata[r].reason = CRef_Undef;
             goto analyzeStart;
         }
         if (confl == CRef_Undef) {
             assert(use_dependency_learning);
-            assert(leftmost_blocked_var != var_Undef);
+            assert(leftmost_blocked_var != var_Undef || asserting_variable != var_Undef);
+            Var var_dependency = (leftmost_blocked_var != var_Undef && leftmost_blocked_var < pivot) ? leftmost_blocked_var : asserting_variable;
             learn_dependency = true;
             out_learnt.clear();
             out_learnt.push(mkLit(pivot, false));
-            out_learnt.push(mkLit(leftmost_blocked_var, false));
+            out_learnt.push(mkLit(var_dependency, false));
             out_btlevel = level(pivot) - 1;
             assert(out_btlevel >= 0);
-            for (int v = 0; v <= rightmost_primary; v++) {
-                seen[v] = 0;
-            }
+            clearSeenAt(rightmost_depth);
             return;
         }
         assert(constraint_type[confl] == ct);
 #ifndef NDEBUG
         printf("Reason %s: ", primary_type ? "clause" : "term");
         printClause(confl);
-        if (primary_type) traceResolvent(rightmost_primary, pivot, r, primary_type);
+        //if (primary_type) traceResolvent(quantifier_blocks[rightmost_depth].last(), pivot, r, primary_type);
 #endif
+        Var w = variables_at[variable_depth[pivot]].last();
+        variables_at[variable_depth[pivot]][seen_at[pivot]] = w;
+        variables_at[variable_depth[pivot]].pop();
+        seen_at[w] = seen_at[pivot];
+        seen_at[pivot] = -1;
+        decision_level_counts[level(pivot)]--;
+
         Clause& c = ca[confl];
         assert(var(c[0]) == pivot);
 
         if (c.learnt())
             claBumpActivity(c);
 
-        seen[pivot] = 0;
-        decision_level_counts[level(pivot)]--;
+        if (mode == 0 && pivot == asserting_variable) {
+            asserting_variable = var_Undef;
+        }
 
         // Account for new primary variables. Check whether one of them is right of the old rightmost primary variable.
         for (int j = 1; j < c.size(); j++) {
             Var v = var(c[j]);
-            if (variable_type[v] == primary_type && !seen[v]) {
-                seen[v] = 1;
+            if (variable_type[v] == primary_type && seen_at[v] == -1) {
+                seen_at[v] = variables_at[variable_depth[v]].size();
+                variables_at[variable_depth[v]].push(v);
                 varBumpActivity(v);
                 decision_level_counts[level(v)]++;
-                if (rightmost_primary < v) {
-                    rightmost_primary = v;
+                if (rightmost_depth < variable_depth[v]) { // TODO: Branchless alternative?
+                    rightmost_depth = variable_depth[v];
                 }
             }
         }
         // If no new rightmost primary was found, search from the old rightmost primary, reducing along the way.
-        if (!seen[rightmost_primary]) {
-            for (; rightmost_primary >= 0 && (!seen[rightmost_primary] || variable_type[rightmost_primary] == other_type); rightmost_primary--) {
-                if (seen[rightmost_primary]) {
-                    // Universal variable, reduce.
-                    assert(variable_type[rightmost_primary] == other_type);
-                    seen[rightmost_primary] = 0;
-                    decision_level_counts[level(rightmost_primary)]--;
-                }
+        while (rightmost_depth > -1 && (quantifier_blocks_type[rightmost_depth] == other_type || !variables_at[rightmost_depth].size())) {
+            for (int i = 0; i < variables_at[rightmost_depth].size(); i++) {
+                Var v = variables_at[rightmost_depth][i];
+                seen_at[v] = -1;
+                decision_level_counts[level(v)]--;
             }
+            variables_at[rightmost_depth].clear();
+            rightmost_depth--;
         }
         // Add blocked universal variables from reason clause.
-        if (rightmost_primary != var_Undef) {
-            if (rightmost_primary < leftmost_blocked_var) {
+        if (rightmost_depth > -1) {
+            if (rightmost_depth < variable_depth[leftmost_blocked_var]) {
                 leftmost_blocked_var = var_Undef;
             }
             for (int j = 1; j < c.size(); j++) {
                 Var v = var(c[j]);
-                if (!seen[v] && variable_type[v] == other_type && v < rightmost_primary) {
-                    seen[v] = 1;
+                if (seen_at[v] == -1 && variable_type[v] == other_type && variable_depth[v] < rightmost_depth) {
+                    seen_at[v] = variables_at[variable_depth[v]].size();
+                    variables_at[variable_depth[v]].push(v);
                     varBumpActivity(v);
                     decision_level_counts[level(v)]++;
-                    leftmost_blocked_var = ((leftmost_blocked_var == var_Undef || v < leftmost_blocked_var) && level(v) == max_dl && (reason(v) == CRef_Undef || reasonType(v) != ct)) ? v : leftmost_blocked_var;
                 }
             }
             // Check if the maximum decision level present in the current clause/term has changed.
             if (!decision_level_counts[max_dl]) {
-                while (!decision_level_counts[max_dl]) max_dl--;
-                index = trail_lim[max_dl];
+                while (max_dl && !decision_level_counts[max_dl]) max_dl--;
+                index = trail_lim[max_dl] - 1;
+                dl_start = max_dl ? trail_lim[max_dl - 1] : 0;
                 leftmost_blocked_var = var_Undef;
-                for (Var v = rightmost_primary - 1; v >= 0; v--) {
-                    if (seen[v] && variable_type[v] == other_type && level(v) == max_dl && (reason(v) == CRef_Undef || reasonType(v) != ct)) { // TODO: More efficiently.
-                        leftmost_blocked_var = v;
-                    }
-                }
+            }
+            if (mode == 0 && (asserting_variable == var_Undef || rightmost_depth < variable_depth[asserting_variable])) {
+                asserting_variable = (decision_level_counts[max_dl] > 1)? var_Undef: getAssertingVar(rightmost_depth, max_dl);
             }
         }
     }
     // The clause represented in "seen" is empty or asserting, translate back to vector.
     out_learnt.clear();
-    if (rightmost_primary != var_Undef) {
+    if (rightmost_depth > -1) {
         int max_dl_var_index = 0;
-        for (int v = 0; v <= rightmost_primary; v++) {
-            if (seen[v]) {
+        for (int d = 0; d <= rightmost_depth; d++) {
+            for (int i = 0; i < variables_at[d].size(); i++) {
+                Var v = variables_at[d][i];
                 out_learnt.push(v == r? ~mkLit(v, primary_type ^ toInt(value(v))) : mkLit(v, primary_type ^ toInt(value(v))));
                 max_dl_var_index = (level(v) > level(var(out_learnt[max_dl_var_index]))) ? out_learnt.size() - 1 : max_dl_var_index;
+                seen_at[v] = -1;
+                seen[v] = 1;
             }
+            variables_at[d].clear();
         }
         // Move max dl. variable to index 0.
         Lit tmp = out_learnt[0];
@@ -732,7 +648,7 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool& l
     }
 
     if (out_learnt.size()) {
-        rightmost_primary = var_Undef;
+        Var rightmost_primary = var_Undef;
         for (int k = 0; k < j; k++) {
             Var v = var(out_learnt[k]);
             rightmost_primary = (rightmost_primary < v && variable_type[v] == primary_type) ? v : rightmost_primary;
@@ -780,8 +696,160 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool& l
         out_learnt[1]     = p;
         out_btlevel       = level(var(p));
     }
+
+    // for (int i = 0; i < out_learnt.size(); i++) {
+    //     varBumpActivity(var(out_learnt[i]), var_inc * ((double)learnts_literals[ct]/nLearnts(ct) - out_learnt.size()));
+    // }
 }
 
+void Solver::analyzeLDQ(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool& learn_dependency, bool& ct) {
+    learn_dependency = false;
+    bool primary_type = (ct == ConstraintTypes::Clauses);
+    bool other_type = !primary_type;
+    Var asserting_variable, second_watcher_variable;
+    int iterations = 0;
+
+    vec<int> decision_level_counts(decisionLevel() + 1);
+    int rightmost_depth = -1;
+
+    #ifndef NDEBUG
+    printf("Conflict: ");
+    printClause(confl);
+    #endif
+
+    Clause& c = ca[confl];
+
+    for (int i = 0; i < c.size(); i++) {
+        Var v = var(c[i]);
+        assert(v < nVars());
+        if (variable_type[v] == primary_type) {
+            seen[v] = 1;
+            rightmost_depth = (rightmost_depth < variable_depth[v]) ? variable_depth[v] : rightmost_depth;
+            decision_level_counts[level(v)]++;
+        }
+    }
+    if (rightmost_depth > -1) {
+        for (int i = 0; i < c.size(); i++) {
+            Var v = var(c[i]);
+            assert(v >= 0);
+            if (variable_depth[v] <= rightmost_depth) {
+                varBumpActivity(v);
+                assert(value(v) == l_Undef || level(v) >= 0);
+                seen_at[toInt(c[i])] = variables_at[variable_depth[v]].size();
+                variables_at[variable_depth[v]].push(toInt(c[i]));
+            }
+        }
+    }
+
+    int max_dl = decisionLevel();
+    while (max_dl && !decision_level_counts[max_dl]) max_dl--;
+    int index = trail.size();
+
+    #ifndef NDEBUG
+    printTrail();
+    #endif
+    while (rightmost_depth > -1 && (max_dl == 0 || decision_level_counts[max_dl] > 1 || !isAsserting(rightmost_depth, asserting_variable = getAssertingVarLDQ(rightmost_depth, max_dl), second_watcher_variable))) {
+        iterations++;
+        assert(iterations < 2*trail.size());
+        Var pivot = nextPivot(index);
+        #ifndef NDEBUG
+        printf("Pivot: %d\n", variable_names[pivot]);
+        #endif
+        assert(reason(pivot) != CRef_Undef);
+        Clause& c = ca[reason(pivot)];
+        if (c.learnt())
+            claBumpActivity(c);
+        #ifndef NDEBUG
+        printf("Reason: ");
+        printClause(reason(pivot));
+        #endif
+
+        // Remove pivot variable from current clause/term.
+        int pivot_int = toInt(mkLit(pivot, primary_type ^ toInt(value(pivot))));
+        int w = variables_at[variable_depth[pivot]].last();
+        variables_at[variable_depth[pivot]][seen_at[pivot_int]] = w;
+        variables_at[variable_depth[pivot]].pop();
+        seen_at[w] = seen_at[pivot_int];
+        seen_at[pivot_int] = -1;
+        decision_level_counts[level(pivot)]--;
+        seen[pivot] = 0;
+
+        for (int j = 1; j < c.size(); j++) {
+            Lit q = c[j];
+            Var v = var(c[j]);
+            if (variable_type[v] == primary_type && seen_at[toInt(q)] == -1) {
+                seen[v] = 1;
+                seen_at[toInt(q)] = variables_at[variable_depth[v]].size();
+                variables_at[variable_depth[v]].push(toInt(q));
+                varBumpActivity(v);
+                decision_level_counts[level(v)]++;
+                if (rightmost_depth < variable_depth[v]) {
+                    rightmost_depth = variable_depth[v];
+                }
+            }
+        }
+        if (level(pivot) == max_dl) {
+            while (max_dl && !decision_level_counts[max_dl]) max_dl--;
+        }
+
+        // If no new rightmost primary was found, search from the old rightmost primary, reducing along the way.
+        while (rightmost_depth > -1 && (quantifier_blocks_type[rightmost_depth] == other_type || !variables_at[rightmost_depth].size())) {
+            for (int i = 0; i < variables_at[rightmost_depth].size(); i++) {
+                seen_at[variables_at[rightmost_depth][i]] = -1;
+            }
+            variables_at[rightmost_depth].clear();
+            rightmost_depth--;
+        }
+        // Add blocked universal variables from reason clause.
+        if (rightmost_depth > -1) {
+            for (int j = 1; j < c.size(); j++) {
+                int lit_int = toInt(c[j]);
+                Var v = var(c[j]);
+                if (seen_at[lit_int] == -1 && variable_type[v] == other_type && variable_depth[v] < rightmost_depth) {
+                    seen_at[lit_int] = variables_at[variable_depth[v]].size();
+                    variables_at[variable_depth[v]].push(lit_int);
+                    varBumpActivity(v);
+                }
+            }
+        }
+    }
+
+    int asserting_index = -1;
+    int second_watcher_index = -1;
+
+    for (int d = 0; d <= rightmost_depth; d++) {
+        for (int i = 0; i < variables_at[d].size(); i++) {
+            Lit p = toLit(variables_at[d][i]);
+            if (var(p) == asserting_variable)
+                asserting_index = out_learnt.size();
+            else if (var(p) == second_watcher_variable)
+                second_watcher_index = out_learnt.size();
+            out_learnt.push(p);
+        }
+    }
+    clearSeenAt(rightmost_depth);
+
+    if (out_learnt.size() > 1) {
+        Lit p = out_learnt[asserting_index];
+        out_learnt[asserting_index] = out_learnt[0];
+        out_learnt[0] = p;
+        second_watcher_index = (second_watcher_index == 0) ? asserting_index : second_watcher_index;
+        p = out_learnt[second_watcher_index];
+        out_learnt[second_watcher_index] = out_learnt[1];
+        out_learnt[1] = p;
+        out_btlevel = level(var(p));
+    } else {
+        out_btlevel = 0;
+    }
+
+    #ifndef NDEBUG
+    printf("Learnt %s: ", primary_type ? "clause" : "term");
+    printClause(out_learnt);
+    #endif
+ 
+    for (int i = 0; i < out_learnt.size(); i++)
+        seen[var(out_learnt[i])] = 0;
+}
 
 // Check if 'p' can be removed from a conflict clause.
 bool Solver::litRedundant(Lit p, bool ct)
@@ -908,6 +976,7 @@ void Solver::uncheckedEnqueue(Lit p, CRef from, bool constraint_type)
 CRef Solver::propagate(bool& ct)
 {
     CRef    confl     = CRef_Undef;
+    Lit     q         = lit_Undef;
     int     num_props = 0;
 
     while (qhead < trail.size()){
@@ -951,8 +1020,134 @@ CRef Solver::propagate(bool& ct)
 
                 // Did not find watch -- clause is unit under assignment:
                 *j++ = w;
-                if (value(first) == l_vanishing) {
+                if (value(first) == l_vanishing || (mode == 0 && variable_type[var(first)] == (ct_ == ConstraintTypes::Terms))) {
                     // Clause falsified.
+                    q = first;
+                    ct = ct_;
+                    confl = cr;
+                    qhead = trail.size();
+                    // Copy the remaining watches:
+                    while (i < end)
+                        *j++ = *i++;
+                } else {
+                    uncheckedEnqueue(ct_ == Clauses ? first : ~first, cr, ct_);
+                }
+
+            NextClause:;
+            }
+            ws.shrink(i - j);
+        }
+    }
+    propagations += num_props;
+    simpDB_props -= num_props;
+
+    if (mode == 0 && q != lit_Undef && value(q) == l_Undef) {
+        uncheckedEnqueue(ct == Clauses ? ~q : q);
+    }
+
+    return confl;
+}
+
+CRef Solver::propagateLDQ(bool& ct)
+{
+    CRef    confl     = CRef_Undef;
+    Lit     q         = lit_Undef;
+    int     num_props = 0;
+
+    while (qhead < trail.size()){
+        num_props++;
+        Lit            p   = trail[qhead++];     // 'p' is enqueued fact to propagate.
+        
+        for (auto ct_ : { Clauses, Terms } ) {
+            lbool l_disabling = (ct_ == Clauses) ? l_True : l_False;
+            lbool l_vanishing = (ct_ == Clauses) ? l_False : l_True;
+            bool primary = (ct_ == Clauses);
+            bool secondary = !primary;
+
+            vec<Watcher>&  ws  = watches[ct_]->lookup(p);
+            Watcher        *i, *j, *end;
+
+            for (i = j = (Watcher*)ws, end = i + ws.size();  i != end;){
+                // Try to avoid inspecting the clause:
+                Lit blocker = i->blocker;
+                if (value(blocker) == l_disabling){
+                    *j++ = *i++; continue; }
+
+                // Make sure the false literal is data[1]:
+                CRef     cr        = i->cref;
+                Clause&  c         = ca[cr];
+                Lit      false_lit = (ct_ == Clauses) ? ~p : p;
+                if (c[0] == false_lit)
+                    c[0] = c[1], c[1] = false_lit;
+                i++;
+                // Skip spurious entries.
+                if (c[1] != false_lit) {
+                    continue;    
+                }
+
+                #ifndef NDEBUG
+                printTrail();
+                printf("Propagating %s: ", primary ? "clause": "term");
+                printClause(cr);
+                #endif
+
+                // If 0th watch is true, then clause is already satisfied.
+                Lit     first = c[0];
+                Watcher w     = Watcher(cr, first);
+                if (first != blocker && value(first) == l_disabling) {
+                    *j++ = w;
+                    continue; 
+                }
+
+                // If a literal satisfies the clause, do not touch the watchers.
+                int k;
+                for (k = 2; k < c.size(); k++) {
+                    if (value(c[k]) == l_disabling) {
+                        break;
+                    }
+                }
+                if (k < c.size()) {
+                    *j++ = w;
+                    continue;
+                }
+
+                // Every remaining literal is unassigned or falsified.
+                if (variable_type[var(first)] == primary) {
+                    // Look for new primary watch or secondary that is blocked by var(first).
+                    for (int k = 2; k < c.size(); k++)
+                        if (value(c[k]) != l_vanishing && (variable_type[var(c[k])] == primary || var(c[k]) < var(first))) {
+                            c[1] = c[k]; c[k] = false_lit;
+                            (*watches[ct_])[(ct_ == Clauses) ? ~c[1] : c[1]].push(w);
+                            goto NextClause; }
+                } else {
+                    // First literal is a secondary literal.
+                    // Find a new primary to watch.
+                    for (k = 2; k < c.size(); k++)
+                        if (value(c[k]) != l_vanishing && variable_type[var(c[k])] == primary)
+                            break;
+                    if (k < c.size()) {
+                        // New primary found. Try to find a new primary or secondary that is blocked by var(c[0]);
+                        c[0] = c[k];
+                        c[k] = first;
+                        (*watches[ct_])[(ct_ == Clauses) ? ~c[0] : c[0]].push(w);
+                        for (int h = 2; h < c.size(); h++)
+                            if (value(c[h]) != l_vanishing && (variable_type[var(c[h])] == primary || var(c[h]) < var(c[0]))) {
+                                c[1] = c[h]; c[h] = false_lit;
+                                // Check if new watcher happens to be the original first literal. This clause is already on its watched list.
+                                if (first != c[h])
+                                    (*watches[ct_])[(ct_ == Clauses) ? ~c[1] : c[1]].push(w);
+                                goto NextClause;
+                            }
+                        // No new second watcher found. Clause/term is unit and c[1] (primary) remains a watcher.
+                        first = c[0];
+                    }
+                }
+
+                // Did not find watch -- clause is unit under assignment:
+                *j++ = w;
+                if (value(first) == l_vanishing || variable_type[var(first)] == secondary) {
+                    // Clause falsified.
+                    q = first;
                     ct = ct_;
                     confl = cr;
                     qhead = trail.size();
@@ -985,23 +1180,27 @@ CRef Solver::propagate(bool& ct)
 |________________________________________________________________________________________________@*/
 struct reduceDB_lt { 
     ClauseAllocator& ca;
-    reduceDB_lt(ClauseAllocator& ca_) : ca(ca_) {}
+    CMap<int>& LBDs;
+    reduceDB_lt(ClauseAllocator& ca_, CMap<int>& LBDs_) : ca(ca_), LBDs(LBDs_) {}
     bool operator () (CRef x, CRef y) { 
-        return ca[x].size() > 2 && (ca[y].size() == 2 || ca[x].activity() < ca[y].activity()); } 
+        return LBDs[x] > LBDs[y] || (LBDs[x] == LBDs[y] && (ca[x].activity() < ca[y].activity())); }
 };
 void Solver::reduceDB()
 {
     int     i, j;
-    double  extra_lim = cla_inc / learnts.size();    // Remove any clause below this activity
-
-    sort(learnts, reduceDB_lt(ca));
-    // Don't delete binary or locked clauses. From the rest, delete clauses from the first half
-    // and clauses with activity smaller than 'extra_lim':
-    for (i = j = 0; i < learnts.size(); i++){
+    sort(learnts, reduceDB_lt(ca, constraint_LBD));
+    int learnt_counts[2] = {0, 0};
+    for (int i = 0; i < learnts.size(); i++)
+        learnt_counts[constraint_type[learnts[i]]]++;
+    // Don't delete binary or locked constraints. From the rest, delete constraints from the first half:
+    int learnts_removed[2] = {0, 0};
+    for (i = j = 0; i < learnts.size(); i++) {
         Clause& c = ca[learnts[i]];
-        if (c.size() > 2 && !locked(c) && (i < learnts.size() / 2 || c.activity() < extra_lim))
+        auto c_type = constraint_type[learnts[i]];
+        if (constraint_LBD[learnts[i]] > 2 && !locked(c) && (learnts_removed[c_type] < (learnt_counts[c_type] / 2))) {
             removeClause(learnts[i]);
-        else
+            learnts_removed[c_type]++;
+        } else
             learnts[j++] = learnts[i];
     }
     learnts.shrink(i - j);
@@ -1091,7 +1290,7 @@ bool Solver::simplify()
     rebuildOrderHeap();
 
     simpDB_assigns = nAssigns();
-    simpDB_props   = clauses_literals + learnts_literals;   // (shouldn't depend on stats really, but it will do for now)
+    simpDB_props   = clauses_literals + learnts_literals[ConstraintTypes::Clauses];   // (shouldn't depend on stats really, but it will do for now)
 
     return true;
 }
@@ -1121,7 +1320,7 @@ lbool Solver::search(int nof_conflicts)
     starts++;
 
     for (;;){
-        CRef confl = propagate(ct);
+        CRef confl = (mode == 2) ? propagateLDQ(ct) : propagate(ct);
         if (confl != CRef_Undef){
             // CONFLICT
             conflict: // goto label
@@ -1129,7 +1328,11 @@ lbool Solver::search(int nof_conflicts)
             conflicts++; conflictC++;
 
             learnt_clause.clear();
-            analyze(confl, learnt_clause, backtrack_level, learn_dependency, ct);
+            if (mode == 2) {
+                analyzeLDQ(confl, learnt_clause, backtrack_level, learn_dependency, ct);
+            } else {
+                analyze(confl, learnt_clause, backtrack_level, learn_dependency, ct);
+            }
             if (learnt_clause.size() == 0) return (ct == Clauses) ? l_False : l_True;
             if (learn_dependency) {
                 nr_dependencies++;
@@ -1158,16 +1361,17 @@ lbool Solver::search(int nof_conflicts)
                     watched.shrink(1);
                 }
             } else {
+                int lbd = computeLBD(learnt_clause);
                 cancelUntil(backtrack_level);
                 CRef cr = ca.alloc(learnt_clause, true);
                 learnts.push(cr);
                 constraint_type.insert(cr, ct);
-                //constraint_type[cr] = ct;
-
+                constraint_LBD.insert(cr, lbd);
                 if (learnt_clause.size() > 1) {
                     attachClause(cr);
                     claBumpActivity(ca[cr]);
                 }
+                assert(mode == 1 || variable_type[var(learnt_clause[0])] == (ct == ConstraintTypes::Clauses));
                 uncheckedEnqueue((ct == Clauses) ? learnt_clause[0] : ~learnt_clause[0], cr, ct);
 
 
@@ -1180,10 +1384,13 @@ lbool Solver::search(int nof_conflicts)
                     max_learnts             *= learntsize_inc;
 
                     if (verbosity >= 1)
-                        printf("| %9d | %7d %8d %8d | %8d %8d %6.0f | %6.3f %% |\n", 
-                            (int)conflicts, 
-                            (int)dec_vars - (trail_lim.size() == 0 ? trail.size() : trail_lim[0]), nClauses(), (int)clauses_literals, 
-                            (int)max_learnts, nLearnts(), (double)learnts_literals/nLearnts(), progressEstimate()*100);
+                        printf("| %9d | %12d | %8d %8d %6.0f %8d %6.0f | %6.3f %% |\n", 
+                            (int)conflicts,
+                            (int)nr_dependencies,
+                            (int)max_learnts,
+                            nLearnts(ConstraintTypes::Clauses), (double)learnts_literals[ConstraintTypes::Clauses]/ nLearnts(ConstraintTypes::Clauses),
+                            nLearnts(ConstraintTypes::Terms),   (double)learnts_literals[ConstraintTypes::Terms]  / nLearnts(ConstraintTypes::Terms),
+                            random_var_freq * 100);
                 }
             }
 
@@ -1304,10 +1511,10 @@ lbool Solver::solve_()
     lbool   status            = l_Undef;
 
     if (verbosity >= 1){
-        printf("============================[ Search Statistics ]==============================\n");
-        printf("| Conflicts |          ORIGINAL         |          LEARNT          | Progress |\n");
-        printf("|           |    Vars  Clauses Literals |    Limit  Clauses Lit/Cl |          |\n");
-        printf("===============================================================================\n");
+        printf("==============================[ Search Statistics ]===============================\n");
+        printf("| Conflicts | Dependencies |           LEARNT                         | rnd_freq |\n");
+        printf("|           |              |   Limit   Clauses Lit/Cl    Terms  Lit/T |          |\n");
+        printf("==================================================================================\n");
     }
 
     allocInitialTerm();
@@ -1324,10 +1531,11 @@ lbool Solver::solve_()
         if (!withinBudget()) break;
         curr_restarts++;
         if (use_dependency_learning && (curr_restarts + 1) % 20 == 0) resetDependencies();
+        random_var_freq *= 0.995;
     }
 
     if (verbosity >= 1)
-        printf("===============================================================================\n");
+        printf("==================================================================================\n");
 
 
     if (status == l_True){
@@ -1337,6 +1545,7 @@ lbool Solver::solve_()
     }else if (status == l_False && conflict.size() == 0)
         ok = false;
 
+    saveOutermostAssignment();
     cancelUntil(0);
     return status;
 }
@@ -1498,6 +1707,7 @@ void Solver::relocAll(ClauseAllocator& to)
 
     // New constraint type map.
     CMap<bool> constraint_type_;
+    CMap<int>  constraint_LBD_;
     //std::unordered_map<unsigned int, bool> constraint_type_;
 
     // All learnt:
@@ -1506,8 +1716,10 @@ void Solver::relocAll(ClauseAllocator& to)
     for (i = j = 0; i < learnts.size(); i++)
         if (!isRemoved(learnts[i])){
             auto ct = constraint_type[learnts[i]];
+            auto lbd = constraint_LBD[learnts[i]];
             ca.reloc(learnts[i], to);
             constraint_type_.insert(learnts[i], ct);
+            constraint_LBD_.insert(learnts[i], lbd);
             //constraint_type_[learnts[i]] = ct;
             learnts[j++] = learnts[i];
         }
@@ -1543,6 +1755,7 @@ void Solver::relocAll(ClauseAllocator& to)
     terms.shrink(i - j);
 
     constraint_type_.moveTo(constraint_type);
+    constraint_LBD_.moveTo(constraint_LBD);
     //constraint_type_.swap(constraint_type);
 }
 
@@ -1641,7 +1854,10 @@ void Solver::printClause(CRef cr) const {
     for (int i = 0; i < c.size(); i++) {
         Lit p = c[i];
         Var v = variable_names[var(p)];
-        printf("%c%d@%d ", variable_type[var(p)] ? 'e' : 'a', sign(p) ? -v : v, level(var(p)));
+        printf("%c%d", variable_type[var(p)] ? 'e' : 'a', sign(p) ? -v : v);
+        if (value(var(p)) != l_Undef)
+            printf("@%d", level(var(p)));
+        printf(" ");
     }
     printf("\n");
 }
@@ -1650,7 +1866,10 @@ void Solver::printClause(const vec<Lit>& literals) const {
     for (int i = 0; i < literals.size(); i++) {
         Lit p = literals[i];
         Var v = variable_names[var(p)];
-        printf("%c%d@%d ", variable_type[var(p)] ? 'e' : 'a', sign(p) ? -v : v, level(var(p)));
+        printf("%c%d", variable_type[var(p)] ? 'e' : 'a', sign(p) ? -v : v);
+        if (value(var(p)) != l_Undef)
+            printf("@%d", level(var(p)));
+        printf(" ");
     }
     printf("\n");
 }
@@ -1671,6 +1890,16 @@ void Solver::printTrail() const {
 void Solver::printSeen(Var rightmost) const {
     for (int v = 0; v <= rightmost; v++) {
         if (seen[v]) {
+            printf("%c%d@%d ", variable_type[v] ? 'e' : 'a', variable_names[v], level(v));
+        }
+    }
+    printf("\n");
+}
+
+void Solver::printVariablesAt(int rightmost_depth) const {
+    for (int d = 0; d <= rightmost_depth; d++) {
+        for (int i = 0; i < variables_at[d].size(); i++) {
+            Var v = variables_at[d][i];
             printf("%c%d@%d ", variable_type[v] ? 'e' : 'a', variable_names[v], level(v));
         }
     }
@@ -1712,24 +1941,28 @@ void Solver::allocInitialTerm() {
 }
 
 lbool Solver::addTerm(const vec<Lit>& term) {
-    CRef cr = ca.alloc(term, false);
+    vec<Lit> term_copy;
+    term.copyTo(term_copy);
+    reduce(term_copy, false);
+
+    CRef cr = ca.alloc(term_copy, false);
 #ifndef NDEBUG
     printf("Adding term: ");
-    printClause(term);
+    printClause(term_copy);
 #endif
     terms.push(cr);
     //constraint_type[cr] = Terms;
     constraint_type.insert(cr, Terms);
-    if (term.size() == 0) {
+    if (term_copy.size() == 0) {
         return input_status = l_True;
     }
-    if (term.size() == 1){
-        Lit p = term[0];
-        if (!variable_type[var(p)]) {
+    if (term_copy.size() == 1){
+        Lit p = term_copy[0];
+        if (variable_type[var(p)] || value(p) == l_True) {
+            return input_status = l_True;
+        } else {
             uncheckedEnqueue(~p, cr, ConstraintTypes::Terms);
             return l_Undef;
-        } else {
-            return input_status = l_True;
         }
     } else {
         attachClause(cr);
@@ -1832,6 +2065,7 @@ void Solver::resetDependencies() {
         insertVarOrder(v);
     }
     dqhead = 0;
+    nr_dependencies = 0;
 }
 
 bool Solver::hasDependency(Var of, Var on) const {
@@ -1839,4 +2073,93 @@ bool Solver::hasDependency(Var of, Var on) const {
         if (dependencies[of][i] == on) return true;
     }
     return false;
+}
+
+int Solver::computeLBD(vec<Lit>& lits) {
+    IntSet<int> levels_present;
+    for (int i = 0; i < lits.size(); i++) {
+        Var v = var(lits[i]);
+        if (value(v) != l_Undef)
+            levels_present.insert(level(var(lits[i])));
+    }
+    return levels_present.size();
+}
+
+void Solver::reduce(vec<Lit>& lits, bool primary_type) {
+    sort(lits);
+    int i;
+    for (i = lits.size(); i > 0; i--) {
+        assert(i > 0);
+        if (variable_type[var(lits[i-1])] == primary_type)
+            break;
+    }
+    lits.shrink(lits.size() - i);
+}
+
+
+bool Solver::isAsserting(int rightmost_depth, Var asserting_variable, Var& second_watcher_variable) {
+    // A clause is asserting if there is a unique existential of maximum dl (among existentials).
+    // And each universal that it depends on is assigned at a lower dl.
+    bool primary_type = quantifier_blocks_type[rightmost_depth];
+    // There is a unique existential of maximum dl > 0.
+    // Check for blocked secondaries.
+    for (int d = 0; d < variable_depth[asserting_variable]; d++) {
+        if (quantifier_blocks_type[d] == primary_type)
+            continue;
+        for (int i = 0; i < variables_at[d].size(); i++) {
+            Var v = var(toLit(variables_at[d][i]));
+            if (value(v) == l_Undef || level(v) >= level(asserting_variable))
+                return false;
+        }
+    }
+    // Finally, we need a second watcher.
+    second_watcher_variable = var_Undef;
+    int k = 0;
+    for (int d = 0; d <= rightmost_depth; d++) {
+        for (int i = 0; i < variables_at[d].size(); i++) {
+            k++;
+            Var v = var(toLit(variables_at[d][i]));
+            if ((variable_type[v] == primary_type || (v < asserting_variable && value(v) != l_Undef)) && level(v) < level(asserting_variable) && (second_watcher_variable == var_Undef || level(second_watcher_variable) < level(v)))
+                second_watcher_variable = v;
+        }
+    }
+    return k == 1 || second_watcher_variable != var_Undef;
+}
+
+Var Solver::nextPivot(int& index) const {
+    do {
+        index--;
+    } while (index >= 0 && (!seen[var(trail[index])] || reason(var(trail[index])) == CRef_Undef));
+    assert(index >= 0);
+    return var(trail[index]);
+}
+
+void Solver::resolveWith(vec<Lit>& lits, const Clause& c, Var pivot) const {
+    vec<Lit> resolvent;
+    LSet lits_set;
+    for (int i = 0; i < lits.size(); i++) {
+        if (var(lits[i]) != pivot) {
+            lits_set.insert(lits[i]);
+            resolvent.push(lits[i]);
+        }
+    }
+    for (int i = 0; i < c.size(); i++) {
+        if (var(c[i]) != pivot && !lits_set.has(c[i])) {
+            resolvent.push(c[i]);
+        }
+    }
+    resolvent.moveTo(lits);
+}
+
+void Solver::getPartialCertificate(vec<Lit>& certificate) const {
+    outermost_assignment.copyTo(certificate);
+}
+
+void Solver::saveOutermostAssignment() {
+    for (int i = 0; i < quantifier_blocks[0].size(); i++) {
+        Var internal_var = quantifier_blocks[0][i];
+        Var original_var = variable_names[internal_var];
+        bool last_sign = assigns[internal_var] == l_False;
+        outermost_assignment.push(mkLit(original_var, last_sign));
+    }
 }
