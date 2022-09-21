@@ -104,9 +104,11 @@ public:
     // QBF specific:
     //
     void    addQuantifierBlock(vec<Var>& variables, bool existential); // Add a quantifier block.
-    void    traceVector(vec<Lit>& lits);
+    void    traceVector(const vec<Lit>& lits, bool newline=true);
     void    traceResolvent(Var rightmost_primary, Var pivot, Var r, bool primary_type);
     void    traceReduction(vec<Lit>& lits, bool primary_type);
+    void    traceConstraint(uint64_t id, bool constraint_type, const vec<Lit>& lits, const vec<uint64_t>& premise_ids);
+    void    traceInitialTerm();
     int     computeLBD(vec<Lit>& lits);
     void    reduce(vec<Lit>& lits, bool primary_type);
 
@@ -165,6 +167,7 @@ public:
 
     int       restart_first;      // The initial restart limit.                                                                (default 100)
     double    restart_inc;        // The factor with which the restart limit is multiplied in each restart.                    (default 1.5)
+    bool      trace;              // If true, proof tracing is activated.
     double    learntsize_factor;  // The intitial limit for learnt clauses is a factor of the original clauses.                (default 1 / 3)
     double    learntsize_inc;     // The limit for learnt clauses is multiplied with this factor each restart.                 (default 1.1)
 
@@ -280,7 +283,9 @@ protected:
     Var                 max_alias;
     CMap<bool>          constraint_type;
     CMap<int>           constraint_LBD;
+    CMap<uint64_t>      constraint_ID;
     vec<Lit>            outermost_assignment;
+    uint64_t            running_id;
 
     // Resource contraints:
     //
