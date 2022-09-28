@@ -363,6 +363,7 @@ protected:
     Var     nextPivot(int& index) const;
     void    resolveWith(vec<Lit>& lits, const Clause& c, Var pivot) const;
     void    saveOutermostAssignment();
+    Var     getBlockedVariable(Var v);
 
     // Debugging
 
@@ -511,8 +512,8 @@ inline void     Solver::addQuantifierBlock(vec<Var>& variables, bool existential
 inline void     Solver::clearSeenAt(int rightmost_depth) {
     for (int d = 0; d <= rightmost_depth; d++) {
         for (int i = 0; i < variables_at[d].size(); i++) {
-            Var v = variables_at[d][i];
-            seen_at[v] = - 1;
+            int v = variables_at[d][i];
+            seen_at[v] = -1;
         }
         variables_at[d].clear();
     }
@@ -539,6 +540,21 @@ inline Var Solver::getAssertingVar(int rightmost_depth, int asserting_level) {
             Var v = variables_at[d][i];
             if (level(v) == asserting_level) {
                 return v;
+            }
+        }
+    }
+    return var_Undef;
+}
+
+inline Var Solver::getBlockedVariable(Var v) {
+    auto primary_type = quantifier_blocks_type[variable_depth[v]];
+    for (int d = 0; d < variable_depth[v]; d++) {
+        if (quantifier_blocks_type[d] == primary_type)
+            continue;
+        for (int i = 0; i < variables_at[d].size(); i++) {
+            auto literal = toLit(variables_at[d][i]);
+            if (value(literal) == l_Undef || level(var(literal)) >= level(v)) {
+                return var(literal);
             }
         }
     }

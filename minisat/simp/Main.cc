@@ -97,10 +97,10 @@ int main(int argc, char** argv)
         // Use signal handlers that forcibly quit until the solver will be able to respond to
         // interrupts:
         sigTerm(SIGINT_exit);
-        if (dl && mode == 2) {
-            printf("Dependency learning not available in LDQ mode.\n");
-            exit(1);
-        }
+        // if (dl && mode == 2) {
+        //     printf("Dependency learning not available in LDQ mode.\n");
+        //     exit(1);
+        // }
 
         // Try to set resource limits:
         if (cpu_lim != 0) limitTime(cpu_lim);

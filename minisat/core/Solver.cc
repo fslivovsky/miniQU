@@ -778,6 +778,28 @@ void Solver::analyzeLDQ(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool
         iterations++;
         assert(iterations < 2*trail.size());
         Var pivot = nextPivot(index);
+        if (pivot == var_Undef) {
+            // All remaining primary variables are assigned by decision.
+            // In particular, that is the case for the rightmost primary.
+            assert(use_dependency_learning);
+            Var rightmost_primary = var(toLit(variables_at[rightmost_depth].last()));
+            // Find variable left of pivot that is unassigned or was assigned after the rightmost primary.
+            Var var_dependency = getBlockedVariable(rightmost_primary);
+            learn_dependency = true;
+            out_learnt.clear();
+            out_learnt.push(mkLit(rightmost_primary, false));
+            out_learnt.push(mkLit(var_dependency, false));
+            out_btlevel = level(rightmost_primary) - 1;
+            assert(out_btlevel >= 0);
+            for (int d = 0; d <= rightmost_depth; d++) {
+                for (int i = 0; i < variables_at[d].size(); i++) {
+                    auto l = variables_at[d][i];
+                    seen[var(toLit(l))] = 0;
+                }
+            }
+            clearSeenAt(rightmost_depth);
+            return;
+        }
         #ifndef NDEBUG
         printf("Pivot: %d\n", variable_names[pivot]);
         #endif
@@ -792,6 +814,7 @@ void Solver::analyzeLDQ(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool
 
         // Remove pivot variable from current clause/term.
         int pivot_int = toInt(mkLit(pivot, primary_type ^ toInt(value(pivot))));
+        // Swap with last variable at this depth to keep seen_at intact.
         int w = variables_at[variable_depth[pivot]].last();
         variables_at[variable_depth[pivot]][seen_at[pivot_int]] = w;
         variables_at[variable_depth[pivot]].pop();
@@ -1366,14 +1389,14 @@ lbool Solver::search(int nof_conflicts)
                 Var x = var(learnt_clause[0]);
                 Var y = var(learnt_clause[1]);
                 assert(!hasDependency(x, y));
+                #ifndef NDEBUG
+                printf("Learned dependency of %d on %d.\n", variable_names[x], variable_names[y]);
+                #endif
                 dependencies[x].push(y);
                 dependencies[x].last() = dependencies[x][0];
                 dependencies[x][0] = y;
                 dependency_watched_variables[y].push(x);
                 cancelUntil(backtrack_level);
-                #ifndef NDEBUG
-                printf("Learned dependency of %d on %d.\n", variable_names[x], variable_names[y]);
-                #endif
                 if (order_heaps[0]->inHeap(x)) {
                     order_heaps[0]->remove(x);
                 }
@@ -2203,8 +2226,11 @@ Var Solver::nextPivot(int& index) const {
     do {
         index--;
     } while (index >= 0 && (!seen[var(trail[index])] || reason(var(trail[index])) == CRef_Undef));
-    assert(index >= 0);
-    return var(trail[index]);
+    if (index >= 0) {
+        return var(trail[index]);
+    } else {
+        return var_Undef;
+    }
 }
 
 void Solver::resolveWith(vec<Lit>& lits, const Clause& c, Var pivot) const {
