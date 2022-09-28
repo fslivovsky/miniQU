@@ -19,6 +19,7 @@ OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWA
 **************************************************************************************************/
 
 #include <math.h>
+#include <inttypes.h>
 
 #include <algorithm>
 
@@ -47,6 +48,7 @@ static IntOption     opt_restart_first     (_cat, "rfirst",      "The base resta
 static DoubleOption  opt_restart_inc       (_cat, "rinc",        "Restart interval increase factor", 2, DoubleRange(1, false, HUGE_VAL, false));
 static DoubleOption  opt_garbage_frac      (_cat, "gc-frac",     "The fraction of wasted memory allowed before a garbage collection is triggered",  0.20, DoubleRange(0, false, HUGE_VAL, false));
 static IntOption     opt_min_learnts_lim   (_cat, "min-learnts", "Minimum learnt clause limit",  0, IntRange(0, INT32_MAX));
+static BoolOption    opt_trace             (_cat, "trace",       "Output trace to standard error stream", false);
 
 
 //=================================================================================================
@@ -71,6 +73,7 @@ Solver::Solver() :
   , min_learnts_lim  (opt_min_learnts_lim)
   , restart_first    (opt_restart_first)
   , restart_inc      (opt_restart_inc)
+  , trace            (opt_trace)
 
     // Parameters (the rest):
     //
@@ -100,6 +103,7 @@ Solver::Solver() :
   , next_var           (0)
   , dqhead             (0)
   , max_alias          (-1)
+  , running_id         (1)
 
     // Resource constraints:
     //
@@ -239,6 +243,10 @@ bool Solver::addClauseInternal(const vec<Lit>& ps) {
         CRef cr = ca.alloc(ps_copy, false);
         clauses.push(cr);
         constraint_type.insert(cr, Clauses);
+        if (trace) {
+            auto id = running_id++;
+            constraint_ID.insert(cr, id);
+        }
         //constraint_type[cr] = Clauses;
         if (ps_copy.size() == 1){
             p = ps_copy[0];
@@ -264,7 +272,7 @@ void Solver::attachClause(CRef cr) {
     assert(c.size() > 1);
     (*watches[ct])[ct == Terms ? c[0] : ~c[0]].push(Watcher(cr, c[1]));
     (*watches[ct])[ct == Terms ? c[1] : ~c[1]].push(Watcher(cr, c[0]));
-    if (c.learnt()) num_learnts[ct]++, learnts_literals[ct] += constraint_LBD[cr];
+    if (c.learnt()) num_learnts[ct]++, learnts_literals[ct] += c.size();
     else            num_clauses++, clauses_literals += c.size();
 }
 
@@ -283,7 +291,7 @@ void Solver::detachClause(CRef cr, bool strict){
         watches[ct]->smudge(ct == Terms ? c[1] : ~c[1]);
     }
 
-    if (c.learnt()) num_learnts[ct]--, learnts_literals[ct] -= constraint_LBD[cr];
+    if (c.learnt()) num_learnts[ct]--, learnts_literals[ct] -= c.size();
     else            num_clauses--, clauses_literals -= c.size();
 }
 
@@ -410,8 +418,14 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool& l
     learn_dependency = false;
     bool primary_type = (ct == ConstraintTypes::Clauses);
     bool other_type = !primary_type;
+    vec<uint64_t> premise_ids;
+
+    if (trace)
+        premise_ids.push(constraint_ID[confl]);
 
     #ifndef NDEBUG
+    uint64_t id;
+    assert(!trace || (constraint_ID.has(confl, id) && constraint_ID[confl]));
     printf("Conflict %s: ", primary_type ? "clause" : "term");
     printClause(confl);
     printTrail();
@@ -443,6 +457,7 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool& l
                 decision_level_counts[level(v)]++;
                 seen_at[v] = variables_at[variable_depth[v]].size();
                 variables_at[variable_depth[v]].push(v);
+                varBumpActivity(v);
             }
         }
     }
@@ -520,8 +535,15 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool& l
             clearSeenAt(rightmost_depth);
             return;
         }
+        if (trace) {
+            uint64_t id;
+            assert(constraint_ID.has(confl, id));
+            id = constraint_ID[confl];
+            premise_ids.push(id);
+        }
         assert(constraint_type[confl] == ct);
 #ifndef NDEBUG
+        assert(!trace || (constraint_ID.has(confl, id) && constraint_ID[confl]));
         printf("Reason %s: ", primary_type ? "clause" : "term");
         printClause(confl);
         //if (primary_type) traceResolvent(quantifier_blocks[rightmost_depth].last(), pivot, r, primary_type);
@@ -696,6 +718,11 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool& l
         out_btlevel       = level(var(p));
     }
 
+    if (trace) {
+        auto id = running_id;
+        traceConstraint(id, ct, out_learnt, premise_ids);
+    }
+
     // for (int i = 0; i < out_learnt.size(); i++) {
     //     varBumpActivity(var(out_learnt[i]), var_inc * ((double)learnts_literals[ct]/nLearnts(ct) - out_learnt.size()));
     // }
@@ -751,6 +778,28 @@ void Solver::analyzeLDQ(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool
         iterations++;
         assert(iterations < 2*trail.size());
         Var pivot = nextPivot(index);
+        if (pivot == var_Undef) {
+            // All remaining primary variables are assigned by decision.
+            // In particular, that is the case for the rightmost primary.
+            assert(use_dependency_learning);
+            Var rightmost_primary = var(toLit(variables_at[rightmost_depth].last()));
+            // Find variable left of pivot that is unassigned or was assigned after the rightmost primary.
+            Var var_dependency = getBlockedVariable(rightmost_primary);
+            learn_dependency = true;
+            out_learnt.clear();
+            out_learnt.push(mkLit(rightmost_primary, false));
+            out_learnt.push(mkLit(var_dependency, false));
+            out_btlevel = level(rightmost_primary) - 1;
+            assert(out_btlevel >= 0);
+            for (int d = 0; d <= rightmost_depth; d++) {
+                for (int i = 0; i < variables_at[d].size(); i++) {
+                    auto l = variables_at[d][i];
+                    seen[var(toLit(l))] = 0;
+                }
+            }
+            clearSeenAt(rightmost_depth);
+            return;
+        }
         #ifndef NDEBUG
         printf("Pivot: %d\n", variable_names[pivot]);
         #endif
@@ -765,6 +814,7 @@ void Solver::analyzeLDQ(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool
 
         // Remove pivot variable from current clause/term.
         int pivot_int = toInt(mkLit(pivot, primary_type ^ toInt(value(pivot))));
+        // Swap with last variable at this depth to keep seen_at intact.
         int w = variables_at[variable_depth[pivot]].last();
         variables_at[variable_depth[pivot]][seen_at[pivot_int]] = w;
         variables_at[variable_depth[pivot]].pop();
@@ -1339,14 +1389,14 @@ lbool Solver::search(int nof_conflicts)
                 Var x = var(learnt_clause[0]);
                 Var y = var(learnt_clause[1]);
                 assert(!hasDependency(x, y));
+                #ifndef NDEBUG
+                printf("Learned dependency of %d on %d.\n", variable_names[x], variable_names[y]);
+                #endif
                 dependencies[x].push(y);
                 dependencies[x].last() = dependencies[x][0];
                 dependencies[x][0] = y;
                 dependency_watched_variables[y].push(x);
                 cancelUntil(backtrack_level);
-                #ifndef NDEBUG
-                printf("Learned dependency of %d on %d.\n", variable_names[x], variable_names[y]);
-                #endif
                 if (order_heaps[0]->inHeap(x)) {
                     order_heaps[0]->remove(x);
                 }
@@ -1366,6 +1416,10 @@ lbool Solver::search(int nof_conflicts)
                 learnts.push(cr);
                 constraint_type.insert(cr, ct);
                 constraint_LBD.insert(cr, lbd);
+                if (trace) {
+                    auto id = running_id++;
+                    constraint_ID.insert(cr, id);
+                }
                 if (learnt_clause.size() > 1) {
                     attachClause(cr);
                     claBumpActivity(ca[cr]);
@@ -1705,6 +1759,8 @@ void Solver::relocAll(ClauseAllocator& to)
     // New constraint type map.
     CMap<bool> constraint_type_;
     CMap<int>  constraint_LBD_;
+    CMap<uint64_t> constraint_ID_;
+    uint64_t id;
     //std::unordered_map<unsigned int, bool> constraint_type_;
 
     // All learnt:
@@ -1714,10 +1770,13 @@ void Solver::relocAll(ClauseAllocator& to)
         if (!isRemoved(learnts[i])){
             auto ct = constraint_type[learnts[i]];
             auto lbd = constraint_LBD[learnts[i]];
+            if (trace)
+                id = constraint_ID[learnts[i]];
             ca.reloc(learnts[i], to);
             constraint_type_.insert(learnts[i], ct);
             constraint_LBD_.insert(learnts[i], lbd);
-            //constraint_type_[learnts[i]] = ct;
+            if (trace)
+                constraint_ID_.insert(learnts[i], id);
             learnts[j++] = learnts[i];
         }
     learnts.shrink(i - j);
@@ -1726,9 +1785,12 @@ void Solver::relocAll(ClauseAllocator& to)
     //
     for (i = j = 0; i < clauses.size(); i++)
         if (!isRemoved(clauses[i])){
+            if (trace)
+                id = constraint_ID[clauses[i]];
             ca.reloc(clauses[i], to);
             constraint_type_.insert(clauses[i], Clauses);
-            //constraint_type_[clauses[i]] = Clauses;
+            if (trace)
+                constraint_ID_.insert(clauses[i], id);
             clauses[j++] = clauses[i];
         }
     clauses.shrink(i - j);
@@ -1738,22 +1800,26 @@ void Solver::relocAll(ClauseAllocator& to)
     initial_term.setSize(nVars());
     ca.reloc(initial_term_ref, to);
     constraint_type_.insert(initial_term_ref, ConstraintTypes::Terms);
-    //constraint_type_[initial_term_ref] = ConstraintTypes::Terms;
+    if (trace)
+        constraint_ID_.insert(initial_term_ref, 0);
 
     // All terms:
     //
     for (i = j = 0; i < terms.size(); i++)
         if (!isRemoved(terms[i])){
+            if (trace)
+                id = constraint_ID[terms[i]];
             ca.reloc(terms[i], to);
-            //constraint_type_[terms[i]] = Terms;
             constraint_type_.insert(terms[i], Terms);
+            if (trace)
+                constraint_ID_.insert(terms[i], id);
             terms[j++] = terms[i];
         }
     terms.shrink(i - j);
 
     constraint_type_.moveTo(constraint_type);
     constraint_LBD_.moveTo(constraint_LBD);
-    //constraint_type_.swap(constraint_type);
+    constraint_ID_.moveTo(constraint_ID);
 }
 
 
@@ -1844,6 +1910,11 @@ void Solver::getInitialTerm() {
         }
     }
     initial_term.setSize(j);
+    if (trace) {
+        auto id = running_id++;
+        constraint_ID[initial_term_ref] = id;
+        traceInitialTerm();
+    }
 }
 
 void Solver::printClause(CRef cr) const {
@@ -1934,7 +2005,8 @@ void Solver::allocInitialTerm() {
     vec<Lit> all_variables(nVars());
     initial_term_ref = ca.alloc(all_variables, false);
     constraint_type.insert(initial_term_ref, Terms);
-    //constraint_type[initial_term_ref] = Terms;
+    if (trace)
+        constraint_ID.insert(initial_term_ref, 0);
 }
 
 lbool Solver::addTerm(const vec<Lit>& term) {
@@ -1950,6 +2022,8 @@ lbool Solver::addTerm(const vec<Lit>& term) {
     terms.push(cr);
     //constraint_type[cr] = Terms;
     constraint_type.insert(cr, Terms);
+    if (trace)
+        constraint_ID.insert(cr, running_id++);
     if (term_copy.size() == 0) {
         return input_status = l_True;
     }
@@ -2012,12 +2086,16 @@ int Solver::getDecisionBlock() {
     return i;
 }
 
-void Solver::traceVector(vec<Lit>& lits) {
+void Solver::traceVector(const vec<Lit>& lits, bool newline) {
     for (int i = 0; i < lits.size(); i++) {
         Lit p = lits[i];
         fprintf(stderr, "%d ", sign(p) ? -variable_names[var(p)] : variable_names[var(p)]);
     }
-    fprintf(stderr, "0\n");
+    fprintf(stderr, "0");
+    if (newline)
+        fprintf(stderr, "\n");
+    else
+        fprintf(stderr, " ");
 }
 
 void Solver::traceResolvent(Var rightmost_primary, Var pivot, Var r, bool primary_type) {
@@ -2053,6 +2131,27 @@ void Solver::traceReduction(vec<Lit>& lits, bool primary_type) {
         lits.pop();
         traceVector(lits);
     }
+}
+
+void Solver::traceConstraint(uint64_t id, bool constraint_type, const vec<Lit>& lits, const vec<uint64_t>& premise_ids) {
+    fprintf(stderr, "%" PRIu64 " %d ", id, constraint_type);
+    traceVector(lits, false);
+    for (int i = 0; i < premise_ids.size(); i++) {
+        uint64_t premise_id = premise_ids[i];
+        fprintf(stderr, "%" PRIu64 " ", premise_id);
+    }
+    fprintf(stderr, "0 \n");
+}
+
+void Solver::traceInitialTerm() {
+    uint64_t id = constraint_ID[initial_term_ref];
+    fprintf(stderr, "%" PRIu64 " %d ", id, ConstraintTypes::Terms);
+    auto& initial_term = ca[initial_term_ref];
+    for (int i = 0; i < initial_term.size(); i++) {
+        Lit p = initial_term[i];
+        fprintf(stderr, "%d ", sign(p) ? -variable_names[var(p)] : variable_names[var(p)]);
+    }
+    fprintf(stderr, "0 0\n");
 }
 
 void Solver::resetDependencies() {
@@ -2127,8 +2226,11 @@ Var Solver::nextPivot(int& index) const {
     do {
         index--;
     } while (index >= 0 && (!seen[var(trail[index])] || reason(var(trail[index])) == CRef_Undef));
-    assert(index >= 0);
-    return var(trail[index]);
+    if (index >= 0) {
+        return var(trail[index]);
+    } else {
+        return var_Undef;
+    }
 }
 
 void Solver::resolveWith(vec<Lit>& lits, const Clause& c, Var pivot) const {

@@ -81,6 +81,7 @@ int main(int argc, char** argv)
         BoolOption   dl     ("MAIN", "dl",     "Turn on/off dependency learning.", false);
         IntOption    mode   ("MAIN", "mode",   "Propagation mode (0=Q, 1=QU, 2=LDQ).", 0, IntRange(0, 2));
         BoolOption   cert   ("MAIN", "cert",   "Output partial certificate (assignment of first block).", false);
+        BoolOption   qcir   ("MAIN", "qcir",   "Use QCIR parser.", false);
 
         parseOptions(argc, argv, true);
 
@@ -96,10 +97,10 @@ int main(int argc, char** argv)
         // Use signal handlers that forcibly quit until the solver will be able to respond to
         // interrupts:
         sigTerm(SIGINT_exit);
-        if (dl && mode == 2) {
-            printf("Dependency learning not available in LDQ mode.\n");
-            exit(1);
-        }
+        // if (dl && mode == 2) {
+        //     printf("Dependency learning not available in LDQ mode.\n");
+        //     exit(1);
+        // }
 
         // Try to set resource limits:
         if (cpu_lim != 0) limitTime(cpu_lim);
@@ -107,7 +108,7 @@ int main(int argc, char** argv)
 
         std::unique_ptr<QCIRParser> qcir_parser;
 
-        if (argc == 2 && hasEnding(std::string(argv[1]), "qcir")) {
+        if (argc == 2 && (hasEnding(std::string(argv[1]), "qcir") || qcir)) {
             std::string filename_string(argv[1]);
             qcir_parser = std::make_unique<QCIRParser>(filename_string);
             qcir_parser->initSolver(S);

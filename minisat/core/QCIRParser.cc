@@ -79,7 +79,7 @@ void QCIRParser::readOutput(const string& line) {
 
 void QCIRParser::initSolver(Minisat::Solver& solver) {
   std::unordered_map<int, Minisat::Var> alias_to_solver_internal;
-  for (unsigned int i = 1; i < variable_gate_boundary; i++) {
+  for (int i = 1; i < variable_gate_boundary; i++) {
     const Gate& g = gates[i];
     bool is_existential = (g.gate_type == GateType::Existential);
     auto solver_var = solver.newVar(i);
@@ -102,7 +102,6 @@ void QCIRParser::initSolver(Minisat::Solver& solver) {
 
   // Create innermost quantifier blocks for Tseitin variables.
   for (unsigned int i = variable_gate_boundary; i < gates.size(); i++) {
-    const auto& gate = gates[i];
     auto tseitin_var_universal = solver.newVar(i*2+1, Minisat::l_Undef, false);
     gate_alias_to_tseitin_universal[i] = tseitin_var_universal;
     tseitin_block_universal.push(tseitin_var_universal);
