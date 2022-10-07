@@ -35,10 +35,10 @@ QCIRParser::QCIRParser(const string& filename) {
   }
   assert(output_id.size());
   assert(id_to_alias.find(output_id) != id_to_alias.end());
-  std::cerr << "Done parsing " << gates.size() << " gates." << std::endl;
+  std::cout << "Done parsing " << gates.size() << " gates." << std::endl;
 
   /* Remove redundant gates (optional). */
-  std::cerr << "Removed " << removeRedundant() << " redundant gates." << std::endl;
+  std::cout << "Removed " << removeRedundant() << " redundant gates." << std::endl;
   getGatePolarities(polarities, GatePolarity::Positive);
 }
 
