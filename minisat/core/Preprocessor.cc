@@ -9,13 +9,13 @@ Preprocessor::Preprocessor(const CDNF_formula& clauses, const CDNF_formula& term
   // Store each clause and term as a set of literals.
   for (const auto& clause: clauses) {
     addConstraint(clause, false);
-    auto max_var_it = std::max_element(clause.begin(), clause.end(), [](int l1, int l2) { return abs(l1) < abs(l2); });
+    auto max_var_it = std::max_element(clause.begin(), clause.end(), [](int l1, int l2) { return abs(l1) < abs(l2) || (abs(l1) == abs(l2) && l1 < l2); });
     maxvar = std::max(maxvar, abs(*max_var_it));
     touchAll(clause, false);
   }
   for (const auto& term: terms) {
     addConstraint(term, true);
-    auto max_var_it = std::max_element(term.begin(), term.end(), [](int l1, int l2) { return abs(l1) < abs(l2); });
+    auto max_var_it = std::max_element(term.begin(), term.end(), [](int l1, int l2) { return abs(l1) < abs(l2) || (abs(l1) == abs(l2) && l1 < l2); });
     maxvar = std::max(maxvar, abs(*max_var_it));
     touchAll(term, true);
   }
@@ -318,9 +318,9 @@ void Preprocessor::eliminate(int v) {
       }
     }
   }
-  if (positive_occurrences.size() + negative_occurrences.size() < resolvents.size()) {
-    std::cerr << "Eliminating " << v << " occurring in " << positive_occurrences.size() + negative_occurrences.size() << " constraints." << std::endl;
-    std::cerr << "Adding " <<  resolvents.size() << " non-tautological resolvents." << std::endl;
+  if ((resolvents.size()) < (positive_occurrences.size() + negative_occurrences.size() + 200)) {
+    // std::cerr << "Eliminating " << v << " occurring in " << positive_occurrences.size() + negative_occurrences.size() << " constraints." << std::endl;
+    // std::cerr << "Adding " <<  resolvents.size() << " non-tautological resolvents." << std::endl;
     for (auto& c: resolvents) {
       addConstraint(c, ctype);
     }
@@ -342,10 +342,13 @@ void Preprocessor::eliminate(int v) {
 
 bool Preprocessor::canEliminate(int v) {
   bool ctype = isUniversal(v);
-  // Size bounds from Een & Biere (should take a look at Cadical).
-  if (lit_to_occurrences[ctype][v].size() > 15 && lit_to_occurrences[ctype][-v].size() > 15) {
+  if (lit_to_occurrences[ctype][v].empty() && lit_to_occurrences[!ctype][-v].empty()) {
     return false;
   }
+  // Size bounds from Een & Biere (should take a look at Cadical).
+  // if (lit_to_occurrences[ctype][v].size() > 15 && lit_to_occurrences[ctype][-v].size() > 15) {
+  //   return false;
+  // }
   // Variable v to be eliminated may occur only in constraints ctype (only in clauses or only in terms).
   if (!lit_to_occurrences[!ctype][v].empty() || !lit_to_occurrences[!ctype][-v].empty()) {
     return false;

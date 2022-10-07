@@ -2,7 +2,6 @@
 #define MiniQU_Preprocessor_h
 
 #include <unordered_map>
-#include <unordered_set>
 #include <set>
 #include <vector>
 #include <tuple>
@@ -47,7 +46,7 @@ class Preprocessor {
   void boundedVariableElimination();
 
   std::unordered_map<int, std::vector<int>> index_to_lits[2];
-  std::unordered_map<int, std::unordered_set<int>> lit_to_occurrences[2];
+  std::unordered_map<int, std::set<int>> lit_to_occurrences[2];
 
   unsigned int qhead;
   std::vector<int> trail;
