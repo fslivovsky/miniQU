@@ -42,15 +42,15 @@ void Preprocessor::preprocess() {
     index_to_lits[ctype].clear();
     index_to_lits[!ctype].clear();
     index_to_lits[ctype][0] = {};
-    std::cerr << "Formula solved by preprocessing." << std::endl;
+    std::cout << "Formula solved by preprocessing." << std::endl;
   }
-  std::cerr << "Propagated " << nr_units << " unit and " << nr_pure << " pure literals." << std::endl;
-  std::cerr << "Removed " << nr_literals_reduced << " literals by existential/universal reduction." << std::endl;
-  std::cerr << "Strengthened " << nr_self_subsumed << " clauses and terms by self-subsumption." << std::endl;
-  std::cerr << "Removed " << nr_subsumed << " subsumed clauses or terms" << std::endl;
-  std::cerr << "Removed " << nr_blocked << " blocked clauses and terms." << std::endl;
-  std::cerr << "Eliminated " << nr_eliminated << " variables." << std::endl;
-  std::cerr << "==================================================================================" << std::endl;
+  std::cout << "Propagated " << nr_units << " unit and " << nr_pure << " pure literals." << std::endl;
+  std::cout << "Removed " << nr_literals_reduced << " literals by existential/universal reduction." << std::endl;
+  std::cout << "Strengthened " << nr_self_subsumed << " clauses and terms by self-subsumption." << std::endl;
+  std::cout << "Removed " << nr_subsumed << " subsumed clauses or terms" << std::endl;
+  std::cout << "Removed " << nr_blocked << " blocked clauses and terms." << std::endl;
+  std::cout << "Eliminated " << nr_eliminated << " variables." << std::endl;
+  std::cout << "==================================================================================" << std::endl;
 }
 
 std::pair<CDNF_formula, CDNF_formula> Preprocessor::getClausesTerms() {
