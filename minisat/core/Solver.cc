@@ -22,6 +22,7 @@ OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWA
 #include <inttypes.h>
 
 #include <algorithm>
+#include <iostream>
 
 #include "minisat/mtl/Alg.h"
 #include "minisat/mtl/Sort.h"
@@ -48,7 +49,7 @@ static IntOption     opt_restart_first     (_cat, "rfirst",      "The base resta
 static DoubleOption  opt_restart_inc       (_cat, "rinc",        "Restart interval increase factor", 2, DoubleRange(1, false, HUGE_VAL, false));
 static DoubleOption  opt_garbage_frac      (_cat, "gc-frac",     "The fraction of wasted memory allowed before a garbage collection is triggered",  0.20, DoubleRange(0, false, HUGE_VAL, false));
 static IntOption     opt_min_learnts_lim   (_cat, "min-learnts", "Minimum learnt clause limit",  0, IntRange(0, INT32_MAX));
-static BoolOption    opt_trace             (_cat, "trace",       "Output trace to standard error stream", false);
+static StringOption  opt_trace             (_cat, "trace",       "If given, write trace to this file.");
 
 
 //=================================================================================================
@@ -73,7 +74,6 @@ Solver::Solver() :
   , min_learnts_lim  (opt_min_learnts_lim)
   , restart_first    (opt_restart_first)
   , restart_inc      (opt_restart_inc)
-  , trace            (opt_trace)
 
     // Parameters (the rest):
     //
@@ -111,6 +111,10 @@ Solver::Solver() :
   , propagation_budget (-1)
   , asynch_interrupt   (false)
 {
+    if (opt_trace) {
+        trace = true;
+        trace_file.open(opt_trace);
+    }
     watches[0] = new OccLists<Lit, vec<Watcher>, WatcherDeleted, MkIndexLit>(WatcherDeleted(ca));
     watches[1] = new OccLists<Lit, vec<Watcher>, WatcherDeleted, MkIndexLit>(WatcherDeleted(ca));
 }
@@ -2089,13 +2093,13 @@ int Solver::getDecisionBlock() {
 void Solver::traceVector(const vec<Lit>& lits, bool newline) {
     for (int i = 0; i < lits.size(); i++) {
         Lit p = lits[i];
-        fprintf(stderr, "%d ", sign(p) ? -variable_names[var(p)] : variable_names[var(p)]);
+        trace_file << (sign(p) ? -variable_names[var(p)] : variable_names[var(p)]) << " ";
     }
-    fprintf(stderr, "0");
+    trace_file << "0";
     if (newline)
-        fprintf(stderr, "\n");
+        trace_file << "\n";
     else
-        fprintf(stderr, " ");
+        trace_file << " ";
 }
 
 void Solver::traceResolvent(Var rightmost_primary, Var pivot, Var r, bool primary_type) {
@@ -2126,7 +2130,7 @@ void Solver::traceResolvent(Var rightmost_primary, Var pivot, Var r, bool primar
 void Solver::traceReduction(vec<Lit>& lits, bool primary_type) {
     sort(lits, lt_lits);
     while (lits.size() && variable_type[var(lits.last())] != primary_type) {
-        fprintf(stderr, "u ");
+        trace_file << "u ";
         traceVector(lits);
         lits.pop();
         traceVector(lits);
@@ -2134,24 +2138,24 @@ void Solver::traceReduction(vec<Lit>& lits, bool primary_type) {
 }
 
 void Solver::traceConstraint(uint64_t id, bool constraint_type, const vec<Lit>& lits, const vec<uint64_t>& premise_ids) {
-    fprintf(stderr, "%" PRIu64 " %d ", id, constraint_type);
+    trace_file << id << " " << int(constraint_type) << " ";
     traceVector(lits, false);
     for (int i = 0; i < premise_ids.size(); i++) {
         uint64_t premise_id = premise_ids[i];
-        fprintf(stderr, "%" PRIu64 " ", premise_id);
+        trace_file << premise_id << " ";
     }
-    fprintf(stderr, "0 \n");
+    trace_file << "0 \n";
 }
 
 void Solver::traceInitialTerm() {
     uint64_t id = constraint_ID[initial_term_ref];
-    fprintf(stderr, "%" PRIu64 " %d ", id, ConstraintTypes::Terms);
+    trace_file << id << " " << int(ConstraintTypes::Terms) << " ";
     auto& initial_term = ca[initial_term_ref];
     for (int i = 0; i < initial_term.size(); i++) {
         Lit p = initial_term[i];
-        fprintf(stderr, "%d ", sign(p) ? -variable_names[var(p)] : variable_names[var(p)]);
+        trace_file << (sign(p) ? -variable_names[var(p)] : variable_names[var(p)]) << " ";
     }
-    fprintf(stderr, "0 0\n");
+    trace_file << "0 0\n";
 }
 
 void Solver::resetDependencies() {
