@@ -110,6 +110,7 @@ Solver::Solver() :
   , conflict_budget    (-1)
   , propagation_budget (-1)
   , asynch_interrupt   (false)
+  , trace              (false)
 {
     if (opt_trace) {
         trace = true;
@@ -1604,6 +1605,10 @@ lbool Solver::solve_()
 
     saveOutermostAssignment();
     cancelUntil(0);
+    // TODO: Why can't we do the following in the destructor?
+    if (trace) {
+        trace_file.flush();
+    }
     return status;
 }
 
