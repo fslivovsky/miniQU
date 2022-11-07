@@ -113,6 +113,8 @@ public:
     void    traceInitialTerm();
     int     computeLBD(vec<Lit>& lits);
     void    reduce(vec<Lit>& lits, bool primary_type);
+    int     minimize(Lit lit, int asserting_level, bool constraint_type, int depth = 0);
+    int     minimize(vec<Lit>& lits, bool constraint_type);
 
     // Read state:
     //
@@ -213,6 +215,19 @@ protected:
         VarOrderLt(const IntMap<Var, double>&  act) : activity(act) { }
     };
 
+    // For clause/term minimization.
+    struct MinimizeLT{
+        MinimizeLT(Solver& solver, int asserting_level, bool ct): solver(solver), asserting_level(asserting_level), ct(ct) {}
+        Solver& solver;
+        int asserting_level;
+        bool ct;
+        bool operator () (Lit a, Lit b) {
+            auto ca = solver.minimize(a, asserting_level, ct);
+            auto cb = solver.minimize(b, asserting_level, ct);
+            return (ca < cb || (ca == cb && solver.variable_depth[var(a)] > solver.variable_depth[var(b)]));
+        }
+    };
+
     struct ShrinkStackElem {
         uint32_t i;
         Lit      l;
@@ -258,6 +273,8 @@ protected:
     //
 
     vec<char>           seen;
+    vec<int>            removable_if;
+    vec<Var>            minimize_seen;
     vec<ShrinkStackElem>analyze_stack;
     vec<Lit>            analyze_toclear;
     vec<Lit>            add_tmp;
