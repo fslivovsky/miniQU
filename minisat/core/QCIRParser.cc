@@ -74,7 +74,9 @@ void QCIRParser::readOutput(const string& line) {
   assert(line.back() == ')');
   auto opening_pos = line.find('(');
   assert(opening_pos == QBFParser::OUTPUT_STRING.size());
-  output_id = line.substr(opening_pos + 1, line.length() - opening_pos - 2);
+  auto output_lit_str = line.substr(opening_pos + 1, line.length() - opening_pos - 2);
+  output_negated = (output_lit_str.front() == '-');
+  output_id = output_negated ? output_lit_str.substr(1) : output_lit_str;
 }
 
 void QCIRParser::initSolver(Minisat::Solver& solver) {
@@ -152,7 +154,7 @@ std::vector<std::vector<int>> QCIRParser::getClausalEncoding(bool get_terms) {
   }
   // Output term.
   auto output_alias = id_to_alias[output_id];
-  clauses.push_back( {output_alias});
+  clauses.push_back( {output_negated ? -output_alias : output_alias});
   return clauses;
 }
 
