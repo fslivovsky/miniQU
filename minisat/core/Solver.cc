@@ -213,8 +213,11 @@ bool Solver::addClause_(vec<Lit>& ps)
     // Remove tautologies
     Lit p; int i, j;
     for (i = j = 0, p = lit_Undef; i < ps_copy.size(); i++) 
-        if (ps_copy[i] != ~p)
+        if (ps_copy[i] != ~p) {
             ps_copy[j++] = p = ps_copy[i];
+        } else {
+            return true;
+        }
     ps_copy.shrink(i - j);
 
     return addClauseInternal(ps_copy);
