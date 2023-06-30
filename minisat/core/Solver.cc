@@ -41,7 +41,7 @@ static DoubleOption  opt_var_decay         (_cat, "var-decay",   "The variable a
 static DoubleOption  opt_clause_decay      (_cat, "cla-decay",   "The clause activity decay factor",              0.999,    DoubleRange(0, false, 1, false));
 static DoubleOption  opt_random_var_freq   (_cat, "rnd-freq",    "The frequency with which the decision heuristic tries to choose a random variable", 0, DoubleRange(0, true, 1, true));
 static DoubleOption  opt_random_seed       (_cat, "rnd-seed",    "Used by the random variable selection",         91648253, DoubleRange(0, false, HUGE_VAL, false));
-static IntOption     opt_ccmin_mode        (_cat, "ccmin-mode",  "Controls conflict clause minimization (0=none, 1=basic, 2=deep)", 0, IntRange(0, 2));
+static IntOption     opt_ccmin_mode        (_cat, "ccmin-mode",  "Controls conflict clause minimization (0=none, 1=basic, 2=deep, 3=new)", 0, IntRange(0, 3));
 static IntOption     opt_phase_saving      (_cat, "phase-saving", "Controls the level of phase saving (0=none, 1=limited, 2=full)", 2, IntRange(0, 2));
 static BoolOption    opt_rnd_init_act      (_cat, "rnd-init",    "Randomize the initial activity", false);
 static BoolOption    opt_luby_restart      (_cat, "luby",        "Use the Luby restart sequence", true);
@@ -168,6 +168,7 @@ Var Solver::newVar(Var alias, lbool upol, bool dvar)
     activity .insert(v, rnd_init_act ? drand(random_seed) * 0.00001 : 0);
     seen_at.push(-1);
     seen.push(0);
+    removable_if.push(-1);
     if (mode == 2) {
         seen_at.push(-1);
     }
@@ -212,8 +213,11 @@ bool Solver::addClause_(vec<Lit>& ps)
     // Remove tautologies
     Lit p; int i, j;
     for (i = j = 0, p = lit_Undef; i < ps_copy.size(); i++) 
-        if (ps_copy[i] != ~p)
+        if (ps_copy[i] != ~p) {
             ps_copy[j++] = p = ps_copy[i];
+        } else {
+            return true;
+        }
     ps_copy.shrink(i - j);
 
     return addClauseInternal(ps_copy);
@@ -237,6 +241,13 @@ bool Solver::addClauseInternal(const vec<Lit>& ps) {
         else if (value(ps_copy[i]) != l_False && ps_copy[i] != p)
             ps_copy[j++] = p = ps_copy[i];
     ps_copy.shrink(i - j);
+
+    // Check for tautologies.
+    for (i = 1; i < ps_copy.size(); i++) {
+        if (ps_copy[i] == ~ps_copy[i-1]) {
+            return true;
+        }
+    }
 
     reduce(ps_copy, true);
 
@@ -495,6 +506,8 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool& l
         // - Resolve out blocking primaries 
 
         while(seen_at[var(trail[index--])] < 0);
+        assert(index + 1 >= 0);
+        assert(index + 1 < trail.size());
         Var pivot = var(trail[index + 1]);
 
         if (index + 1 >= dl_start) {
@@ -669,6 +682,9 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool& l
                         break; }
             }
         }
+    } else if (ccmin_mode == 3) {
+        i = out_learnt.size();
+        j = minimize(out_learnt, ct);
     } else {
         i = j = out_learnt.size();
     }
@@ -731,6 +747,59 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool& l
     // for (int i = 0; i < out_learnt.size(); i++) {
     //     varBumpActivity(var(out_learnt[i]), var_inc * ((double)learnts_literals[ct]/nLearnts(ct) - out_learnt.size()));
     // }
+}
+
+int Solver::minimize(Lit lit, int asserting_level, bool constraint_type, int depth) {
+    auto v = var(lit);
+    if (depth > 1000)
+        return 0; // 0 is "poison".
+    if (depth && seen[v])
+        return INT_MAX;
+    if (removable_if[v] > -1)
+        return removable_if[v];
+    if (level(v) == asserting_level)
+        return 0;
+    if (variable_type[v] == constraint_type)
+        return variable_depth[v];
+    CRef cr = reason(v);
+    if (cr == CRef_Undef || reasonType(v) != constraint_type)
+        return 0;
+    Clause& c = ca[cr];
+    int res = INT_MAX;
+    assert(v == var(c[0]));
+    for (int i = 1; i < c.size(); i++) {
+        Lit other_lit = c[i];
+        auto res_ = minimize(other_lit, asserting_level, constraint_type, depth + 1);
+        if (res_ < res)
+            res = res_;
+        if (!res)
+            break;
+    }
+    minimize_seen.push(v);
+    return removable_if[v] = res;
+}
+
+int Solver::minimize(vec<Lit>& lits, bool constraint_type) {
+    if (!lits.size())
+        return 0;
+    // We assume that the first literal is asserting.
+    auto alevel = level(var(lits[0]));
+    int innermost_depth = variable_depth[var(lits[0])];
+    MinimizeLT minimize_lt(*this, alevel, constraint_type);
+    sort(&lits[1], lits.size() - 1, minimize_lt);
+    int i, j;
+    for (i = j = 1; i < lits.size(); i++) {
+        auto v = var(lits[i]);
+        if (minimize(lits[i], alevel, constraint_type) <= innermost_depth) {
+            lits[j++] = lits[i];
+            if (variable_type[v] != constraint_type && innermost_depth < variable_depth[v])
+                innermost_depth = variable_depth[v];
+        }
+    }
+    for (int i = 0; i < minimize_seen.size(); i++)
+        removable_if[minimize_seen[i]] = -1;
+    minimize_seen.clear ();
+    return j;
 }
 
 void Solver::analyzeLDQ(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool& learn_dependency, bool& ct) {
@@ -2021,6 +2090,23 @@ void Solver::allocInitialTerm() {
 lbool Solver::addTerm(const vec<Lit>& term) {
     vec<Lit> term_copy;
     term.copyTo(term_copy);
+
+    sort(term_copy);
+
+    // Check for contradictions.
+    for (int i = 1; i < term_copy.size(); i++) {
+        if (term_copy[i] == ~term_copy[i-1]) {
+            return l_Undef;
+        }
+    }
+
+    // Remove duplicate literals.
+    Lit p; int i, j;
+    for (i = j = 0, p = lit_Undef; i < term_copy.size(); i++)
+        if (term_copy[i] != p)
+            term_copy[j++] = p = term_copy[i];
+    term_copy.shrink(i - j);
+
     reduce(term_copy, false);
 
     CRef cr = ca.alloc(term_copy, false);

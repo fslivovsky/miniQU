@@ -80,6 +80,7 @@ protected:
   unsigned int max_quantifier_depth;
   int max_alias;
   string output_id;
+  bool output_negated;
   unordered_map<string, int> id_to_alias;
   vector<Gate> gates;
   int variable_gate_boundary;
