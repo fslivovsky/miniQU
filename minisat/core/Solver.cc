@@ -2100,6 +2100,13 @@ lbool Solver::addTerm(const vec<Lit>& term) {
         }
     }
 
+    // Remove duplicate literals.
+    Lit p; int i, j;
+    for (i = j = 0, p = lit_Undef; i < term_copy.size(); i++)
+        if (term_copy[i] != p)
+            term_copy[j++] = p = term_copy[i];
+    term_copy.shrink(i - j);
+
     reduce(term_copy, false);
 
     CRef cr = ca.alloc(term_copy, false);
