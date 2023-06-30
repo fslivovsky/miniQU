@@ -242,6 +242,13 @@ bool Solver::addClauseInternal(const vec<Lit>& ps) {
             ps_copy[j++] = p = ps_copy[i];
     ps_copy.shrink(i - j);
 
+    // Check for tautologies.
+    for (i = 1; i < ps_copy.size(); i++) {
+        if (ps_copy[i] == ~ps_copy[i-1]) {
+            return true;
+        }
+    }
+
     reduce(ps_copy, true);
 
     if (ps_copy.size() == 0) {
@@ -499,6 +506,8 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool& l
         // - Resolve out blocking primaries 
 
         while(seen_at[var(trail[index--])] < 0);
+        assert(index + 1 >= 0);
+        assert(index + 1 < trail.size());
         Var pivot = var(trail[index + 1]);
 
         if (index + 1 >= dl_start) {
@@ -2081,6 +2090,16 @@ void Solver::allocInitialTerm() {
 lbool Solver::addTerm(const vec<Lit>& term) {
     vec<Lit> term_copy;
     term.copyTo(term_copy);
+
+    sort(term_copy);
+
+    // Check for contradictions.
+    for (int i = 1; i < term_copy.size(); i++) {
+        if (term_copy[i] == ~term_copy[i-1]) {
+            return l_Undef;
+        }
+    }
+
     reduce(term_copy, false);
 
     CRef cr = ca.alloc(term_copy, false);

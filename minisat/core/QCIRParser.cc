@@ -39,7 +39,7 @@ QCIRParser::QCIRParser(const string& filename) {
 
   /* Remove redundant gates (optional). */
   std::cerr << "Removed " << removeRedundant() << " redundant gates." << std::endl;
-  getGatePolarities(polarities, GatePolarity::Positive);
+  getGatePolarities(polarities, output_negated ? GatePolarity::Negative : GatePolarity::Positive);
 }
 
 void QCIRParser::readQuantifierBlock(const string& line) {
