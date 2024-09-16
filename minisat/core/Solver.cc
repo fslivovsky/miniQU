@@ -199,6 +199,7 @@ void Solver::setVarType(Var x, bool is_existential, int depth) {
 
 bool Solver::addClause_(vec<Lit>& ps)
 {
+    running_id++;
     assert(decisionLevel() == 0);
     if (!ok) return false;
 
@@ -260,7 +261,7 @@ bool Solver::addClauseInternal(const vec<Lit>& ps) {
         clauses.push(cr);
         constraint_type.insert(cr, Clauses);
         if (trace) {
-            auto id = running_id++;
+            auto id = running_id - 1;
             constraint_ID.insert(cr, id);
         }
         //constraint_type[cr] = Clauses;
