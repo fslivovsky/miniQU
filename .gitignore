@@ -5,3 +5,5 @@ formula
 formula_min
 wrapper.sh
 dd-discrepancy.sh
+build-cmake
+__pycache__

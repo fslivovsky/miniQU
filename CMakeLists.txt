@@ -1,81 +1,64 @@
-cmake_minimum_required(VERSION 2.6 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.10)
 
-project(minisat)
+project(miniQU CXX)
 
 #--------------------------------------------------------------------------------------------------
 # Configurable options:
 
-option(STATIC_BINARIES "Link binaries statically." ON)
-option(USE_SORELEASE   "Use SORELEASE in shared library filename." ON)
+option(STATIC_BINARIES "Link binaries statically." OFF)
 
-#--------------------------------------------------------------------------------------------------
-# Library version:
-
-set(MINISAT_SOMAJOR   2)
-set(MINISAT_SOMINOR   1)
-set(MINISAT_SORELEASE 0)
-
-# Compute VERSION and SOVERSION:
-if (USE_SORELEASE)
-  set(MINISAT_VERSION ${MINISAT_SOMAJOR}.${MINISAT_SOMINOR}.${MINISAT_SORELEASE})
-else()
-  set(MINISAT_VERSION ${MINISAT_SOMAJOR}.${MINISAT_SOMINOR})
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+  set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type." FORCE)
 endif()
-set(MINISAT_SOVERSION ${MINISAT_SOMAJOR})
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
 
 #--------------------------------------------------------------------------------------------------
 # Dependencies:
 
-find_package(ZLIB)
-include_directories(${ZLIB_INCLUDE_DIR})
-include_directories(${minisat_SOURCE_DIR})
-
-#--------------------------------------------------------------------------------------------------
-# Compile flags:
-
-add_definitions(-D__STDC_FORMAT_MACROS -D__STDC_LIMIT_MACROS)
+find_package(ZLIB REQUIRED)
 
 #--------------------------------------------------------------------------------------------------
 # Build Targets:
 
-set(MINISAT_LIB_SOURCES
+add_library(miniqu-lib STATIC
     minisat/utils/Options.cc
     minisat/utils/System.cc
     minisat/core/Solver.cc
+    minisat/core/QBFParser.cc
+    minisat/core/QCIRParser.cc
     minisat/simp/SimpSolver.cc)
 
-add_library(minisat-lib-static STATIC ${MINISAT_LIB_SOURCES})
-add_library(minisat-lib-shared SHARED ${MINISAT_LIB_SOURCES})
+target_include_directories(miniqu-lib PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(miniqu-lib PUBLIC __STDC_FORMAT_MACROS __STDC_LIMIT_MACROS)
+target_compile_options(miniqu-lib PRIVATE -Wall -Wno-parentheses -Wno-class-memaccess)
+target_link_libraries(miniqu-lib PUBLIC ZLIB::ZLIB)
+set_target_properties(miniqu-lib PROPERTIES OUTPUT_NAME "miniQU")
 
-target_link_libraries(minisat-lib-shared ${ZLIB_LIBRARY})
-target_link_libraries(minisat-lib-static ${ZLIB_LIBRARY})
-
-add_executable(minisat_core minisat/core/Main.cc)
-add_executable(minisat_simp minisat/simp/Main.cc)
+# The solver for QDIMACS and QCIR input.
+add_executable(miniQU minisat/simp/Main.cc)
+target_link_libraries(miniQU miniqu-lib)
 
 if(STATIC_BINARIES)
-  target_link_libraries(minisat_core minisat-lib-static)
-  target_link_libraries(minisat_simp minisat-lib-static)
-else()
-  target_link_libraries(minisat_core minisat-lib-shared)
-  target_link_libraries(minisat_simp minisat-lib-shared)
+  target_link_libraries(miniQU -static)
 endif()
 
-set_target_properties(minisat-lib-static PROPERTIES OUTPUT_NAME "minisat")
-set_target_properties(minisat-lib-shared
-  PROPERTIES
-    OUTPUT_NAME "minisat" 
-    VERSION ${MINISAT_VERSION}
-    SOVERSION ${MINISAT_SOVERSION})
+#--------------------------------------------------------------------------------------------------
+# Tests:
 
-set_target_properties(minisat_simp       PROPERTIES OUTPUT_NAME "minisat")
+enable_testing()
+add_test(NAME fuzz-dependency-learning
+         COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/tests/fuzz.sh $<TARGET_FILE:miniQU> 1 20 -dl)
+add_test(NAME fuzz-prefix-order
+         COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/tests/fuzz.sh $<TARGET_FILE:miniQU> 1 20)
 
 #--------------------------------------------------------------------------------------------------
 # Installation targets:
 
-install(TARGETS minisat-lib-static minisat-lib-shared minisat_core minisat_simp 
+install(TARGETS miniQU miniqu-lib
         RUNTIME DESTINATION bin
-        LIBRARY DESTINATION lib
         ARCHIVE DESTINATION lib)
 
 install(DIRECTORY minisat/mtl minisat/utils minisat/core minisat/simp
