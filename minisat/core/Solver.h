@@ -22,6 +22,8 @@ OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWA
 #define Minisat_Solver_h
 
 #include <fstream>
+#include <memory>
+#include <vector>
 
 #include "minisat/mtl/Vec.h"
 #include "minisat/mtl/Heap.h"
@@ -113,8 +115,6 @@ public:
     void    traceInitialTerm();
     int     computeLBD(vec<Lit>& lits);
     void    reduce(vec<Lit>& lits, bool primary_type);
-    int     minimize(Lit lit, int asserting_level, bool constraint_type, int depth = 0);
-    int     minimize(vec<Lit>& lits, bool constraint_type);
 
     // Read state:
     //
@@ -162,7 +162,8 @@ public:
     double    random_var_freq;
     double    random_seed;
     bool      luby_restart;
-    int       ccmin_mode;         // Controls conflict clause minimization (0=none, 1=basic, 2=deep).
+    int       ccmin_mode;         // Controls conflict clause/term minimization (0=none, 1=basic, 2=deep, 3=deep with reduction).
+    bool      legacy_analyze;     // Use the old conflict analysis in mode 0 (it is always used in mode 1).
     int       phase_saving;       // Controls the level of phase saving (0=none, 1=limited, 2=full).
     bool      rnd_pol;            // Use random polarities for branching heuristics.
     bool      rnd_init_act;       // Initialize variable activities with a small random value.
@@ -215,17 +216,12 @@ protected:
         VarOrderLt(const IntMap<Var, double>&  act) : activity(act) { }
     };
 
-    // For clause/term minimization.
-    struct MinimizeLT{
-        MinimizeLT(Solver& solver, int asserting_level, bool ct): solver(solver), asserting_level(asserting_level), ct(ct) {}
-        Solver& solver;
-        int asserting_level;
-        bool ct;
-        bool operator () (Lit a, Lit b) {
-            auto ca = solver.minimize(a, asserting_level, ct);
-            auto cb = solver.minimize(b, asserting_level, ct);
-            return (ca < cb || (ca == cb && solver.variable_depth[var(a)] > solver.variable_depth[var(b)]));
-        }
+    // For clause/term minimization: a literal together with the result of 'minimize()'.
+    struct MinimizeKey {
+        int bound;
+        Lit lit;
+        MinimizeKey(int b = 0, Lit l = lit_Undef) : bound(b), lit(l) {}
+        bool operator<(const MinimizeKey& other) const { return bound < other.bound; }
     };
 
     struct ShrinkStackElem {
@@ -248,10 +244,13 @@ protected:
     VMap<lbool>         user_pol;         // The users preferred polarity of each variable.
     VMap<char>          decision;         // Declares if a variable is eligible for selection in the decision heuristic.
     VMap<VarData>       vardata;          // Stores reason and level for each variable.
-    OccLists<Lit, vec<Watcher>, WatcherDeleted, MkIndexLit>*
-                        watches[2];       // 'watches[lit]' is a list of constraints watching 'lit' (will go there if literal becomes true).
+    typedef OccLists<Lit, vec<Watcher>, WatcherDeleted, MkIndexLit> WatchLists;
+    std::unique_ptr<WatchLists>
+                        watches[2];       // '(*watches[ct])[lit]' is a list of constraints of type 'ct' watching 'lit' (will go there if literal becomes true).
 
-    Heap<Var,VarOrderLt> **order_heaps;    // A priority queue of variables ordered with respect to the variable activity.
+    std::vector<std::unique_ptr<Heap<Var,VarOrderLt>>>
+                        order_heaps;      // Priority queues of variables ordered with respect to the variable activity
+                                          // (one per quantifier block, or a single one with dependency learning).
 
     bool                ok;               // If FALSE, the constraints are already unsatisfiable. No part of the solver state may be used!
     lbool               input_status;     // l_Undef unless a universal unit clause (l_False) or an existential unit term (l_True) have been added.
@@ -275,6 +274,10 @@ protected:
     vec<char>           seen;
     vec<int>            removable_if;
     vec<Var>            minimize_seen;
+    vec<MinimizeKey>    minimize_keys;
+    vec<Lit>            analyze_lits;     // Literals added to the resolvent during 'analyzeQ()'.
+    vec<int>            level_count;      // Number of primary literals of the resolvent per decision level.
+    vec<Var>            level_blocked;    // Leftmost secondary variable of the resolvent per decision level.
     vec<ShrinkStackElem>analyze_stack;
     vec<Lit>            analyze_toclear;
     vec<Lit>            add_tmp;
@@ -302,9 +305,7 @@ protected:
     CRef                initial_term_ref;
     vec<CRef>           terms;
     Var                 max_alias;
-    CMap<bool>          constraint_type;
-    CMap<int>           constraint_LBD;
-    CMap<uint64_t>      constraint_ID;
+    CMap<uint64_t>      constraint_ID;    // Constraint IDs for tracing.
     vec<Lit>            outermost_assignment;
     uint64_t            running_id;
 
@@ -316,6 +317,8 @@ protected:
 
     // Main internal methods:
     //
+    Heap<Var,VarOrderLt>&
+             orderHeap        (Var x);                                                 // The decision order priority queue of a variable.
     void     insertVarOrder   (Var x);                                                 // Insert a variable in the decision order priority queue.
     Lit      pickBranchLit    ();                                                      // Return the next decision variable.
     void     newDecisionLevel ();                                                      // Begins a new decision level.
@@ -330,7 +333,13 @@ protected:
     void     analyzeLDQ       (CRef confl, vec<Lit>& out_learnt, int& out_btlevel, 
                                bool& learn_dependency, bool& ct); 
     void     analyzeFinal     (Lit p, LSet& out_conflict);                             // COULD THIS BE IMPLEMENTED BY THE ORDINARIY "analyze" BY SOME REASONABLE GENERALIZATION?
+    void     analyzeQ         (CRef confl, vec<Lit>& out_learnt, int& out_btlevel,
+                               bool& learn_dependency, bool ct);                       // Conflict analysis for Q-resolution (mode 0).
+    void     finishLearnt     (vec<Lit>& out_learnt, int& out_btlevel, bool ct,
+                               const vec<uint64_t>& premise_ids);                      // Minimization, reduction, backtrack level.
     bool     litRedundant     (Lit p, bool ct);                                        // (helper method for 'analyze()')
+    int      minimize         (Lit lit, int asserting_level, bool ct, int depth = 0);  // (helper method for 'minimize()')
+    int      minimize         (vec<Lit>& lits, bool ct);                               // Minimize learnt clause/term.
     lbool    search           (int nof_conflicts);                                     // Search for a given number of conflicts.
     lbool    solve_           ();                                                      // Main solve method (assumptions given in 'assumptions').
     void     reduceDB         ();                                                      // Reduce the set of learnt clauses.
@@ -361,6 +370,7 @@ protected:
     CRef     reason           (Var x) const;
     int      level            (Var x) const;
     bool     reasonType       (Var x) const;
+    bool     isPrimary        (Var x, bool ct) const; // Existential variables are primary for clauses, universal variables for terms.
     double   progressEstimate ()      const; // DELETE THIS ?? IT'S NOT VERY USEFUL ...
     bool     withinBudget     ()      const;
     void     relocAll         (ClauseAllocator& to);
@@ -418,15 +428,13 @@ protected:
 inline CRef Solver::reason(Var x) const { return vardata[x].reason; }
 inline int  Solver::level (Var x) const { return vardata[x].level; }
 inline bool Solver::reasonType(Var x) const { return vardata[x].constraint_type; }
+inline bool Solver::isPrimary (Var x, bool ct) const { return (bool)variable_type[x] == (ct == ConstraintTypes::Clauses); }
+
+inline Heap<Var,Solver::VarOrderLt>& Solver::orderHeap(Var x) { return *order_heaps[use_dependency_learning ? 0 : variable_depth[x]]; }
 
 inline void Solver::insertVarOrder(Var x) {
-    if (use_dependency_learning) {
-        if (!order_heaps[0]->inHeap(x) && decision[x]) order_heaps[0]->insert(x);
-    } else {
-        int depth = variable_depth[x];
-        if (!order_heaps[depth]->inHeap(x) && decision[x]) order_heaps[depth]->insert(x);
-    }
-}
+    Heap<Var,VarOrderLt>& heap = orderHeap(x);
+    if (!heap.inHeap(x) && decision[x]) heap.insert(x); }
 
 inline void Solver::varDecayActivity() { var_inc *= (1 / var_decay); }
 inline void Solver::varBumpActivity(Var v) { varBumpActivity(v, var_inc); }
@@ -437,16 +445,10 @@ inline void Solver::varBumpActivity(Var v, double inc) {
             activity[i] *= 1e-100;
         var_inc *= 1e-100; }
 
-    // Update order_heaps with respect to new activity:
-    if (use_dependency_learning) {
-        if (order_heaps[0]->inHeap(v))
-            order_heaps[0]->decrease(v);
-    } else {
-        int depth = variable_depth[v];
-        if (order_heaps[depth]->inHeap(v))
-            order_heaps[depth]->decrease(v);
-    }
-}
+    // Update order heap with respect to new activity:
+    Heap<Var,VarOrderLt>& heap = orderHeap(v);
+    if (heap.inHeap(v))
+        heap.decrease(v); }
 
 inline void Solver::claDecayActivity() { cla_inc *= (1 / clause_decay); }
 inline void Solver::claBumpActivity (Clause& c) {

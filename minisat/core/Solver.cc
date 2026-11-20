@@ -20,6 +20,7 @@ OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWA
 
 #include <math.h>
 #include <inttypes.h>
+#include <limits.h>
 
 #include <algorithm>
 #include <iostream>
@@ -49,6 +50,7 @@ static IntOption     opt_restart_first     (_cat, "rfirst",      "The base resta
 static DoubleOption  opt_restart_inc       (_cat, "rinc",        "Restart interval increase factor", 2, DoubleRange(1, false, HUGE_VAL, false));
 static DoubleOption  opt_garbage_frac      (_cat, "gc-frac",     "The fraction of wasted memory allowed before a garbage collection is triggered",  0.20, DoubleRange(0, false, HUGE_VAL, false));
 static IntOption     opt_min_learnts_lim   (_cat, "min-learnts", "Minimum learnt clause limit",  0, IntRange(0, INT32_MAX));
+static BoolOption    opt_legacy_analyze    (_cat, "legacy-analyze", "Use the old conflict analysis in mode 0 (for comparison)", false);
 static StringOption  opt_trace             (_cat, "trace",       "If given, write trace to this file.");
 
 
@@ -60,13 +62,16 @@ Solver::Solver() :
 
     // Parameters (user settable):
     //
-    verbosity        (0)
+    use_dependency_learning (false)
+  , mode             (0)
+  , verbosity        (0)
   , var_decay        (opt_var_decay)
   , clause_decay     (opt_clause_decay)
   , random_var_freq  (opt_random_var_freq)
   , random_seed      (opt_random_seed)
   , luby_restart     (opt_luby_restart)
   , ccmin_mode       (opt_ccmin_mode)
+  , legacy_analyze   (opt_legacy_analyze)
   , phase_saving     (opt_phase_saving)
   , rnd_pol          (false)
   , rnd_init_act     (opt_rnd_init_act)
@@ -89,8 +94,6 @@ Solver::Solver() :
   , solves(0), starts(0), decisions(0), rnd_decisions(0), propagations(0), conflicts(0), nr_dependencies(0)
   , dec_vars(0), num_clauses(0), num_learnts{0, 0}, clauses_literals(0), learnts_literals{0, 0}, max_literals(0), tot_literals(0)
 
-//  , watches {OccLists<Lit, vec<Watcher>, WatcherDeleted, MkIndexLit>(WatcherDeleted(ca)), OccLists<Lit, vec<Watcher>, WatcherDeleted, MkIndexLit>(WatcherDeleted(ca))}
-  //, order_heap         (VarOrderLt(activity))
   , ok                 (true)
   , input_status       (l_Undef)
   , cla_inc            (1)
@@ -116,23 +119,13 @@ Solver::Solver() :
         trace = true;
         trace_file.open(opt_trace);
     }
-    watches[0] = new OccLists<Lit, vec<Watcher>, WatcherDeleted, MkIndexLit>(WatcherDeleted(ca));
-    watches[1] = new OccLists<Lit, vec<Watcher>, WatcherDeleted, MkIndexLit>(WatcherDeleted(ca));
+    watches[Clauses] = std::make_unique<WatchLists>(WatcherDeleted(ca));
+    watches[Terms]   = std::make_unique<WatchLists>(WatcherDeleted(ca));
 }
 
 
 Solver::~Solver()
 {
-    // delete watches[0];
-    // delete watches[1];
-    // if (use_dependency_learning) {
-    //     delete order_heaps[0];
-    // } else {
-    //     for (int i = 0; i < quantifier_blocks.size(); i++) {
-    //         delete order_heaps[i];
-    //     }
-    // }
-    // delete[] order_heaps;
 }
 
 
@@ -257,14 +250,12 @@ bool Solver::addClauseInternal(const vec<Lit>& ps) {
         return ok = false;
     }
     else {
-        CRef cr = ca.alloc(ps_copy, false);
+        CRef cr = ca.alloc(ps_copy, false, Clauses);
         clauses.push(cr);
-        constraint_type.insert(cr, Clauses);
         if (trace) {
             auto id = running_id - 1;
             constraint_ID.insert(cr, id);
         }
-        //constraint_type[cr] = Clauses;
         if (ps_copy.size() == 1){
             p = ps_copy[0];
             if (variable_type[var(p)]) {
@@ -285,7 +276,7 @@ bool Solver::addClauseInternal(const vec<Lit>& ps) {
 
 void Solver::attachClause(CRef cr) {
     const Clause& c = ca[cr];
-    auto ct = constraint_type[cr];
+    bool ct = c.term();
     assert(c.size() > 1);
     (*watches[ct])[ct == Terms ? c[0] : ~c[0]].push(Watcher(cr, c[1]));
     (*watches[ct])[ct == Terms ? c[1] : ~c[1]].push(Watcher(cr, c[0]));
@@ -297,7 +288,7 @@ void Solver::attachClause(CRef cr) {
 void Solver::detachClause(CRef cr, bool strict){
     const Clause& c = ca[cr];
     assert(c.size() > 1);
-    auto ct = constraint_type[cr];
+    bool ct = c.term();
     
     // Strict or lazy detaching:
     if (strict){
@@ -560,7 +551,7 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool& l
             id = constraint_ID[confl];
             premise_ids.push(id);
         }
-        assert(constraint_type[confl] == ct);
+        assert(ca[confl].term() == ct);
 #ifndef NDEBUG
         assert(!trace || (constraint_ID.has(confl, id) && constraint_ID[confl]));
         printf("Reason %s: ", primary_type ? "clause" : "term");
@@ -657,7 +648,197 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool& l
     printClause(out_learnt);
 #endif
 
-    // Clause minimization. TODO: Can mode 1 be better than mode 2?
+    finishLearnt(out_learnt, out_btlevel, ct, premise_ids);
+}
+
+/*_________________________________________________________________________________________________
+|
+|  analyzeQ : (confl : CRef) (out_learnt : vec<Lit>&) (out_btlevel : int&)
+|             (learn_dependency : bool&) (ct : bool)  ->  [void]
+|
+|  Description:
+|    Conflict analysis for Q-resolution/Q-consensus (mode 0), with or without dependency
+|    learning. 'confl' is a falsified clause (ct == Clauses) or a satisfied term (ct == Terms).
+|    Below, "primary" variables are existential for clauses and universal for terms, and
+|    "secondary" variables are the others. Every literal of 'confl' and of the reasons is assigned.
+|
+|    The learnt constraint must become unit after backtracking, so it must contain a primary
+|    literal that is the only literal on its decision level, with every other literal on a lower
+|    level. We derive it in a single pass over the trail:
+|
+|      1. Resolve away primary literals in reverse assignment order until reaching one that is
+|         the only primary literal on its level (as in 1-UIP learning), and that is to the left of
+|         every "blocked" secondary literal. A secondary literal is blocked if it is assigned on
+|         the level of the current pivot or later: it cannot be resolved away and would still be
+|         unassigned after backtracking, so it has to be removed by reduction.
+|      2. Continue to resolve away the primary literals to the right of the leftmost blocked
+|         secondary literal, so that all blocked literals can be reduced.
+|
+|    If a literal that has to be resolved away is a decision, the decision was made too early:
+|    the variable depends on the leftmost blocked variable. In that case, 'learn_dependency' is
+|    set, and 'out_learnt' contains the two variables. (This cannot happen if decisions follow the
+|    quantifier prefix.)
+|
+|    Post-conditions (unless a dependency is learnt):
+|      * 'out_learnt' is empty if the empty clause/term was derived. Otherwise:
+|      * 'out_learnt[0]' is the asserting literal, and if out_learnt.size() > 1 then
+|        'out_learnt[1]' has the greatest decision level of the rest of literals, which is
+|        'out_btlevel'.
+|________________________________________________________________________________________________@*/
+void Solver::analyzeQ(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool& learn_dependency, bool ct)
+{
+    vec<uint64_t> premise_ids;
+    vec<Lit>&     lits      = analyze_lits;     // Every literal added to the resolvent ('seen' if still present).
+    int           index     = trail.size();
+    int           plevel    = decisionLevel();  // Decision level of the current pivot.
+    Var           blocked   = var_Undef;        // Leftmost secondary variable with level >= plevel.
+    Var           asserting = var_Undef;
+    int           remaining = 0;                // Number of primary literals that may have to be resolved away.
+
+    learn_dependency = false;
+    out_learnt.clear();
+    lits.clear();
+    level_count  .growTo(decisionLevel() + 1, 0);
+    level_blocked.growTo(decisionLevel() + 1, var_Undef);
+
+    // Adds the literals of a clause/term to the resolvent, starting from position 'from'.
+    auto resolve = [&](CRef cr, int from) {
+        Clause& c = ca[cr];
+        if (c.learnt())
+            claBumpActivity(c);
+        if (trace)
+            premise_ids.push(constraint_ID[cr]);
+        for (int i = from; i < c.size(); i++) {
+            Var v = var(c[i]);
+            if (seen[v]) continue;
+            assert(value(v) != l_Undef);
+            seen[v] = 1;
+            lits.push(c[i]);
+            varBumpActivity(v);
+            int l = level(v);
+            if (isPrimary(v, ct)) {
+                level_count[l]++;
+                remaining += (asserting == var_Undef || v > blocked);
+            } else if (l >= plevel)
+                blocked = (blocked == var_Undef || v < blocked) ? v : blocked;
+            else if (level_blocked[l] == var_Undef || v < level_blocked[l])
+                level_blocked[l] = v;
+        }
+    };
+
+    auto cleanup = [&](bool clear_seen) {
+        for (int i = 0; i < lits.size(); i++) {
+            Var v = var(lits[i]);
+            level_count  [level(v)] = 0;
+            level_blocked[level(v)] = var_Undef;
+            if (clear_seen) seen[v] = 0;
+        }
+    };
+
+    resolve(confl, 0);
+
+    for (;;) {
+        // Find the next primary literal that may have to be resolved away.
+        if (remaining == 0)
+            break;
+        Var pivot;
+        do {
+            assert(index > 0);
+            pivot = var(trail[--index]);
+        } while (!seen[pivot] || !isPrimary(pivot, ct) || (asserting != var_Undef && pivot < blocked));
+
+        if (asserting == var_Undef) {
+            // Literals assigned on or after the level of the pivot are blocked.
+            for (; plevel > level(pivot); plevel--) {
+                Var u = level_blocked[plevel - 1];
+                if (u != var_Undef && (blocked == var_Undef || u < blocked))
+                    blocked = u;
+            }
+            if (plevel > 0 && level_count[plevel] == 1 && (blocked == var_Undef || pivot < blocked)) {
+                // Found the asserting literal. Only primary literals to the right of the leftmost
+                // blocked literal remain to be resolved away.
+                asserting = pivot;
+                remaining = 0;
+                if (blocked != var_Undef)
+                    for (int i = 0; i < lits.size(); i++) {
+                        Var v = var(lits[i]);
+                        remaining += (seen[v] && isPrimary(v, ct) && v > blocked); }
+                continue; }
+        }
+
+        if (reason(pivot) == CRef_Undef) {
+            // An out-of-order decision is in the way of reducing a blocked literal.
+            assert(use_dependency_learning);
+            assert(blocked != var_Undef && blocked < pivot && level(pivot) > 0);
+            learn_dependency = true;
+            out_learnt.push(mkLit(pivot, false));
+            out_learnt.push(mkLit(blocked, false));
+            out_btlevel = level(pivot) - 1;
+            cleanup(true);
+            return;
+        }
+        assert(reasonType(pivot) == ct);
+        assert(var(ca[reason(pivot)][0]) == pivot);
+        seen[pivot] = 0;
+        level_count[level(pivot)]--;
+        remaining--;
+        resolve(reason(pivot), 1);
+    }
+
+    cleanup(false);
+
+    if (asserting == var_Undef) {
+        // No primary literals remain: reduction yields the empty clause/term.
+        for (int i = 0; i < lits.size(); i++)
+            seen[var(lits[i])] = 0;
+    } else {
+        // Collect the remaining literals, removing secondary literals by reduction.
+        Var rightmost_primary = var_Undef;
+        for (int i = 0; i < lits.size(); i++) {
+            Var v = var(lits[i]);
+            if (seen[v] && isPrimary(v, ct) && v > rightmost_primary)
+                rightmost_primary = v;
+        }
+        for (int i = 0; i < lits.size(); i++) {
+            Var v = var(lits[i]);
+            if (!seen[v])
+                continue;
+            if (v > rightmost_primary) {
+                seen[v] = 0;
+                continue; }
+            out_learnt.push(lits[i]);
+            if (v == asserting) {
+                out_learnt.last() = out_learnt[0];
+                out_learnt[0]     = lits[i]; }
+        }
+        assert(var(out_learnt[0]) == asserting);
+    }
+
+    finishLearnt(out_learnt, out_btlevel, ct, premise_ids);
+}
+
+/*_________________________________________________________________________________________________
+|
+|  finishLearnt : (out_learnt : vec<Lit>&) (out_btlevel : int&) (ct : bool) (premise_ids : ...)
+|
+|  Description:
+|    Common final steps of conflict analysis: minimize the learnt clause/term, apply
+|    universal/existential reduction, and compute the backtrack level.
+|
+|    Pre-conditions:
+|      * 'out_learnt[0]' is the asserting literal (if the constraint is non-empty).
+|      * 'seen[v]' is set exactly for the variables of 'out_learnt'.
+|
+|    Post-conditions:
+|      * 'seen[]' is cleared.
+|      * If out_learnt.size() > 1 then 'out_learnt[1]' has the greatest decision level of the
+|        rest of literals, and that level is 'out_btlevel'.
+|________________________________________________________________________________________________@*/
+void Solver::finishLearnt(vec<Lit>& out_learnt, int& out_btlevel, bool ct, const vec<uint64_t>& premise_ids)
+{
+    bool primary_type = (ct == ConstraintTypes::Clauses);
+
+    // Clause/term minimization. Skipped when tracing since the trace would lack premises.
     out_learnt.copyTo(analyze_toclear);
     int i, j;
     if (ccmin_mode == 2) {
@@ -683,7 +864,7 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool& l
                         break; }
             }
         }
-    } else if (ccmin_mode == 3) {
+    } else if (ccmin_mode == 3 && !trace) {
         i = out_learnt.size();
         j = minimize(out_learnt, ct);
     } else {
@@ -745,61 +926,74 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool& l
         traceConstraint(id, ct, out_learnt, premise_ids);
     }
 
-    // for (int i = 0; i < out_learnt.size(); i++) {
-    //     varBumpActivity(var(out_learnt[i]), var_inc * ((double)learnts_literals[ct]/nLearnts(ct) - out_learnt.size()));
-    // }
 }
 
-int Solver::minimize(Lit lit, int asserting_level, bool constraint_type, int depth) {
-    auto v = var(lit);
+/*_________________________________________________________________________________________________
+|
+|  minimize : (lit : Lit) (asserting_level : int) (ct : bool) (depth : int)  ->  [int]
+|
+|  Description:
+|    Helper for clause/term minimization. Consider eliminating 'lit' from the learnt constraint by
+|    resolving with its reason, and recursively eliminating the literals introduced by that. The
+|    secondary literals (universal for clauses, existential for terms) introduced this way cannot
+|    be resolved away, but they disappear by reduction if they are to the right of every primary
+|    literal remaining in the constraint. The result is a bound that encodes this condition:
+|
+|      * 0 if 'lit' cannot be eliminated,
+|      * INT_MAX if 'lit' can be eliminated without introducing any literal, and otherwise
+|      * the leftmost secondary variable introduced by eliminating 'lit'.
+|
+|    That is, 'lit' is redundant if the result is greater than every primary variable that
+|    remains in the constraint. Results are cached in 'removable_if'.
+|________________________________________________________________________________________________@*/
+int Solver::minimize(Lit lit, int asserting_level, bool ct, int depth) {
+    Var v = var(lit);
     if (depth > 1000)
-        return 0; // 0 is "poison".
+        return 0;
     if (depth && seen[v])
-        return INT_MAX;
+        return INT_MAX;         // Already part of the constraint.
     if (removable_if[v] > -1)
         return removable_if[v];
+    if (!isPrimary(v, ct))
+        return v;               // Fine if it can be reduced.
     if (level(v) == asserting_level)
         return 0;
-    if (variable_type[v] == constraint_type)
-        return variable_depth[v];
     CRef cr = reason(v);
-    if (cr == CRef_Undef || reasonType(v) != constraint_type)
+    if (cr == CRef_Undef || reasonType(v) != ct)
         return 0;
-    Clause& c = ca[cr];
-    int res = INT_MAX;
+    const Clause& c = ca[cr];
     assert(v == var(c[0]));
-    for (int i = 1; i < c.size(); i++) {
-        Lit other_lit = c[i];
-        auto res_ = minimize(other_lit, asserting_level, constraint_type, depth + 1);
-        if (res_ < res)
-            res = res_;
-        if (!res)
-            break;
-    }
+    int res = INT_MAX;
+    for (int i = 1; i < c.size() && res; i++)
+        res = std::min(res, minimize(c[i], asserting_level, ct, depth + 1));
     minimize_seen.push(v);
     return removable_if[v] = res;
 }
 
-int Solver::minimize(vec<Lit>& lits, bool constraint_type) {
+// Minimize a learnt clause/term whose first literal is asserting. Returns the new size; the
+// literals to keep are moved to the front.
+int Solver::minimize(vec<Lit>& lits, bool ct) {
     if (!lits.size())
         return 0;
-    // We assume that the first literal is asserting.
-    auto alevel = level(var(lits[0]));
-    int innermost_depth = variable_depth[var(lits[0])];
-    MinimizeLT minimize_lt(*this, alevel, constraint_type);
-    sort(&lits[1], lits.size() - 1, minimize_lt);
-    int i, j;
-    for (i = j = 1; i < lits.size(); i++) {
-        auto v = var(lits[i]);
-        if (minimize(lits[i], alevel, constraint_type) <= innermost_depth) {
-            lits[j++] = lits[i];
-            if (variable_type[v] != constraint_type && innermost_depth < variable_depth[v])
-                innermost_depth = variable_depth[v];
-        }
+    int alevel = level(var(lits[0]));
+    // Sorting by bound means that the literals we have to keep form a prefix: a literal must be
+    // kept if its bound does not exceed the rightmost primary variable among the literals kept so
+    // far, and keeping a literal can only increase the latter.
+    minimize_keys.clear();
+    for (int i = 1; i < lits.size(); i++)
+        minimize_keys.push(MinimizeKey(minimize(lits[i], alevel, ct), lits[i]));
+    sort(minimize_keys);
+    Var rightmost_primary = var(lits[0]);   // (the asserting literal may be secondary in QU mode)
+    int j = 1;
+    for (int i = 0; i < minimize_keys.size() && minimize_keys[i].bound <= rightmost_primary; i++) {
+        Lit p = minimize_keys[i].lit;
+        lits[j++] = p;
+        if (isPrimary(var(p), ct) && var(p) > rightmost_primary)
+            rightmost_primary = var(p);
     }
     for (int i = 0; i < minimize_seen.size(); i++)
         removable_if[minimize_seen[i]] = -1;
-    minimize_seen.clear ();
+    minimize_seen.clear();
     return j;
 }
 
@@ -1304,24 +1498,23 @@ CRef Solver::propagateLDQ(bool& ct)
 |________________________________________________________________________________________________@*/
 struct reduceDB_lt { 
     ClauseAllocator& ca;
-    CMap<int>& LBDs;
-    reduceDB_lt(ClauseAllocator& ca_, CMap<int>& LBDs_) : ca(ca_), LBDs(LBDs_) {}
+    reduceDB_lt(ClauseAllocator& ca_) : ca(ca_) {}
     bool operator () (CRef x, CRef y) { 
-        return LBDs[x] > LBDs[y] || (LBDs[x] == LBDs[y] && (ca[x].activity() < ca[y].activity())); }
+        return ca[x].lbd() > ca[y].lbd() || (ca[x].lbd() == ca[y].lbd() && (ca[x].activity() < ca[y].activity())); }
 };
 void Solver::reduceDB()
 {
     int     i, j;
-    sort(learnts, reduceDB_lt(ca, constraint_LBD));
+    sort(learnts, reduceDB_lt(ca));
     int learnt_counts[2] = {0, 0};
     for (int i = 0; i < learnts.size(); i++)
-        learnt_counts[constraint_type[learnts[i]]]++;
+        learnt_counts[ca[learnts[i]].term()]++;
     // Don't delete binary or locked constraints. From the rest, delete constraints from the first half:
     int learnts_removed[2] = {0, 0};
     for (i = j = 0; i < learnts.size(); i++) {
         Clause& c = ca[learnts[i]];
-        auto c_type = constraint_type[learnts[i]];
-        if (constraint_LBD[learnts[i]] > 2 && !locked(c) && (learnts_removed[c_type] < (learnt_counts[c_type] / 2))) {
+        bool c_type = c.term();
+        if (c.lbd() > 2 && !locked(c) && (learnts_removed[c_type] < (learnt_counts[c_type] / 2))) {
             removeClause(learnts[i]);
             learnts_removed[c_type]++;
         } else
@@ -1454,6 +1647,8 @@ lbool Solver::search(int nof_conflicts)
             learnt_clause.clear();
             if (mode == 2) {
                 analyzeLDQ(confl, learnt_clause, backtrack_level, learn_dependency, ct);
+            } else if (mode == 0 && !legacy_analyze) {
+                analyzeQ(confl, learnt_clause, backtrack_level, learn_dependency, ct);
             } else {
                 analyze(confl, learnt_clause, backtrack_level, learn_dependency, ct);
             }
@@ -1487,10 +1682,9 @@ lbool Solver::search(int nof_conflicts)
             } else {
                 int lbd = computeLBD(learnt_clause);
                 cancelUntil(backtrack_level);
-                CRef cr = ca.alloc(learnt_clause, true);
+                CRef cr = ca.alloc(learnt_clause, true, ct);
+                ca[cr].lbd(lbd);
                 learnts.push(cr);
-                constraint_type.insert(cr, ct);
-                constraint_LBD.insert(cr, lbd);
                 if (trace) {
                     auto id = running_id++;
                     constraint_ID.insert(cr, id);
@@ -1835,27 +2029,21 @@ void Solver::relocAll(ClauseAllocator& to)
         }
     }
 
-    // New constraint type map.
-    CMap<bool> constraint_type_;
-    CMap<int>  constraint_LBD_;
+    // Constraint IDs are only kept for tracing.
     CMap<uint64_t> constraint_ID_;
-    uint64_t id;
-    //std::unordered_map<unsigned int, bool> constraint_type_;
+    auto reloc = [&](CRef& cr) {
+        uint64_t id = trace ? constraint_ID[cr] : 0;
+        ca.reloc(cr, to);
+        if (trace)
+            constraint_ID_.insert(cr, id);
+    };
 
     // All learnt:
     //
     int i, j;
     for (i = j = 0; i < learnts.size(); i++)
         if (!isRemoved(learnts[i])){
-            auto ct = constraint_type[learnts[i]];
-            auto lbd = constraint_LBD[learnts[i]];
-            if (trace)
-                id = constraint_ID[learnts[i]];
-            ca.reloc(learnts[i], to);
-            constraint_type_.insert(learnts[i], ct);
-            constraint_LBD_.insert(learnts[i], lbd);
-            if (trace)
-                constraint_ID_.insert(learnts[i], id);
+            reloc(learnts[i]);
             learnts[j++] = learnts[i];
         }
     learnts.shrink(i - j);
@@ -1864,40 +2052,24 @@ void Solver::relocAll(ClauseAllocator& to)
     //
     for (i = j = 0; i < clauses.size(); i++)
         if (!isRemoved(clauses[i])){
-            if (trace)
-                id = constraint_ID[clauses[i]];
-            ca.reloc(clauses[i], to);
-            constraint_type_.insert(clauses[i], Clauses);
-            if (trace)
-                constraint_ID_.insert(clauses[i], id);
+            reloc(clauses[i]);
             clauses[j++] = clauses[i];
         }
     clauses.shrink(i - j);
 
-    // Initial term:
-    Clause& initial_term = ca[initial_term_ref];
-    initial_term.setSize(nVars());
-    ca.reloc(initial_term_ref, to);
-    constraint_type_.insert(initial_term_ref, ConstraintTypes::Terms);
-    if (trace)
-        constraint_ID_.insert(initial_term_ref, 0);
+    // Initial term (relocated at full capacity):
+    ca[initial_term_ref].setSize(nVars());
+    reloc(initial_term_ref);
 
     // All terms:
     //
     for (i = j = 0; i < terms.size(); i++)
         if (!isRemoved(terms[i])){
-            if (trace)
-                id = constraint_ID[terms[i]];
-            ca.reloc(terms[i], to);
-            constraint_type_.insert(terms[i], Terms);
-            if (trace)
-                constraint_ID_.insert(terms[i], id);
+            reloc(terms[i]);
             terms[j++] = terms[i];
         }
     terms.shrink(i - j);
 
-    constraint_type_.moveTo(constraint_type);
-    constraint_LBD_.moveTo(constraint_LBD);
     constraint_ID_.moveTo(constraint_ID);
 }
 
@@ -2082,8 +2254,7 @@ void Solver::updateDependencyWatchers() {
 
 void Solver::allocInitialTerm() {
     vec<Lit> all_variables(nVars());
-    initial_term_ref = ca.alloc(all_variables, false);
-    constraint_type.insert(initial_term_ref, Terms);
+    initial_term_ref = ca.alloc(all_variables, false, Terms);
     if (trace)
         constraint_ID.insert(initial_term_ref, 0);
 }
@@ -2110,14 +2281,12 @@ lbool Solver::addTerm(const vec<Lit>& term) {
 
     reduce(term_copy, false);
 
-    CRef cr = ca.alloc(term_copy, false);
+    CRef cr = ca.alloc(term_copy, false, Terms);
 #ifndef NDEBUG
     printf("Adding term: ");
     printClause(term_copy);
 #endif
     terms.push(cr);
-    //constraint_type[cr] = Terms;
-    constraint_type.insert(cr, Terms);
     if (trace)
         constraint_ID.insert(cr, running_id++);
     if (term_copy.size() == 0) {
@@ -2166,9 +2335,9 @@ lbool Solver::addInitialTerms() {
 
 void Solver::initOrderHeaps() { 
     int nr_heaps = use_dependency_learning ? 1 : quantifier_blocks.size();
-    order_heaps = new Heap<Var,VarOrderLt>*[nr_heaps];
+    order_heaps.clear();
     for (int i = 0; i < nr_heaps; i++) {
-        order_heaps[i] = new Heap<Var,VarOrderLt>(VarOrderLt(activity)); 
+        order_heaps.push_back(std::make_unique<Heap<Var,VarOrderLt>>(VarOrderLt(activity)));
     }
     for (Var v = 0; v < nVars(); v++) {
         insertVarOrder(v);

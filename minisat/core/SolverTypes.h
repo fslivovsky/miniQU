@@ -143,28 +143,34 @@ class Clause {
         unsigned learnt    : 1;
         unsigned has_extra : 1;
         unsigned reloced   : 1;
-        unsigned size      : 27; }                        header;
-    union { Lit lit; float act; uint32_t abs; CRef rel; } data[0];
+        unsigned term      : 1;     // Constraint is a term (cube) rather than a clause.
+        unsigned size      : 26; }                        header;
+    // Literals are followed by one extra field (activity or abstraction) if 'has_extra' is set,
+    // and by another one (LBD) for learnt constraints.
+    union { Lit lit; float act; uint32_t abs; uint32_t lbd; CRef rel; } data[0];
 
     friend class ClauseAllocator;
 
     // NOTE: This constructor cannot be used directly (doesn't allocate enough memory).
-    Clause(const vec<Lit>& ps, bool use_extra, bool learnt) {
+    Clause(const vec<Lit>& ps, bool use_extra, bool learnt, bool term) {
+        assert(!learnt || use_extra);
         header.mark      = 0;
         header.learnt    = learnt;
         header.has_extra = use_extra;
         header.reloced   = 0;
+        header.term      = term;
         header.size      = ps.size();
 
         for (int i = 0; i < ps.size(); i++) 
             data[i].lit = ps[i];
 
         if (header.has_extra){
-            if (header.learnt)
+            if (header.learnt){
                 data[header.size].act = 0;
-            else
+                data[header.size + 1].lbd = 0;
+            }else
                 calcAbstraction();
-    }
+        }
     }
 
     // NOTE: This constructor cannot be used directly (doesn't allocate enough memory).
@@ -176,11 +182,12 @@ class Clause {
             data[i].lit = from[i];
 
         if (header.has_extra){
-            if (header.learnt)
+            if (header.learnt){
                 data[header.size].act = from.data[header.size].act;
-            else 
+                data[header.size + 1].lbd = from.data[header.size + 1].lbd;
+            }else 
                 data[header.size].abs = from.data[header.size].abs;
-    }
+        }
     }
 
 public:
@@ -193,9 +200,14 @@ public:
 
 
     int          size        ()      const   { return header.size; }
-    void         shrink      (int i)         { assert(i <= size()); if (header.has_extra) data[header.size-i] = data[header.size]; header.size -= i; }
+    void         shrink      (int i)         {
+        assert(i <= size());
+        if (header.has_extra) data[header.size-i] = data[header.size];
+        if (header.learnt)    data[header.size-i+1] = data[header.size+1];
+        header.size -= i; }
     void         pop         ()              { shrink(1); }
     bool         learnt      ()      const   { return header.learnt; }
+    bool         term        ()      const   { return header.term; }
     bool         has_extra   ()      const   { return header.has_extra; }
     uint32_t     mark        ()      const   { return header.mark; }
     void         mark        (uint32_t m)    { header.mark = m; }
@@ -213,6 +225,8 @@ public:
 
     float&       activity    ()              { assert(header.has_extra); return data[header.size].act; }
     uint32_t     abstraction () const        { assert(header.has_extra); return data[header.size].abs; }
+    uint32_t     lbd         () const        { assert(header.learnt); return data[header.size + 1].lbd; }
+    void         lbd         (uint32_t l)    { assert(header.learnt); data[header.size + 1].lbd = l; }
 
     Lit          subsumes    (const Clause& other) const;
     void         strengthen  (Lit p);
@@ -228,8 +242,8 @@ class ClauseAllocator
 {
     RegionAllocator<uint32_t> ra;
 
-    static uint32_t clauseWord32Size(int size, bool has_extra){
-        return (sizeof(Clause) + (sizeof(Lit) * (size + (int)has_extra))) / sizeof(uint32_t); }
+    static uint32_t clauseWord32Size(int size, bool has_extra, bool learnt){
+        return (sizeof(Clause) + (sizeof(Lit) * (size + (int)has_extra + (int)learnt))) / sizeof(uint32_t); }
 
  public:
     enum { Unit_Size = RegionAllocator<uint32_t>::Unit_Size };
@@ -243,13 +257,13 @@ class ClauseAllocator
         to.extra_clause_field = extra_clause_field;
         ra.moveTo(to.ra); }
 
-    CRef alloc(const vec<Lit>& ps, bool learnt = false)
+    CRef alloc(const vec<Lit>& ps, bool learnt = false, bool term = false)
     {
         assert(sizeof(Lit)      == sizeof(uint32_t));
         assert(sizeof(float)    == sizeof(uint32_t));
         bool use_extra = learnt | extra_clause_field;
-        CRef cid       = ra.alloc(clauseWord32Size(ps.size(), use_extra));
-        new (lea(cid)) Clause(ps, use_extra, learnt);
+        CRef cid       = ra.alloc(clauseWord32Size(ps.size(), use_extra, learnt));
+        new (lea(cid)) Clause(ps, use_extra, learnt, term);
 
         return cid;
     }
@@ -257,7 +271,7 @@ class ClauseAllocator
     CRef alloc(const Clause& from)
     {
         bool use_extra = from.learnt() | extra_clause_field;
-        CRef cid       = ra.alloc(clauseWord32Size(from.size(), use_extra));
+        CRef cid       = ra.alloc(clauseWord32Size(from.size(), use_extra, from.learnt()));
         new (lea(cid)) Clause(from, use_extra);
         return cid; }
 
@@ -274,7 +288,7 @@ class ClauseAllocator
     void free(CRef cid)
     {
         Clause& c = operator[](cid);
-        ra.free(clauseWord32Size(c.size(), c.has_extra()));
+        ra.free(clauseWord32Size(c.size(), c.has_extra(), c.learnt()));
     }
 
     void reloc(CRef& cr, ClauseAllocator& to)
