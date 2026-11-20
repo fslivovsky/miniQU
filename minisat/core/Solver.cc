@@ -487,7 +487,7 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool& l
         if (leftmost_blocked_var != var_Undef) {
             printf("Leftmost blocked: %d\n", variable_names[leftmost_blocked_var]);
         }
-        if (decision_level_counts[max_dl] == 1) {
+        if (decision_level_counts[max_dl] == 1 && asserting_variable != var_Undef) {
             printf("(Potentially) asserting: %d\n", variable_names[asserting_variable]);
         }
 #endif
@@ -600,7 +600,7 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool& l
         }
         // Add blocked universal variables from reason clause.
         if (rightmost_depth > -1) {
-            if (rightmost_depth < variable_depth[leftmost_blocked_var]) {
+            if (leftmost_blocked_var != var_Undef && rightmost_depth < variable_depth[leftmost_blocked_var]) {
                 leftmost_blocked_var = var_Undef;
             }
             for (int j = 1; j < c.size(); j++) {
