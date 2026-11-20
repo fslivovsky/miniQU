@@ -292,7 +292,7 @@ protected:
     vec<int>            seen_at;
     //vec<char>           quantifier_blocks_type;
     vec<char>           quantifier_blocks_type;
-    vec<int>            quantifier_blocks_unassigned;
+    vec<int>            quantifier_blocks_unassigned; // Number of unassigned decision variables per block (unused with dependency learning).
     //vec<char>           variable_type;
     vec<char>           variable_type;
     vec<int>            variable_depth;
@@ -531,7 +531,18 @@ inline void     Solver::toDimacs     (const char* file, Lit p){ vec<Lit> as; as.
 inline void     Solver::toDimacs     (const char* file, Lit p, Lit q){ vec<Lit> as; as.push(p); as.push(q); toDimacs(file, as); }
 inline void     Solver::toDimacs     (const char* file, Lit p, Lit q, Lit r){ vec<Lit> as; as.push(p); as.push(q); as.push(r); toDimacs(file, as); }
 
-inline void     Solver::addQuantifierBlock(vec<Var>& variables, bool existential) { quantifier_blocks_decision_overflow.push(); quantifier_blocks.push(); variables_at.push(); variables.copyTo(quantifier_blocks.last()); quantifier_blocks_type.push(existential), quantifier_blocks_unassigned.push(variables.size()); }
+inline void     Solver::addQuantifierBlock(vec<Var>& variables, bool existential) {
+    quantifier_blocks_decision_overflow.push();
+    quantifier_blocks.push();
+    variables_at.push();
+    variables.copyTo(quantifier_blocks.last());
+    quantifier_blocks_type.push(existential);
+    // Only decision variables have to be assigned before moving on to the next block.
+    int nr_decision_vars = 0;
+    for (int i = 0; i < variables.size(); i++)
+        nr_decision_vars += (bool)decision[variables[i]];
+    quantifier_blocks_unassigned.push(nr_decision_vars);
+}
 inline void     Solver::clearSeenAt(int rightmost_depth) {
     for (int d = 0; d <= rightmost_depth; d++) {
         for (int i = 0; i < variables_at[d].size(); i++) {

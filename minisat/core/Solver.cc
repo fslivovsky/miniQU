@@ -42,7 +42,7 @@ static DoubleOption  opt_var_decay         (_cat, "var-decay",   "The variable a
 static DoubleOption  opt_clause_decay      (_cat, "cla-decay",   "The clause activity decay factor",              0.999,    DoubleRange(0, false, 1, false));
 static DoubleOption  opt_random_var_freq   (_cat, "rnd-freq",    "The frequency with which the decision heuristic tries to choose a random variable", 0, DoubleRange(0, true, 1, true));
 static DoubleOption  opt_random_seed       (_cat, "rnd-seed",    "Used by the random variable selection",         91648253, DoubleRange(0, false, HUGE_VAL, false));
-static IntOption     opt_ccmin_mode        (_cat, "ccmin-mode",  "Controls conflict clause minimization (0=none, 1=basic, 2=deep, 3=new)", 0, IntRange(0, 3));
+static IntOption     opt_ccmin_mode        (_cat, "ccmin-mode",  "Controls minimization of learnt clauses/terms (0=none, 1=basic, 2=deep, 3=deep with reduction)", 0, IntRange(0, 3));
 static IntOption     opt_phase_saving      (_cat, "phase-saving", "Controls the level of phase saving (0=none, 1=limited, 2=full)", 2, IntRange(0, 2));
 static BoolOption    opt_rnd_init_act      (_cat, "rnd-init",    "Randomize the initial activity", false);
 static BoolOption    opt_luby_restart      (_cat, "luby",        "Use the Luby restart sequence", true);
@@ -50,7 +50,7 @@ static IntOption     opt_restart_first     (_cat, "rfirst",      "The base resta
 static DoubleOption  opt_restart_inc       (_cat, "rinc",        "Restart interval increase factor", 2, DoubleRange(1, false, HUGE_VAL, false));
 static DoubleOption  opt_garbage_frac      (_cat, "gc-frac",     "The fraction of wasted memory allowed before a garbage collection is triggered",  0.20, DoubleRange(0, false, HUGE_VAL, false));
 static IntOption     opt_min_learnts_lim   (_cat, "min-learnts", "Minimum learnt clause limit",  0, IntRange(0, INT32_MAX));
-static BoolOption    opt_legacy_analyze    (_cat, "legacy-analyze", "Use the old conflict analysis in mode 0 (for comparison)", false);
+static BoolOption    opt_legacy_analyze    (_cat, "legacy-analyze", "Use the old conflict analysis in mode 0 as well (for comparison)", false);
 static StringOption  opt_trace             (_cat, "trace",       "If given, write trace to this file.");
 
 
@@ -329,7 +329,7 @@ void Solver::cancelUntil(int level_to) {
         for (int c = trail.size()-1; c >= trail_lim[level_to]; c--){
             Var      x  = var(trail[c]);
             assigns [x] = l_Undef;
-            if (!use_dependency_learning) {
+            if (!use_dependency_learning && decision[x]) {
                 quantifier_blocks_unassigned[variable_depth[x]]++;
             }
             if (phase_saving > 1 || (phase_saving == 1 && c > trail_lim.last()))
@@ -1276,7 +1276,7 @@ void Solver::uncheckedEnqueue(Lit p, CRef from, bool constraint_type)
     assigns[var(p)] = lbool(!sign(p));
     vardata[var(p)] = mkVarData(from, decisionLevel(), constraint_type);
     trail.push_(p);
-    if (!use_dependency_learning) quantifier_blocks_unassigned[variable_depth[var(p)]]--;
+    if (!use_dependency_learning && decision[var(p)]) quantifier_blocks_unassigned[variable_depth[var(p)]]--;
 }
 
 
@@ -2520,10 +2520,15 @@ void Solver::getPartialCertificate(vec<Lit>& certificate) const {
 }
 
 void Solver::saveOutermostAssignment() {
-    for (int i = 0; i < quantifier_blocks[0].size(); i++) {
-        Var internal_var = quantifier_blocks[0][i];
-        Var original_var = variable_names[internal_var];
-        bool last_sign = assigns[internal_var] == l_False;
-        outermost_assignment.push(mkLit(original_var, last_sign));
-    }
+    // The outermost block of decision variables (blocks may also contain gate variables).
+    outermost_assignment.clear();
+    for (int d = 0; d < quantifier_blocks.size() && outermost_assignment.size() == 0; d++)
+        for (int i = 0; i < quantifier_blocks[d].size(); i++) {
+            Var internal_var = quantifier_blocks[d][i];
+            if (!decision[internal_var])
+                continue;
+            Var original_var = variable_names[internal_var];
+            bool last_sign = assigns[internal_var] == l_False;
+            outermost_assignment.push(mkLit(original_var, last_sign));
+        }
 }

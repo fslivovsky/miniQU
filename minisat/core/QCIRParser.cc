@@ -182,33 +182,16 @@ std::vector<int> QCIRParser::getGateDepths() const {
 }
 
 void QCIRParser::initSolver(Minisat::Solver& solver, bool early_tseitin) {
-  std::unordered_map<int, Minisat::Var> alias_to_solver_internal;
-  std::unordered_map<int, Minisat::Var> gate_alias_to_tseitin_universal;
-  std::unordered_map<int, Minisat::Var> gate_alias_to_tseitin_existential;
-  Minisat::vec<Minisat::Var> tseitin_block_universal;
-  Minisat::vec<Minisat::Var> tseitin_block_existential;
-  const int nr_blocks = quantifier_blocks.size();
-
   // Each gate is represented by two Tseitin variables: an existential one that is used in
-  // clauses, and a universal one that is used in terms. For the purpose of making decisions, they
-  // form two innermost quantifier blocks (they are never decided on anyway).
-  auto createTseitinVariables = [&](int alias) {
-    auto tseitin_var_universal = solver.newVar(alias*2+1, Minisat::l_Undef, false);
-    gate_alias_to_tseitin_universal[alias] = tseitin_var_universal;
-    tseitin_block_universal.push(tseitin_var_universal);
-    auto tseitin_var_existential = solver.newVar(alias*2, Minisat::l_Undef, false);
-    gate_alias_to_tseitin_existential[alias] = tseitin_var_existential;
-    tseitin_block_existential.push(tseitin_var_existential);
-    solver.setVarType(tseitin_var_universal, false, nr_blocks);
-    solver.setVarType(tseitin_var_existential, true, nr_blocks + 1);
-  };
-
-  // The solver uses the order in which variables are created as the order of the quantifier
-  // prefix in universal/existential reduction. The value of a gate is a function of the variables
-  // it depends on, so its Tseitin variables can be placed right after the innermost quantifier
-  // block containing such a variable, rather than after all variables. This allows for more
-  // reduction, and in turn shorter learnt constraints and cheaper conflict analysis.
-  std::vector<std::vector<int>> gates_at_depth(nr_blocks + 1);
+  // clauses, and a universal one that is used in terms. They are never used as decision
+  // variables.
+  //
+  // The value of a gate is a function of the variables it depends on, so its Tseitin variables
+  // can be quantified right after the innermost quantifier block containing such a variable,
+  // rather than after all variables. This allows for more universal/existential reduction, and in
+  // turn shorter learnt constraints and cheaper conflict analysis.
+  const int nr_blocks = quantifier_blocks.size();
+  std::vector<std::vector<int>> gates_at_depth(nr_blocks + 1); // Shifted by one, for gates without variables.
   if (early_tseitin) {
     auto gate_depth = getGateDepths();
     for (unsigned int i = variable_gate_boundary; i < gates.size(); i++) {
@@ -220,27 +203,66 @@ void QCIRParser::initSolver(Minisat::Solver& solver, bool early_tseitin) {
     }
   }
 
-  for (auto alias: gates_at_depth[0]) {
-    createTseitinVariables(alias);
-  }
+  // The prefix as a sequence of groups of variables. Adjacent groups of the same type end up in
+  // the same quantifier block of the solver.
+  struct Group {
+    bool existential;
+    bool tseitin;
+    const std::vector<int>* aliases;
+  };
+  std::vector<Group> groups;
+  auto blockIsExistential = [&](int depth) {
+    return gates[quantifier_blocks[depth][0]].gate_type == GateType::Existential;
+  };
+  auto addTseitinGroups = [&](const std::vector<int>& gate_aliases, bool first_existential) {
+    groups.push_back({first_existential, true, &gate_aliases});
+    groups.push_back({!first_existential, true, &gate_aliases});
+  };
+  addTseitinGroups(gates_at_depth[0], nr_blocks > 0 && !blockIsExistential(0));
   for (int depth = 0; depth < nr_blocks; depth++) {
-    bool is_existential = (gates[quantifier_blocks[depth][0]].gate_type == GateType::Existential);
-    Minisat::vec<Minisat::Var> block;
-    for (auto alias: quantifier_blocks[depth]) {
-      auto solver_var = solver.newVar(alias);
-      alias_to_solver_internal[alias] = solver_var;
-      solver.setVarType(solver_var, is_existential, depth);
+    groups.push_back({blockIsExistential(depth), false, &quantifier_blocks[depth]});
+    addTseitinGroups(gates_at_depth[depth + 1], blockIsExistential(depth));
+  }
+
+  // Create the variables in the order of the prefix.
+  std::unordered_map<int, Minisat::Var> gate_alias_to_tseitin_universal;
+  std::unordered_map<int, Minisat::Var> gate_alias_to_tseitin_existential;
+  Minisat::vec<Minisat::Var> block;
+  bool block_is_existential = false;
+  int solver_depth = 0;
+  auto finishBlock = [&]() {
+    if (block.size() > 0) {
+      solver.addQuantifierBlock(block, block_is_existential);
+      block.clear();
+      solver_depth++;
+    }
+  };
+  for (auto& group: groups) {
+    if (group.aliases->empty()) {
+      continue;
+    }
+    if (group.existential != block_is_existential) {
+      finishBlock();
+      block_is_existential = group.existential;
+    }
+    for (auto alias: *group.aliases) {
+      Minisat::Var solver_var;
+      if (!group.tseitin) {
+        solver_var = solver.newVar(alias);
+        gate_alias_to_tseitin_universal[alias] = solver_var;
+        gate_alias_to_tseitin_existential[alias] = solver_var;
+      } else if (group.existential) {
+        solver_var = solver.newVar(alias*2, Minisat::l_Undef, false);
+        gate_alias_to_tseitin_existential[alias] = solver_var;
+      } else {
+        solver_var = solver.newVar(alias*2+1, Minisat::l_Undef, false);
+        gate_alias_to_tseitin_universal[alias] = solver_var;
+      }
+      solver.setVarType(solver_var, group.existential, solver_depth);
       block.push(solver_var);
     }
-    solver.addQuantifierBlock(block, is_existential);
-    for (auto alias: gates_at_depth[depth + 1]) {
-      createTseitinVariables(alias);
-    }
   }
-  solver.addQuantifierBlock(tseitin_block_universal, false);
-  solver.addQuantifierBlock(tseitin_block_existential, true);
-  gate_alias_to_tseitin_existential.insert(alias_to_solver_internal.begin(), alias_to_solver_internal.end());
-  gate_alias_to_tseitin_universal.insert(alias_to_solver_internal.begin(), alias_to_solver_internal.end());
+  finishBlock();
 
   for (auto& clause: getClausalEncoding(false)) {
     Minisat::vec<Minisat::Lit> minisat_clause;
