@@ -45,8 +45,10 @@ The most important options (see `--help` for all of them):
 | `-trace=<file>` | | Write a proof trace. Disables minimization. |
 | `-verb=<0,1,2>` | 1 | Verbosity. |
 
-For QCIR input, `-dl` (with the default mode 0) is the recommended
-configuration.
+Whether dependency learning pays off depends on the instance: it can be
+essential when following the quantifier prefix forces bad decisions, and it
+can be slower on formulas with many alternations where the prefix order is a
+good guide.
 
 ### QCIR support
 
