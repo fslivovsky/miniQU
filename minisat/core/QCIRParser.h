@@ -13,15 +13,16 @@ using std::string;
 class QCIRParser: virtual public QBFParser {
   public:
     QCIRParser(const string& filename);
-    void initSolver(Minisat::Solver& solver);
+    void initSolver(Minisat::Solver& solver, bool early_tseitin);
     string getOriginalName(int alias) const;
 
   protected:
     QCIRParser();
-    void readQuantifierBlock(const string& line);
-    void readGate(const string& line);
-    void readOutput(const string& line);
+    void readQuantifierBlock(VariableType type, const string& variables_string);
+    void readGate(const string& gate_id, const string& gate_type_string, const string& gate_inputs_string);
+    void readOutput(const string& output_lit_str);
     void getVarAliases(Minisat::Solver& solver);
+    std::vector<int> getGateDepths() const;
     std::vector<std::vector<int>> getClausalEncoding(bool get_terms);
     std::vector<std::vector<int>> getClausalEncoding(int gate_alias, bool get_terms);
 

@@ -82,6 +82,7 @@ int main(int argc, char** argv)
         IntOption    mode   ("MAIN", "mode",   "Propagation mode (0=Q, 1=QU, 2=LDQ).", 0, IntRange(0, 2));
         BoolOption   cert   ("MAIN", "cert",   "Output partial certificate (assignment of first block).", false);
         BoolOption   qcir   ("MAIN", "qcir",   "Use QCIR parser.", false);
+        BoolOption   early  ("MAIN", "early-tseitin", "QCIR only: quantify gate variables right after the innermost variable they depend on (mode 0 only).", true);
 
         parseOptions(argc, argv, true);
 
@@ -111,7 +112,9 @@ int main(int argc, char** argv)
         if (argc == 2 && (hasEnding(std::string(argv[1]), "qcir") || qcir)) {
             std::string filename_string(argv[1]);
             qcir_parser = std::make_unique<QCIRParser>(filename_string);
-            qcir_parser->initSolver(S);
+            // The other modes (and the old conflict analysis) assume that the variable order is
+            // consistent with quantifier depth.
+            qcir_parser->initSolver(S, early && mode == 0 && !S.legacy_analyze);
         } else {
             if (argc == 1)
                 printf("Reading QDIMACS from standard input... Use '--help' for help.\n");
