@@ -1,6 +1,7 @@
 # miniQU rewrite: architecture
 
 Status: target design, written before any code exists. Owner: coordinator.
+Revision 2 (after review 00): section 13 lists what changed and why.
 Workers implement it; if the design turns out to be wrong somewhere, record the
 deviation and the reason in `STATUS.md` (and fix this file in the same commit).
 
@@ -93,22 +94,41 @@ Build rules:
 
 ## 3. Module map
 
-One namespace, `miniqu`. Three layers, each depending only on the ones below:
+One namespace, `miniqu`. Four layers above the base; each depends only on the
+ones below it, and there is no pointer from a lower layer to a higher one:
 
 ```
  app        app.cpp  signal.cpp  resources.cpp
               |            (owns: argv, files, names of QCIR identifiers, output)
  frontend   parse_qcir.cpp  parse_qdimacs.cpp  circuit.{hpp,cpp}  encode.cpp
               |            (owns: the circuit, gate numbers, polarities, depths)
- API        miniqu.hpp  solver.cpp           class Solver (pimpl, contracts)
-              |
- external   external.{hpp,cpp}  extend.cpp   user variables <-> internal
-              |                              variables, extension stack
+ API        miniqu.hpp  solver.cpp           class Solver (pimpl): contracts,
+              |                              call-order state, user variable
+              |                              numbers <-> internal variables
  internal   internal.hpp + one .cpp per technique (below)
               |
  base       arena  constraint  watch  heap  ema  options  stats  profile
             limit  logging  message  file  util  random  contract
 ```
+
+There is **no `External` class** (CaDiCaL has one because of incremental
+solving, compaction and the external propagator; none of that exists here).
+What CaDiCaL's `External` would do is split as follows:
+
+- `Solver` (`solver.cpp`) owns the two arrays that map user variable numbers
+  to internal variables and back, checks the contracts, and translates
+  literals on the way in (`add_var`, `add_original`, `freeze`) and on the way
+  out (`val`, `certificate`). It contains no solver logic. Internal variables
+  are created in the order of the `add_var` calls, which is prefix order
+  (4.2), so the map is a renumbering and nothing else.
+- Everything that needs solver state lives in `Internal` and is expressed in
+  internal literals: the extension stack and reconstruction (`extend.cpp`,
+  10.4), the certificate values (`certificate.cpp`), frozen marks
+  (`flags.hpp`).
+- The **proof number** of a variable (4.4) arrives through `add_var` and is
+  stored with the per-variable static data in `prefix.hpp`. It is written
+  once when the variable is created and read only by `Proof` (which holds a
+  pointer to `Internal`, same layer) and by `LOG`.
 
 `struct Internal` (`internal.hpp`) holds the whole solver state as plain data
 members; the technique files implement its member functions. This is CaDiCaL's
@@ -116,7 +136,7 @@ structure and the reason it works is discipline, not encapsulation: a
 technique file may *read* everything but *writes* only the state it owns or
 state it changes through the owner's functions (e.g. constraints are created
 and deleted only through `constraint.cpp`, assignments only through
-`assign`/`backtrack`). The table lists owners.
+`assign`/`backtrack`). The tables list owners; 3.6 says how the rule is kept.
 
 ### 3.1 Base
 
@@ -142,10 +162,10 @@ and deleted only through `constraint.cpp`, assignments only through
 | file | owns / implements |
 |---|---|
 | `internal.{hpp,cpp}` | `Internal` state, construction, `solve ()`, the CDCL loop (section 7.1) |
-| `prefix.{hpp,cpp}` | quantifier blocks, per-variable `Quant`/depth/flags, `qreduce` (4.2, 4.6) |
+| `prefix.{hpp,cpp}` | quantifier blocks, per-variable `Quant`/depth/flags/proof number, `qreduce` (4.2, 4.6) |
 | `constraint.cpp` | `new_constraint`, `mark_garbage`, `shrink_constraint`, attach/detach, the constraint lists |
 | `assign.cpp` | `assign`, `Var` data (level, reason, trail position) |
-| `propagate.cpp` | propagation for modes 0 and 1, both kinds (7.2) |
+| `propagate.{hpp,cpp}` | the one watch loop (template) and its instances for modes 0 and 1 (7.2) |
 | `propagate_ldq.cpp` | propagation for mode 2 (7.2) |
 | `backtrack.cpp` | `backtrack (level)`, phase saving, heap re-insertion |
 | `decide.cpp` | block selection, eligibility, `decide ()` (7.3) |
@@ -163,37 +183,36 @@ and deleted only through `constraint.cpp`, assignments only through
 | `rephase.cpp`, `mode.cpp` | (M2) rephasing; stable/focused switching |
 | `collect.cpp` | root-level simplification of the databases, arena garbage collection (5.3) |
 | `report.cpp` | progress lines |
-| `certificate.cpp` | outermost-block assignment for `--cert` |
+| `certificate.cpp` | values of the certificate block in internal variables, for `--cert` (10.4) |
 
 ### 3.3 Internal: proofs
 
 | file | contents |
 |---|---|
 | `tracer.hpp` | abstract `Tracer` (section 8) |
-| `proof.{hpp,cpp}` | `Proof`: the one object the solver talks to; id allocation, literal translation, fan-out to tracers |
+| `proof.{hpp,cpp}` | `Proof`: the one object the solver talks to; literal translation to proof numbers, fan-out to tracers |
 | `qlrup_tracer.{hpp,cpp}` | QLRUP text and binary writer |
 | `trace_tracer.{hpp,cpp}` | the older `-trace` format (also works for QDIMACS) |
-| `checker.{hpp,cpp}` | online checker of derived steps, for debug/asan builds and `--check` |
+| `checker.{hpp,cpp}` | online checker of derived steps, for debug/asan builds and `--check` (8.1) |
 
 ### 3.4 Internal: inprocessing (M3 and later)
 
 | file | contents |
 |---|---|
 | `inprocess.cpp` | scheduling of passes, effort budgets, entering/leaving "occurrence mode" (10.1) |
-| `flags.hpp` | per-variable status (active/fixed/eliminated/...) and scheduling marks |
+| `flags.hpp` | per-variable status (active/fixed/eliminated) and scheduling marks |
 | `occs.{hpp,cpp}` | full occurrence lists per literal and kind (10.2) |
 | `elim.cpp` | bounded variable elimination (clause and cube distribution) |
+| `extend.cpp` | extension stack in internal literals and reconstruction (10.4); only built with QDIMACS elimination (ROADMAP M3.6) |
 | `subsume.cpp` | subsumption and strengthening |
 | `vivify.cpp` | vivification of clauses and cubes |
 | later: `block.cpp`, `probe.cpp`, `decompose.cpp`, `gates.cpp`, `expand.cpp` | see ROADMAP M5+ |
 
-### 3.5 External, API, frontend, app
+### 3.5 API, frontend, app
 
 | file | contents |
 |---|---|
-| `external.{hpp,cpp}` | user variable numbers <-> internal variables; building the prefix; frozen marks; `val` of user variables |
-| `extend.cpp` | extension stack and reconstruction of eliminated outermost variables (10.4) |
-| `miniqu.hpp`, `solver.cpp` | public `class Solver`; checks contracts and forwards to `External` |
+| `miniqu.hpp`, `solver.cpp` | public `class Solver`: contracts, user <-> internal variable map, forwarding to `Internal` |
 | `circuit.{hpp,cpp}` | prenex circuit: variables, blocks, AND/OR gates (xor/ite expanded), cone-of-influence removal, polarities, gate depths |
 | `parse_qcir.cpp`, `parse_qdimacs.cpp` | parsers; report errors with line numbers |
 | `encode.cpp` | dual Plaisted-Greenbaum encoding of a `Circuit` into a `Solver` (4.4) |
@@ -215,10 +234,12 @@ public:
   int solve ();                                         // 10 true, 20 false, 0 unknown
   int val (int var) const;                              // certificate block only; 0 = unassigned
   std::vector<int> certificate () const;
-  void terminate ();                                    // async-signal-safe
+  void terminate ();                                    // async-signal-safe: sets a flag
+  void flush_proof ();                                  // not async-signal-safe (8.2)
   void statistics () const;
 private:
-  std::unique_ptr<External> external;
+  struct Impl;                       // user<->internal maps, state, Internal
+  std::unique_ptr<Impl> impl;
 };
 ```
 
@@ -229,7 +250,36 @@ uses everything.
 Dependency rules: nothing below `app` prints to stdout except through
 `message.cpp`; nothing below `frontend` knows about identifiers or files
 (the proof *file* is opened by the app and handed to a tracer); `Internal`
-never sees user variable numbers; the frontend uses only `miniqu.hpp`.
+never sees user variable numbers and never calls into `Solver`; the frontend
+uses only `miniqu.hpp`.
+
+### 3.6 What "one technique, one file" means in practice
+
+`Internal` is a shared state, so a technique is not a plug-in: adding one
+touches a known, short list of places, and nothing else.
+
+| touch point | what is added |
+|---|---|
+| `<technique>.cpp` | all of its logic, with the header comment of section 12 |
+| `internal.hpp` | declarations of its member functions and **one struct member** holding its private state (below) |
+| `options.hpp`, `stats.hpp`, `profile.hpp`, `limit.hpp` | its rows in the tables |
+| `inprocess.cpp` (pass) or the loop in `internal.cpp` (search heuristic) | one call under its `...ing ()` predicate |
+| `constraint.hpp` | a header bit, only if it needs one (5.2) |
+| `tests/matrix.txt`, `test/unit/` | its configurations (normal and stress) with the counters that must be nonzero; unit tests |
+
+State that belongs to one technique is grouped in a small struct defined next
+to its declarations and held as a single member of `Internal`: `Depend
+depend` (dependency lists, their watches and trail head), `Eliminator elim`
+(schedule, bound, resolvent buffer), `Vivifier vivify`, `Tiers tiers`,
+`Averages averages`, and so on. Loose fields in `Internal` are for state
+shared by the core only (values, trail, levels, databases, watches, heaps).
+
+A technique that needs an edit in `propagate.{hpp,cpp}`, `propagate_ldq.cpp`,
+`analyze*.cpp`, `learn.cpp` or `assign.cpp` is a **design change**: the
+worker records it in `STATUS.md` (what was changed in the core and why the
+technique could not do without it) and the reviewer looks at it. This is the
+rule reviewers apply; the ownership tables above are otherwise enforced by
+nothing.
 
 ---------------------------------------------------------------------------
 
@@ -282,14 +332,13 @@ integer comparisons. Consequences:
 - adjacent blocks have different quantifiers (the builder merges);
 - `depth (v)` is the block index; for variables of different quantifier,
   comparing indices and comparing depths is the same thing;
-- variables are created only while the formula is being added. A later
-  technique that needs fresh variables has to renumber (a `compact` pass);
-  nothing in M1-M4 does.
+- variables are created only while the formula is being added; nothing in
+  M1-M4 creates a variable later.
 
-Per-variable static data (`prefix.hpp`): `Quant`, depth, and flags
-`decision` (input variable, may be decided), `gate` (Tseitin variable,
-never decided, never printed). Per-variable dynamic status lives in
-`flags.hpp` (section 10.3).
+Per-variable static data (`prefix.hpp`): `Quant`, depth, the proof number
+(4.4; 0 if the input has none), and flags `decision` (input variable, may be
+decided), `gate` (Tseitin variable, never decided, never printed).
+Per-variable dynamic status lives in `flags.hpp` (section 10.3).
 
 ### 4.3 Constraint databases
 
@@ -301,8 +350,10 @@ constraint header is authoritative; the lists exist for iteration.
 
 Unit constraints are allocated like any other constraint (size 1, never
 watched) and serve as the reason of their root-level assignment, so that
-reasons and proof ids are uniform. The empty constraint is never allocated;
-deriving it ends the search.
+reasons and proof ids are uniform. A unit constraint is always flagged
+irredundant, whatever produced it, and is **never deleted**: section 11.1
+uses stored units to justify deleting other constraints. The empty
+constraint is never allocated; deriving it ends the search.
 
 Invariants (checked by `check_invariants ()` in debug builds, at root level):
 
@@ -327,6 +378,11 @@ Invariants (checked by `check_invariants ()` in debug builds, at root level):
   propagation ran to completion, at least one of the two kinds has a conflict.
   It holds for the encoding (4.4) and must be preserved by every transformation
   of the irredundant databases (section 11 explains which ones do).
+- **INV-SANDWICH** (QDIMACS input, modes 0 and 1): with `G` the irredundant
+  clauses, `L` the learnt clauses and `T` the stored cubes, `Π.(G ∧ ⋀L)` and
+  `Π.(G ∨ ⋁T)` both have the truth value of the input. Defined and argued
+  in 11.1; it is a semantic invariant and cannot be checked at run time, but
+  its consequence "an initial cube hits every irredundant clause" is (8.1).
 
 ### 4.4 QCIR: the dual encoding
 
@@ -377,18 +433,30 @@ point of analysis without being stored.
 
 Rules that later techniques rely on:
 
-- the hitting set ranges over the *current irredundant* clauses. Any pass that
-  changes the irredundant clause set must keep it truth-equivalent to the
-  input in the sense of section 11.1; then the cube is an implicant of the
-  current matrix and all reasoning stays sound;
+- the hitting set ranges over the *current irredundant* clauses, unit clauses
+  included, so the cube is an implicant of the current irredundant clause set
+  `G`. That is all the cube is: it need not imply the input matrix, and
+  older stored cubes need not imply the current `G`. Soundness rests on
+  INV-SANDWICH (11.1), and any pass that changes `G` must satisfy the
+  admissibility criterion (LO)/(HI) given there;
+- with `--check` and in debug/asan builds, `model.cpp` verifies every initial
+  cube before reduction against all live irredundant clauses
+  (`check_model_cube ()`, a linear scan; fatal on a miss). This catches a
+  cube taken from a clause set that some pass made too weak, the one
+  QDIMACS failure no proof checker sees;
 - such a cube is not derivable in QLRUP (no proof for QDIMACS, as in the old
-  solver). The `-trace` format records it as a step without premises;
-- for QCIR input, INV-COMPLETE says this code is never reached. It is kept as
-  a fallback when no proof is written (the hitting-set cube is valid for the
-  clause encoding) and counted in `stats.modelcubes`; when a proof is written
-  it is a fatal internal error (old behaviour), and a nonzero count on a QCIR
-  run is to be reported in `STATUS.md` as a bug in whatever broke the
-  invariant.
+  solver). Tracers receive it through `add_model_cube` (8.1); the `-trace`
+  format records it as a step without premises;
+- for QCIR input, INV-COMPLETE says this code is never reached. In M1 it is
+  kept as the old solver has it: a fallback when no proof is written (for the
+  untouched encoding the hitting-set cube is valid), a fatal internal error
+  when a proof is written. From the first package that changes irredundant
+  constraints (ROADMAP M2.1) there is no argument that such a cube is still
+  valid next to the cube encoding (section 11.1 argues QDIMACS only), so from
+  then on reaching this code on QCIR input ends the run with the answer
+  "unknown" and an error message, proof or not. Every occurrence is counted
+  in `stats.modelcubes`, and a nonzero count on a QCIR run is reported in
+  `STATUS.md` as a bug in whatever broke the invariant.
 
 ### 4.6 Reduction
 
@@ -448,18 +516,21 @@ word 1      bit field:
               garbage    1   deleted, memory not yet reclaimed
               moved      1   relocated during GC; lits[0] holds the new Ref
               reason     1   protected in reduce (set only inside reduce)
-              used       2   recently used in analysis (M2 tiers)
-              keep       1   (M2) never reduce
-              subsume    1   \
-              vivify     1    > scheduling marks for inprocessing (M3+)
-              vivified   1   /
-              gate       1   belongs to a gate definition (M3+)
+              (7 bits reserved: `used` 2 and `keep` 1 for M2 tiers, scheduling
+               marks and a gate-definition mark for M3+. A bit gets its name
+               and its accessors in the package that first uses it.)
               glue      20   LBD, saturating
 word 2,3    id                           64-bit proof id (two words)
 word 4...   lits[size]
 ```
 
-Sixteen bytes of header for every constraint. The id is stored inline and
+Sixteen bytes of header for every constraint (the old solver: 4 bytes, 12
+for learnt constraints, so a binary original grows from 12 to 24 bytes).
+This layout is **provisional until measured**: ROADMAP M1.3 compares
+propagations per second and peak RSS with the baseline on the largest
+instances. If the header costs measurably, the fallback is 12 bytes (size and
+flags packed into one word, glue narrowed), which the accessor-only rule
+below keeps local to `constraint.hpp`. The id is stored inline and
 always present: the old solver kept ids in a hash map keyed by `CRef`, which
 has to be rebuilt at every garbage collection and costs a hash lookup per
 antecedent during analysis; ids are also what makes log output and sort
@@ -480,7 +551,10 @@ Deleting a constraint (`mark_garbage`) sets the bit, reports the deletion to
 the proof, adds its words to `wasted`, and smudges its two watch lists
 (section 6.2). Memory is reclaimed when `wasted > gcfrac% * size` at one of
 the safe points (after `reduce`, after `collect`, at the end of an
-inprocessing pass), never inside propagation or analysis.
+inprocessing pass), never inside propagation or analysis. `--gcfrac=0`
+collects at **every** safe point, even when nothing is wasted; the stress
+configurations of the test matrix use it so that relocation runs on tiny
+instances (ROADMAP 0.1).
 
 `garbage_collect ()` copies the live constraints into a fresh arena of the
 right size in this order:
@@ -502,9 +576,10 @@ Step 2 is the point of the design: the first time propagation walks the watch
 list of a literal after a collection, the constraints it has to dereference
 lie next to each other in memory, in list order. This is MiniSat's
 `relocAll`, kept as it is. The variable order of step 2 is an option
-(`--arenasort`: 0 = variable index as in miniQU, default in M1; 1 = decision
-order, i.e. descending score, saved phase first, which is CaDiCaL's
-`arenatype=3` idea and an M2 experiment).
+(`--arenaorder`: 0 = variable index as in miniQU, default in M1; 1 = decision
+order, i.e. descending score, saved phase first, which is the idea of
+CaDiCaL's `arenatype=3` and an M2 experiment. The option is not called
+`arenasort` because CaDiCaL uses that name for something else).
 
 ---------------------------------------------------------------------------
 
@@ -603,6 +678,38 @@ and `stats.ticks` approximating cache lines touched (one per watch list, one
 per dereferenced constraint), which is the unit in which inprocessing effort
 is budgeted (10.1).
 
+**Propagation variants.** By M4 the solver propagates in six situations.
+They differ in two things only: which kinds take part, and what happens to a
+constraint whose single non-vanished literal is *secondary* (the "lone
+secondary" rule):
+
+| variant | used by | kinds | lone secondary literal | code |
+|---|---|---|---|---|
+| search, mode 0 | `propagate ()` | both | conflict, completed after the loop (4.7) | watch loop, `Lone::Conflict` |
+| search, mode 1 | `propagate ()` | both | propagated | watch loop, `Lone::Propagate` |
+| vivify, mode 0 | `propagate_kind (K)` | `K` only | ignored (ROADMAP M4, V2) | watch loop, `Lone::Ignore` |
+| vivify, mode 1 | `propagate_kind (K)` | `K` only | propagated | watch loop, `Lone::Propagate` |
+| search, mode 2 | `propagate_ldq ()` | both | prefix-aware unit rule, other watch invariant (6.3) | its own loop in `propagate_ldq.cpp` |
+| occurrence mode | `propagate_occs ()` | both | root units only, no watches (10.2) | `occs.cpp` |
+
+The MiniSat watch loop of 6.2 therefore exists **once**, as
+
+```cpp
+enum class Lone : uint8_t { Conflict, Propagate, Ignore };
+template <Kind K, Lone R> Ref Internal::propagate_watches (Lit p);   // propagate.hpp
+```
+
+with kind and rule as compile-time parameters (`kval` and the rule fold to
+straight code in each instance). The functions in the table are thin drivers
+in `propagate.cpp`: they select the instance **outside** the loop over the
+trail (one `switch` on the mode per call, never per watch) and own everything
+that is not the loop: the trail heads, conflict completion for mode 0, the
+`ticks` accounting. Mode 2 and occurrence propagation are not instances of
+the template, because their data structures differ; they must not grow a
+third and fourth copy of the mode-0/1 logic either. A new variant is a new
+row of this table and at most a new enumerator, and is a design change in the
+sense of 3.6.
+
 ### 7.3 Decisions
 
 Without dependency learning decisions follow the prefix: the current block is
@@ -615,8 +722,14 @@ dependency (7.4) is assigned. Gate variables, fixed and eliminated variables
 are never in a heap and are not counted in `unassigned`.
 
 Scores are EVSIDS (`bump.cpp`): bump by an increment that grows by
-`1/decay` per conflict, rescale on overflow. Phase: saved phase, initial
-phase false (the old default). M2 may add a VMTF queue per block and
+`1/decay` per conflict, rescale on overflow. Initial scores are 0 with
+`--seed=0` (the default: the run is deterministic and ties are broken by
+variable index); with `--seed=s`, `s > 0`, every variable starts with a
+score drawn uniformly from `[0, 1e-5)` by the PRNG seeded with `s`. This is
+the baseline's `-rnd-init -rnd-seed=s` and is the **only** thing the seed
+changes: it perturbs the first decisions and thereby the whole search, which
+is how the benchmark protocol measures search variance (ROADMAP 0.3). Phase:
+saved phase, initial phase false (the old default). M2 may add a VMTF queue per block and
 alternative phases; `decide.cpp` is the only place that reads them.
 
 ### 7.4 Dependency learning
@@ -670,6 +783,7 @@ public:
   virtual void add_derived  (uint64_t id, Kind, std::span<const int> lits,
                              std::span<const uint64_t> chain) = 0;
   virtual void delete_constraint (uint64_t id, Kind, std::span<const int> lits) = 0;
+  virtual void add_model_cube (uint64_t id, std::span<const int> lits) = 0;   // 4.5
   virtual void conclude (Kind empty_kind, uint64_t id) {}
   virtual void flush () {}
 };
@@ -700,18 +814,27 @@ is live and of the right kind, and aborts with the offending step. It cannot
 validate original steps against the circuit (the Lean checker does). It is on
 by default in `debug`/`asan` builds whenever no QLRUP file is requested, so
 that every fuzz run exercises proof generation, and is available as `--check`
-in all builds.
+in all builds. Its scope by input and mode:
+
+| | modes 0 and 1 | mode 2 |
+|---|---|---|
+| QCIR | every derived step replayed | `Checker` not connected (long-distance steps are not replayable); `--check` still runs `check_invariants ()` |
+| QDIMACS | every derived step of both kinds replayed; an initial cube arrives through `add_model_cube`, is accepted as a premise-free cube and from then on is an ordinary live cube; that it hits every irredundant clause is verified by `model.cpp` (4.5), which has the clause lists | as QCIR mode 2, plus the initial-cube check of 4.5 |
+
+`add_model_cube`: `QlrupTracer` reports a fatal error (not expressible),
+`TraceTracer` writes a step without premises, `Checker` as in the table.
 
 ### 8.2 Where steps are logged
 
 | event | file | step |
 |---|---|---|
-| original constraint added | `constraint.cpp` via `External::add_original` | `o id kind gate lits` exactly as given by the encoder (duplicates removed); tautological clauses / contradictory cubes are skipped without a step |
+| original constraint added | `constraint.cpp` via `Solver::add_original` | `o id kind gate lits` exactly as given by the encoder (duplicates removed); tautological clauses / contradictory cubes are skipped without a step |
 | reduction of an original | same | derived from the original's id alone; original deleted |
 | two complementary unit originals | same | empty constraint from the two ids |
 | learnt constraint | `learn.cpp` | derived, chain = conflict id, then reason ids in resolution order (plus, from M2, the reasons used by minimisation) |
 | final empty constraint | `learn.cpp` | derived with empty literal list |
-| initial cube from a model | `model.cpp` | not expressible: fatal error if a QLRUP tracer is connected; `TraceTracer` gets a step with an empty chain |
+| initial cube from a model | `model.cpp` | `add_model_cube`: fatal error if a QLRUP tracer is connected; `TraceTracer` writes a step without premises |
+| root unit materialised (M2.1) | `collect.cpp` | derived unit, chain = the non-unit reason id, then the same-kind unit ids of its other literals |
 | learnt constraint deleted | `reduce.cpp` -> `mark_garbage` | `d id` |
 | satisfied constraint removed at root | `collect.cpp` -> `mark_garbage` | `d id` |
 | root-vanished literals removed | `collect.cpp` | `strengthen`, chain = constraint id, then the unit ids (only literals whose root reason has the same kind) |
@@ -723,7 +846,12 @@ in all builds.
 
 `mark_garbage` is the only function that emits deletions, so no deletion can
 be forgotten. Proof files are written through a 1 MiB buffer and flushed at
-`conclude` and on termination signals.
+`conclude`. **Signal handlers write nothing**: the handler in `signal.cpp`
+only calls `Solver::terminate ()`, which sets an atomic flag; the search loop
+sees the flag and returns "unknown"; `app.cpp` then calls
+`Solver::flush_proof ()`, prints statistics and exits. A second signal while
+this is in progress terminates the process at once, without flushing (a
+truncated proof of an unfinished run is worthless either way).
 
 Proof support matrix: QCIR input, modes 0 and 1, with or without `--dl`.
 Requests outside it (QDIMACS input, mode 2) are rejected at start-up with the
@@ -761,9 +889,32 @@ keep working. Non-integer arguments are application arguments, not options:
 Options that exist from M1 (old names; defaults as in the old solver):
 `mode dl cert qcir earlytseitin verb ccminmode legacyanalyze phasesaving
 luby rfirst rinc vardecay gcfrac minlearnts proofbinary cpulim memlim`, plus
-`check`, `log`, `arenasort`, `seed`. The old `cla-decay`, `rnd-freq`,
-`rnd-init` are dropped (constraint activities and random decisions are not
-ported).
+`check`, `log`, `arenaorder`, `seed` (7.3). The old `cla-decay` and
+`rnd-freq` are dropped (constraint activities and random decisions are not
+ported); `-rnd-init -rnd-seed=s` is `--seed=s`.
+
+**Ranges must allow stress testing.** Every scheduled event has to be able to
+fire on an instance with a few hundred conflicts, otherwise the fuzz corpus
+never reaches it (ROADMAP 0.1). So the low end of every interval, limit and
+threshold option is the smallest value the code can run with, not the
+smallest sensible one, and where the old solver had no knob at all one is
+added. From M1:
+
+| option | default (M1) | range | stress value | meaning |
+|---|---|---|---|---|
+| `gcfrac` | 20 | 0..100 | 0 | percent of wasted arena that triggers a collection; 0 = collect at every safe point (5.3) |
+| `reduceint` | 0 | 0..1e9 | 2 | if nonzero: also reduce when `conflicts >= lim.reduce`, then `lim.reduce += reduceint * (reductions + 1)`. 0 in M1 leaves the old size-based trigger alone; M2.2 makes this the schedule |
+| `tier1glue` | 2 | 0..1e9 | 0 | learnt constraints with glue up to this value are never reduced (the old hard-wired "glue > 2"); becomes the tier-1 limit in M2.2 |
+| `luby`, `rfirst`, `rinc` | 1, 100, 200 (%) | `rfirst` 1.., `rinc` 100.. | `--no-luby --rfirst=1 --rinc=100` | restart after every conflict |
+| `depreset` | 20 | 1..1e9 | 1 | reset dependencies every n-th restart |
+
+The arithmetic growth of the `reduceint` schedule is deliberate: a fixed tiny
+interval would keep the learnt database at constant size, and together with
+restarts that can cost termination. Later milestones add their own rows
+(`tier2glue` from 0, `restartint` from 1, `inprocessint` from 1, effort
+options up to "unbounded", occurrence and size limits from 0); ROADMAP names
+them with each package. Stress values are for tests only and are never
+benchmarked.
 
 ### 9.2 Statistics
 
@@ -775,6 +926,15 @@ rounds, tried, successful, removed literals...). They are incremented
 directly (`stats.conflicts++`) and printed in one place (`stats.cpp`) at
 verbosity >= 1, each line prefixed with `c `. Current database sizes are
 maintained in `constraint.cpp`.
+
+The statistics block is also a machine interface: every counter is printed,
+zero or not, on a line of the fixed form `c stat <name> <integer>` (names as
+in `stats.hpp`, per-kind counters as `<name>.clause` / `<name>.cube`),
+followed by the human-readable table. `tests/regress.sh` sums these lines
+over a fuzz run and fails when a counter that a configuration is meant to
+exercise stays at zero (ROADMAP 0.1); `bench/run.py` stores them for the
+port-fidelity and proof-overhead reports. Renaming a counter is therefore an
+interface change (update `tests/matrix.txt` in the same commit).
 
 ### 9.3 Profiling
 
@@ -855,7 +1015,8 @@ maintain watches. `enter_occurrence_mode ()` clears all watch lists and builds
 constraints of that kind containing the literal (redundant constraints are
 connected only when the pass asks for them). `leave_occurrence_mode ()`
 drops the occurrence lists, removes satisfied constraints and vanished
-literals, and re-attaches watches for every live constraint; if a unit or an
+literals (by the rules of ROADMAP M2.1: only under stored units), and
+re-attaches watches for every live constraint; if a unit or an
 empty constraint appeared it is handled there. Within occurrence mode, new
 root units are propagated over occurrence lists (`propagate_occs`), not
 watches. The arena may not be collected in occurrence mode.
@@ -866,57 +1027,89 @@ collection (5.3) when the pass changed the database.
 
 ### 10.3 Variable status
 
-`flags.hpp`: per variable a status `Active | Fixed | Eliminated |
-Substituted | Pure` and scheduling marks (`elim`, `subsume`, ... : "some
-constraint of this variable changed since the pass last looked"). Only
-`Active` variables may occur in live constraints (after `collect`), be
+`flags.hpp`: per variable a status `Active | Fixed | Eliminated` and
+scheduling marks (`elim`, `subsume`, ... : "some constraint of this variable
+changed since the pass last looked"). Further statuses (`Substituted`,
+`Pure`) are added by the package that implements the technique, not before.
+Only `Active` variables may occur in live constraints (after `collect`), be
 decided, or be candidates. Leaving `Active` updates the block's `unassigned`
 counter and the heaps in one function (`mark_eliminated` etc.); forgetting
 this makes the solver wait forever for a variable that will never be
 assigned.
 
-**Frozen** variables are never eliminated or substituted. A variable is
-frozen if the app says so through `Solver::freeze`. What is frozen by
-default:
+**Frozen** variables are never eliminated. A variable is frozen if the app
+says so through `Solver::freeze`. What is frozen by default:
 
-- nothing, in principle; the side conditions of each technique (ROADMAP)
-  already exclude what must not be touched (for QCIR input they exclude all
-  input variables, because those occur in both databases);
-- outermost-block decision variables are frozen while `--cert` is given
-  **until** the extension stack (10.4) has been validated by the certificate
-  tests; after that the freeze is removed.
+- nothing for QCIR input: the side conditions of elimination (ROADMAP M3)
+  already exclude every input variable, because inputs occur in both
+  databases, and gate variables are never part of any output;
+- for QDIMACS input, elimination is off by default (`--elimqdimacs=0`,
+  ROADMAP M3.6). When it is switched on together with `--cert`, the decision
+  variables of the certificate block are frozen **until** the extension stack
+  (10.4) has been validated by the certificate tests; after that the freeze
+  is removed.
 
 Gate variables are ordinary variables for inprocessing (they are the main
 targets), with one privilege: they are never part of any output.
 
 ### 10.4 Extension stack and certificates
 
-`--cert` prints the values of the decision variables of the outermost block
-at the moment the search ended (for a true formula with an outermost
-existential block this assignment satisfies the formula; dually for a false
-formula with an outermost universal block). Derivation-based reasoning never
-needs a full model, so the only thing reconstruction has to restore is this
-one block. (Known wrinkle inherited from the old solver: with `--dl` the
-block may be only partially assigned when the search ends, and the old binary
-prints unassigned variables as positive literals. M1 keeps the output format
-and adds a certificate test; see ROADMAP M1 for how the gap is handled.)
+`--cert` prints the values of the decision variables of the **certificate
+block**, the outermost block that has decision variables, at the moment the
+search ended (for a true formula with an outermost existential block this
+assignment satisfies the formula; dually for a false formula with an
+outermost universal block). Derivation-based reasoning never needs a full
+model, so the only thing reconstruction ever has to restore is this one
+block.
 
-`External` keeps an **extension stack** as in CaDiCaL's `extend.cpp`,
-generalised by kind: when a variable of the certificate block is eliminated,
-the constraints containing it are pushed, each with its witness literal (the
-literal of the eliminated variable). At the end, `extend ()` walks the stack
-backwards over the certificate assignment: for a clause entry, if no literal
-of the clause is true, the witness is set true; for a cube entry (an
-eliminated universal variable), if no literal of the cube is false, the
-witness is set false. The rightmost condition of elimination guarantees that
-every other variable in a pushed constraint belongs to the same block, so its
-value is known (already printed or reconstructed later in the backward walk).
-Eliminated variables outside the certificate block push nothing. Variables
-fixed at root keep their value on the trail and need no entry.
+Who does what (all in the internal layer, in internal literals):
 
-The same stack serves later techniques that remove variables (equivalent
-literal substitution pushes the two binary constraints; blocked constraints
-push themselves with the blocking literal).
+- `certificate.cpp` computes the value of every decision variable of the
+  certificate block: the value on the trail if it is assigned; a variable
+  left unassigned is given the value the output will show for it (the old
+  binary prints such variables as positive literals, which happens under
+  `--dl`, where the block may be only partially assigned when the search
+  ends). Whether a certificate completed in this way is valid at all is the
+  open question that ROADMAP M1.8 measures; whatever the coordinator decides
+  there (print only assigned variables, or complete the block by a final
+  search), `certificate.cpp` is the one place that implements it, and it
+  hands `extend ()` a **total** assignment of the non-eliminated variables of
+  the block.
+- `extend.cpp` then reconstructs the eliminated variables of the block.
+- `Solver::val` and `Solver::certificate` only translate internal variables
+  to user numbers.
+
+For QCIR input the stack is always empty: the certificate block consists of
+input variables, and inputs are never eliminated (E2). The stack is needed
+only for QDIMACS elimination, so it is built in that package (ROADMAP M3.6)
+and not earlier.
+
+`Internal` keeps the **extension stack** as in CaDiCaL's `extend.cpp`: when
+an (existential) variable `x` of the certificate block is eliminated, the
+irredundant clauses containing it are pushed, each with its witness literal
+(the literal of `x`). At the end `extend ()` walks the stack backwards over
+the certificate assignment: if no literal of a clause entry is true, the
+witness is set true.
+
+Why every other variable of a pushed clause has a known value: E3 only says
+that no other variable of the clause is *deeper* than `x`; since `x` is in
+the certificate block, and for QDIMACS input (every variable is a decision
+variable) that is the outermost block of the prefix, the others are in that
+same block. Their values are either part of the total assignment handed over by
+`certificate.cpp`, or they were eliminated *after* `x` and have already been
+reconstructed by the backward walk. The argument rests on the certificate
+block being outermost, not on E3 alone; a stack for inner blocks would need
+values the solver does not have.
+
+Only clause entries are implemented. An entry for an eliminated *universal*
+variable cannot arise in M3: a universal variable of the certificate block is
+an input, and inputs occur in clauses in both input formats, so E2 never
+lets it go. `mark_eliminated` asserts this. Eliminated variables outside the
+certificate block push nothing. Variables fixed at root keep their value on
+the trail and need no entry.
+
+Later techniques that remove certificate-block variables (equivalent-literal
+substitution, blocked clauses) add their entry kinds when they are built.
 
 ### 10.5 Interaction with the rest of the solver
 
@@ -929,6 +1122,9 @@ push themselves with the blocking literal).
   clauses, so they follow the database automatically.
 - Mode 2 learnt constraints (with complementary literals) are never used as
   resolution partners by inprocessing; passes skip them.
+- QDIMACS input: every change to the irredundant clauses obeys the rules at
+  the end of 11.1 (promotion before removal, deletion only under a stored
+  unit or an irredundant subsumer, no elimination in mode 2).
 
 ---------------------------------------------------------------------------
 
@@ -942,22 +1138,111 @@ databases, because that decides both its side conditions and its proof story.
 The solver's answer is justified by a derivation: the empty clause from the
 clause database (false), or the empty cube from the cube database (true).
 
-- For **QCIR** input the two databases are independent encodings of the same
-  circuit; by INV-DERIVED every stored constraint has a QLRUP derivation from
-  the original encoding of its kind. So *any* answer the solver gives is
-  correct, whatever heuristics or simplifications ran. What a transformation
-  can break is **termination** (INV-COMPLETE: the solver reaches a state with
-  neither kind in conflict) and performance, never the verdict, as long as
-  INV-DERIVED holds.
-- For **QDIMACS** input, cubes start from satisfying assignments of the
-  current irredundant clauses. A transformation of the irredundant clause set
-  from `F` to `F'` (with the prefix restricted to the remaining variables) is
-  admissible if (a) the two QBFs have the same truth value, (b) every stored
-  cube remains an implicant of `F'` (or is deleted), and (c) every stored
-  learnt clause is implied, in the QBF sense, by the new formula (or is
-  deleted). Equivalence-preserving rewrites (subsumption, strengthening,
-  vivification) satisfy this trivially; elimination satisfies it under its
-  side conditions (ROADMAP M3 gives the argument).
+**QCIR input.** The two databases are independent encodings of the same
+circuit; by INV-DERIVED every stored constraint has a QLRUP derivation from
+the original encoding of its kind. So *any* answer the solver gives is
+correct, whatever heuristics or simplifications ran. What a transformation
+can break is **termination** (INV-COMPLETE: the solver reaches a state with
+neither kind in conflict) and performance, never the verdict, as long as
+INV-DERIVED holds. In mode 2 "QLRUP derivation" reads "long-distance
+derivation": inprocessing only ever adds plain resolvents of constraints
+without complementary literals (10.5), so stored constraints stay
+long-distance derivable from the encoding.
+
+**QDIMACS input, modes 0 and 1.** There is no cube encoding; cubes start
+from satisfying assignments of the irredundant clauses, so the cube side is
+only as good as the clause set it was read off. Notation: `Π` the current
+prefix (over the variables that are not eliminated), `G` the irredundant
+clauses (unit clauses included), `L` the learnt clauses, `T` the stored
+cubes (none of them original; unit cubes included), `v` the truth value of the input, and
+
+    lo = value of Π.(G ∧ ⋀L)          hi = value of Π.(G ∨ ⋁T)
+
+Because `G ∧ ⋀L ⊨ G ⊨ G ∨ ⋁T`, every state has `lo <= value of Π.G <= hi`
+(false < true).
+
+> **INV-SANDWICH**: `lo = hi = v`. (Hence also `Π.G` has the value `v`.)
+
+It justifies both verdicts: an empty clause makes `lo` false, an empty cube
+makes `hi` true. It does **not** say that stored cubes are implicants of `G`,
+and they are not in general: learnt clauses are consequences in the QBF
+sense, not propositional ones, so once an irredundant clause has been
+strengthened with a learnt clause an older cube may fail to imply `G`. (The
+first version of this section demanded exactly that; review 00, B4.)
+
+**Admissibility criterion.** A step from `(Π, G, L, T)` to `(Π', G', L',
+T')` is admissible if
+
+- **(LO)** `lo' >= lo`: the lower value does not decrease, and
+- **(HI)** `hi' <= hi`: the upper value does not increase.
+
+Then `v = lo <= lo' <= hi' <= hi = v`. Each condition is one-sided, which is
+what makes the per-technique arguments short: weakening anything satisfies
+(LO) for free, strengthening anything satisfies (HI) for free.
+
+Facts used below (`φ` is an arbitrary propositional formula, not necessarily
+a CNF):
+
+- **F1 (monotonicity)** if `ψ ⊨ ψ'` then `Π.ψ <= Π.ψ'`.
+- **F2 (resolution)** a resolvent, on a pivot of either quantifier, is a
+  propositional consequence of its parents; dually a cube resolvent implies
+  the disjunction of its parents.
+- **F3 (reduction in context)** if `u` is universal and no variable of the
+  clause `C` is quantified after `u`, then `Π.(φ ∧ (C ∨ u))` and
+  `Π.(φ ∧ (C ∨ u) ∧ C)` have the same value. (Take a winning existential
+  strategy for the first formula and a play in which `C` is false; then `u`
+  is true in it. Let the universal player deviate at `u` only: the variables
+  of `C` were all played before, so `C ∨ u` is false in the new play, a
+  contradiction.) Dually for an existential `e` rightmost in a cube:
+  `Π.(φ ∨ (t ∧ e))` and `Π.(φ ∨ (t ∧ e) ∨ t)` have the same value.
+- Consequently **F4**: adding to `L` a clause obtained by one QLRUP step
+  (resolutions, then reduction) from clauses of `G ∪ L` leaves `lo`
+  unchanged, and adding to `T` a cube obtained by one QLRUP step from cubes
+  of `T` leaves `hi` unchanged.
+
+The steps of M1-M4, each against (LO) and (HI):
+
+| step | (LO) | (HI) |
+|---|---|---|
+| learn a clause from `G ∪ L` | F4 | `G`, `T` untouched |
+| learn a cube from `T` | `G`, `L` untouched | F4 |
+| initial cube `t` with `t ⊨ G` (4.5) | untouched | `G ∨ ⋁T ∨ t ≡ G ∨ ⋁T` |
+| delete a learnt clause; delete a cube | F1 (weaker conjunction); untouched | untouched; F1 (weaker disjunction) |
+| promote a learnt clause `D` to irredundant | `G ∧ ⋀L` unchanged | F1 (`G ∧ D ⊨ G`) |
+| replace an irredundant `C` by `C' ⊂ C`, where `C'` comes from one QLRUP step over `G ∪ L` (root-literal removal, self-subsumption, vivification) | F4, since `G' ∧ ⋀L ≡ G ∧ ⋀L ∧ C'` | F1 (`G' ⊨ G`) |
+| replace a cube `t` by `t' ⊂ t` derived from `T` | untouched | F4, then deletion |
+| delete an irredundant `C` implied by the remaining irredundant clauses (subsumed by an irredundant clause; contains a literal `l` whose unit clause `(l)` is irredundant) | F1 | `G' ≡ G` |
+| delete an irredundant `C` containing `¬u`, where the unit cube `(u)` is stored | F1 | `G' ∨ u ≡ G ∨ u`, and `(u)` is a disjunct of `⋁T` |
+| eliminate an existential `x` under E1-E4 | ROADMAP M3.2 | ROADMAP M3.2 (this is where E2 and E3 are used) |
+
+Rules that follow, and that the code must respect for QDIMACS input:
+
+1. **Irredundant clauses may be strengthened using learnt clauses.** The
+   strengthened clause must be a QLRUP step over stored clauses, which
+   INV-DERIVED demands anyway.
+2. **A learnt clause that justifies removing an irredundant one becomes
+   irredundant first.** This covers subsumption by a learnt clause and unit
+   clauses: unit constraints of either kind are flagged irredundant and are
+   never deleted (4.3), so the unit clause `(l)` is in `G` and the unit cube
+   `(u)` stays in `T` for as long as the deletions they justified matter.
+3. **An irredundant clause is deleted only under one of the three deletion
+   rows above.** In particular a clause that is disabled at root by a
+   literal *without* a stored unit (a root assignment whose reason is a
+   longer constraint that cannot be turned into a unit, ROADMAP M2.1) stays.
+4. **Initial cubes hit the current `G`, including its unit clauses.** Root
+   literals are therefore part of initial cubes unless existential reduction
+   removes them; they are permanently vanished there and cost nothing.
+5. Cubes and learnt clauses can always be deleted.
+
+**QDIMACS input, mode 2.** Long-distance constraints (with complementary
+secondary literals) have no clause-by-clause semantics, so INV-SANDWICH
+cannot be stated for them. The argument is the baseline's: every stored
+clause is long-distance derivable from the input, and every initial cube is
+an implicant of the *input* matrix. To keep the second half true, `G` may
+only be strengthened or shrunk equivalently in mode 2 (`G' ⊨ G`, with every
+new clause derivable and every deleted clause implied by the remaining
+irredundant ones): the last two rows of the table (deletion under a unit
+cube, elimination) are **not applied to QDIMACS input in mode 2**.
 
 ### 11.2 Classes
 
@@ -968,9 +1253,9 @@ clause database (false), or the empty cube from the cube database (true).
   units.
 - **(R) Removal**: deletes irredundant constraints that are not implied by the
   rest in the propositional sense (BVE parents, blocked constraints). In the
-  proof a deletion is always legal. The obligations are 11.1(a)-(c) for
-  QDIMACS and INV-COMPLETE for QCIR; they are side conditions of the solver,
-  not of the proof.
+  proof a deletion is always legal. The obligations are condition (HI) of
+  11.1 for QDIMACS (removal weakens `G`, so (LO) is free) and INV-COMPLETE
+  for QCIR; they are side conditions of the solver, not of the proof.
 - **(N) Non-derivational**: adds a constraint or an assignment that is not a
   resolvent (pure literals, universal expansion, definitions, anything that
   changes the prefix). Not expressible in QLRUP. Such a technique is either
@@ -1019,18 +1304,54 @@ Where **not** to imitate CaDiCaL:
   the arena and 8-byte watches stay (owner requirement);
 - no signed-`int` literals inside the solver;
 - no incremental machinery (assumptions, constraint, freeze/melt counting,
-  restore, tainting), no `External` propagator, no IPASIR, no local search,
-  no `mobical`; the `External` layer is deliberately thin;
+  restore, tainting), no `External` class and no external propagator, no
+  IPASIR, no local search, no `mobical`;
 - no several-thousand-line `internal.hpp` with inline everything: inline only
   what profiling shows hot (`val`, `kval`, `assign`, watch access);
 - no macro-generated control flow beyond the tables and `LOG`/`START`
   families; no `goto` (the old analysis uses it; restructure when porting);
-- CaDiCaL's GNU-style space before the call parenthesis is **not** adopted in
-  code; `.clang-format` (LLVM base, 100 columns; `clang-format` 15 is
-  installed) is the authority and a `ctest` test fails on unformatted files
-  in `src/` and `test/unit/`. (The prose of these documents writes `f ()`
-  only to mark something as a function.)
 
-Process rules: no commented-out code; no dead options; every new technique
-arrives with its option to switch it off, its statistics, its unit tests, a
-fuzz configuration in `tests/regress.sh`, and a benchmark ablation.
+Formatting **is** CaDiCaL's: the repository's `.clang-format` is a copy of
+`~/cadical/.clang-format` (LLVM base, `ColumnLimit: 76`, `SpaceBeforeParens:
+Always`, `SpaceAfterCStyleCast: true`, `AlignEscapedNewlines: DontAlign`), so
+code is written `propagate ()`, `if (x)`, as in these documents.
+`clang-format` 15 is installed and is the authority; a `ctest` test fails on
+unformatted files in `src/` and `test/unit/`. (Revision 1 chose LLVM style at
+100 columns; changed after review 00, S9, while no code exists. The owner can
+reverse it by replacing one file and reformatting.)
+
+Process rules: no commented-out code; no dead options (options that exist
+for the stress configurations are not dead: the matrix uses them); every new
+technique arrives with its option to switch it off, its statistics, its unit
+tests, its normal and stress configurations in `tests/matrix.txt` with the
+counters that must be nonzero, and a benchmark ablation.
+
+---------------------------------------------------------------------------
+
+## 13. Review responses
+
+Review 00 (`reviews/00-architecture.md`) on revision 1 of this document and
+of `ROADMAP.md`. All five blocking items are accepted; none is rebutted. The
+table says where each one landed and where the response goes beyond or
+departs from what the review asked.
+
+| item | response | where |
+|---|---|---|
+| **B1** fuzz corpus does not reach the search machinery | Accepted. Two-tier corpus (search tier: 10^2-10^4 baseline conflicts with checkable proofs, histogram reported); stress configurations per milestone; options whose ranges allow them (`gcfrac=0`, `reduceint`, `tier1glue=0`, restart every conflict, `depreset=1`, later tier/inprocessing knobs); `c stat` lines; `regress.sh` fails when a required counter is nonzero on fewer than 10% of the search-tier instances. Added beyond the review: `gc` and `restart` stress are separate and `reduceint` grows arithmetically, because restarting every conflict while deleting nearly all learnt constraints need not terminate; stress timeouts above 2% fail | ROADMAP 0.1, P0.1; ARCH 9.1, 9.2, 5.3 |
+| **B2** noise band measures the machine, not the search | Accepted. `--seed` = random initial scores (the baseline's `-rnd-init -rnd-seed`); run sets of 5 seeds (quick) and 3 fresh seeds (full) for both arms; paired per-instance comparison with a bootstrap interval on the PAR2 difference and a sign test; "better" / "not worse" defined once and used by every gate; experiment items must pass at the quick tier and again at the full tier. Limits fixed at 16 GB and 48 jobs, enforced by `compare.py`; the existing `baseline-t5` / `baseline-t180` runs are informational only | ROADMAP 0.3, P0.2, P0.4; ARCH 7.3 |
+| **B3** proof-check coverage unspecified | Accepted. Coverage table in every report with non-accepted proofs by name; a proof attempted for every instance solved at the quick tier (routine: "on" arm, seed 1; gates: seed 0, default, `-dl`, `-mode=1`, 3600 s checker limit, `qlrup-trim` retry); no unexplained drop between gates; proof overhead per milestone | ROADMAP 0.3 and every milestone's acceptance |
+| **B4** QDIMACS soundness criterion wrong | Accepted; the review's invariant is adopted in a slightly stronger and more convenient form. INV-SANDWICH: `Π.(G ∧ ⋀L)` and `Π.(G ∨ ⋁T)` both have the input's truth value (the review's `Π.G` then follows, and the learnt clauses are covered by the same statement instead of a separate condition). Admissibility is two one-sided conditions (LO)/(HI); every step of M1-M4 is argued against them, including the review's missing step (moving `∃x` innermost in `G ∨ ⋁T` under E2+E3). Answer to the review's question: **yes, irredundant constraints may be strengthened using redundant ones**; a redundant constraint that justifies *removing* an irredundant one is promoted first; units are irredundant and never deleted. Two things the review did not ask for: deletion of root-disabled constraints is tied to a stored unit (M2.1 step 3), and for QDIMACS in mode 2 the invariant cannot be stated, so only equivalent shrinking of `G` is allowed there | ARCH 11.1, 4.3, 4.5, 10.5; ROADMAP M2.1, M3.1-M3.3, M4 |
+| **B5** layering claim false for the extension stack | Accepted, and taken one step further (with S10): there is no `External` class at all. `Solver` owns the variable maps and translates; the extension stack, reconstruction and certificate values live in `Internal` in internal literals; proof numbers are per-variable static data in `prefix.hpp`, read by `Proof`. No upward pointer exists | ARCH 3, 3.5, 10.4 |
+| S1 measure BVE yield first | Accepted: P0.3 / M3.0 with a decision point before M3.2, and the statement that E3 is not a soundness condition for QCIR goes to the owner with the numbers | ROADMAP M3.0 |
+| S2 QDIMACS elimination unverified | Accepted and strengthened: it is the optional package M3.6, off by default (`--elimqdimacs=0`); `check_model_cube ()` validates every initial cube; clause entries only on the extension stack | ROADMAP M3.4, M3.6; ARCH 4.5, 10.4 |
+| S3 header size | Accepted: layout provisional, measurement in M1.3, 12-byte fallback | ARCH 5.2; ROADMAP M1.3 |
+| S4 propagation variants | Accepted: table of six variants, one templated watch loop (`Kind`, `Lone`), dispatch outside the loop | ARCH 7.2 |
+| S5 meaning of "pluggable" | Accepted: touch-point list, per-technique state structs, edits to the core are recorded design changes | ARCH 3.6 |
+| S6 port-fidelity diagnostics | Accepted | ROADMAP M1.9 |
+| S7 signals | Accepted: the handler sets a flag, the app flushes | ARCH 8.2, 3.5 |
+| S8 scope of the internal `Checker` | Accepted: scope table; `add_model_cube` in the tracer interface | ARCH 8.1 |
+| S9 formatting, `--arenasort` | Accepted and resolved rather than recorded as a deviation: the repository uses CaDiCaL's `.clang-format`; option renamed `--arenaorder` | ARCH 12, 5.3 |
+| S10 things specified too early; three layers | Accepted: statuses and header bits arrive with their technique, the `compact` remark is gone, `External` is gone | ARCH 10.3, 5.2, 4.2, 3 |
+| S11 extension stack wording | Accepted: the argument rests on the certificate block being outermost; `certificate.cpp` hands `extend ()` a total assignment and is the single place where the `-dl` wrinkle is resolved | ARCH 10.4 |
+| S12 gate for modes 1 and 2 | Accepted | ROADMAP 0.3 |
+| watcher interpretation | Recorded in `STATUS.md` as a decision the owner can veto | STATUS |
