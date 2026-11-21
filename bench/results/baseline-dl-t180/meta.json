@@ -1,0 +1,18 @@
+{
+  "solver": "/home/ec2-user/miniqu-work/baseline/miniQU",
+  "solver_sha256": "10ff614c6694e5f8170c1cc65a616660236ef7158ae08af4e7ccf43b8b71c25b",
+  "solver_git": "c39005a",
+  "args": "-dl",
+  "proof_args": "-proof-binary",
+  "timeout": 180.0,
+  "mem_gb": 8,
+  "jobs": 64,
+  "cores": "64-127",
+  "proof_check": false,
+  "proof_max_solve_sec": 20,
+  "checker": null,
+  "date": "2026-11-21T17:56:52",
+  "host": "ip-172-31-34-83.eu-west-2.compute.internal",
+  "cmdline": "bench/run.py --solver /home/ec2-user/miniqu-work/baseline/miniQU --args=-dl --tag baseline-dl-t180 --timeout 180 --jobs 64",
+  "note": ""
+}
