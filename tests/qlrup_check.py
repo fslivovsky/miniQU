@@ -324,6 +324,8 @@ class Checker:
             if l == 0 or abs(l) > self.f.nvars:
                 raise Fail('literal %d out of range (variables are 1..%d)'
                            % (l, self.f.nvars))
+            if -l in lits:
+                raise Fail('complementary literals %d and %d' % (l, -l))
         return set(lits)
 
     def check_new_id(self, cid):
@@ -376,7 +378,25 @@ class Checker:
                            % (cid, a))
             if self.cons[a][0] != t:
                 raise Fail('id %d: antecedent %d has a different type' % (cid, a))
-        R = self.reduce(set(self.cons[ants[0]][1]), t)
+        # Reducing only at the end is cheaper and is tried first; reducing after
+        # every step can succeed where that fails.
+        try:
+            R = self.chain(cid, t, ants, eager=False)
+            if R - C:
+                raise Fail('retry')
+        except Fail:
+            R = self.chain(cid, t, ants, eager=True)
+        missing = sorted(R - C)
+        if missing:
+            raise Fail('id %d: derived literals %s are not in the stated '
+                       'constraint' % (cid, missing))
+        self.cons[cid] = (t, frozenset(C))
+
+    def chain(self, cid, t, ants, eager):
+        """The result of resolving the antecedents in order, reduced."""
+        R = set(self.cons[ants[0]][1])
+        if eager:
+            R = self.reduce(R, t)
         for a in ants[1:]:
             A = self.cons[a][1]
             clash = [p for p in A if -p in R]
@@ -385,12 +405,10 @@ class Checker:
                            % (cid, a, sorted(clash)))
             if clash:
                 p = clash[0]
-                R = self.reduce((R - {-p}) | (set(A) - {p}), t)
-        missing = sorted(R - C)
-        if missing:
-            raise Fail('id %d: derived literals %s are not in the stated '
-                       'constraint' % (cid, missing))
-        self.cons[cid] = (t, frozenset(C))
+                R = (R - {-p}) | (set(A) - {p})
+                if eager:
+                    R = self.reduce(R, t)
+        return self.reduce(R, t)
 
     def delete(self, ids):
         for i in ids:

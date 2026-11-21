@@ -75,16 +75,23 @@ adds a clause or term `C` derived from the constraints `id_1, ..., id_m`, which
 must be of the same type and `m >= 1`. For clauses, the derivation is checked
 as follows (QU-resolution with universal reduction):
 
-1. Let `R` be the clause `id_1`, after reduction (see below).
+1. Let `R` be the clause `id_1`.
 2. For `j = 2, ..., m`, let `A` be the clause `id_j`. If there is exactly one
    literal `p` in `A` such that `-p` is in `R`, replace `R` by the resolvent
-   `(R \ {-p}) ∪ (A \ {p})`, followed by reduction. If there is no such
-   literal, `R` stays the same. If there are several, the step is invalid.
-3. Every literal of `R` must occur in `C`.
+   `(R \ {-p}) ∪ (A \ {p})`. If there is no such literal, `R` stays the same.
+   If there are several, the step is invalid.
+3. Apply reduction to `R` (see below). Every literal of the result must occur
+   in `C`.
 
 Reduction removes each universal literal `u` from `R` such that `-u` is not in
 `R` and every existential variable in `R` comes before the variable of `u` in
 the extended prefix. Note that the pivot of a resolution step can be universal.
+
+A step is also valid if this check succeeds when reduction is additionally
+applied to `id_1` and to every resolvent in step 2. (This can make a
+difference: a literal that can be reduced at some point may no longer be
+reducible after further resolution steps. Checkers try the cheaper variant
+first.)
 
 Terms are checked in the same way with the roles of existential and universal
 variables exchanged (so reduction removes existential literals).
@@ -116,8 +123,8 @@ and `1` for a term.
 ## Tools
 
 - `tests/qlrup_check.py FORMULA.qcir PROOF` is a simple reference checker.
-- `checker/` contains a checker written and verified in Lean; see
-  `checker/README.md`.
+- [qu-check](https://github.com/fslivovsky/qu-check) is a checker written and
+  verified in Lean.
 - `tools/qlrup-trim.cc` removes the steps that are not needed to derive the
   final empty constraint, and adds deletion steps after the last use of each
   constraint (`qlrup-trim [--binary|--text] [--renumber] INPUT OUTPUT`).
