@@ -92,7 +92,7 @@ Open points (need a decision when they come up):
 worked into `ARCHITECTURE.md` / `ROADMAP.md`; ARCH section 13 ("Review responses") maps every review item to
 the changed sections. Still no solver code. Workers: re-read ARCH 3, 7.2, 9.1, 9.2, 11.1 and ROADMAP 0 before
 starting anything; **P0.1-P0.4 (ROADMAP 0.4) come before M1.3**, M1.1 and M1.2 are unaffected except for
-formatting (decision 16).
+formatting (decision 23).
 
 Decisions added or changed (numbers continue the list above; 1, 7, 11, 13 are amended):
 
