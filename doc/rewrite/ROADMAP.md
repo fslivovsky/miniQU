@@ -381,6 +381,52 @@ Work packages:
   around 1; a systematic shift of the conflict ratio means a behaviour from
   the porting notes was lost and is investigated before the gate is called.
 
+### M1 execution plan (coordinator, supersedes the package order above)
+
+The packages above say *what* is built; this table says in which order and
+in which task. Ten tasks, one worker each, done strictly in order; each
+leaves the tree building with all tests passing that exist at that point.
+
+| task | content | packages | matrix configurations that must pass from here on |
+|---|---|---|---|
+| T01 | test tooling: two-tier corpus, `tests/matrix.txt`, coverage assertion and stress-timeout rule in `regress.sh`, `tests/fuzz_qdimacs.sh`, `tests/regressions/` | P0.1, part of M1.8 | (validated with the baseline and fake solvers) |
+| T02 | build system, `.clang-format`, base layer, unit-test hook | M1.1 | unit tests |
+| T03 | frontend: `circuit`, parsers, `encode`, `miniqu.hpp`, `tracer.hpp`; encoding compared with the baseline's `o` steps | M1.2 | unit tests, encoding diff |
+| T04 | core data: `internal`, `prefix`, `constraint.cpp`, `assign`, `propagate` (templated loop, modes 0/1), `backtrack`, `solver.cpp` | M1.3 (a) | unit tests |
+| T05 | mode-0 search: `decide`, `analyze`, `learn`, `bump`, `restart`, `model`, `certificate`, `app`, signals, limits; first end-to-end fuzz (no proofs yet) | M1.3 (b), `-cert` and limits of M1.7 | `default` (verdicts only), QDIMACS fuzz |
+| T06 | proofs: `proof`, `qlrup_tracer`, `trace_tracer`, `checker`, all logging points | M1.4, `-trace` of M1.7 | `default` with Lean checking |
+| T07 | `reduce` (old policy), arena garbage collection, stress options, header measurement | M1.3 (c) | + `gc`, `restart` |
+| T08 | dependency learning; mode 1 and `--legacyanalyze` | M1.5, half of M1.6 | + `dl`, `mode1`, `mode1-dl`, `legacy`, their stress rows |
+| T09 | mode 2; minimisation | half of M1.6, rest of M1.7 | full matrix |
+| T10 | harness (seeds, paired statistics, coverage table), `tests/check_cert.py`, port-fidelity script, full-matrix parity fuzz, removal of `miniQU-old` from the root build | P0.2, rest of M1.8, tooling of M1.9 | full matrix, seeds 1:2000 / 1:300 |
+
+Deviations from the package list, with reasons:
+
+- **Proofs before reduction and garbage collection** (T06 before T07): the
+  `gc` stress configuration then runs under the Lean checker from its first
+  day, and deletion steps need no second visit (`mark_garbage` logs them).
+- **M1.3 is three tasks**: it was far above the size a reviewer can read.
+  T04 ends with a solver that answers only formulas decided at input; that
+  is deliberate, the acceptance of T04 is unit tests.
+- **P0.2 moved to T10**, P0.4 to the benchmark stage after T10 (nothing
+  before the gate needs paired statistics; the header measurement of T07 is
+  a direct per-instance comparison). **P0.3** (elimination yield) is planned
+  with M3.
+- `-cert`, CPU/memory limits and signal handling come with the app in T05
+  instead of M1.7; `-trace` with the proofs in T06.
+- The old solver stays in the root build as `miniQU-old` until T10 (owner:
+  "removed from the build once parity is shown").
+- `--arenaorder` is not added in M1 (single legal value; arrives in M2).
+- In M1 the default-on `Checker` of debug/asan builds is not connected when
+  `ccminmode > 0` (ARCH 8.1).
+- Until a feature's task is done, the app rejects its option with
+  "not implemented yet" (exit 1); each task removes its own rejections.
+
+Matrix names (`tests/matrix.txt`): normal `default dl mode1 mode1-dl mode2
+mode2-dl ccmin3 dl-ccmin3 noearly legacy`; stress `gc gc-dl gc-mode1
+gc-mode2 restart restart-dl restart-mode1-dl`. Per-task acceptance uses
+seeds 1:300 (`release`) and 1:100 (`asan`) on the rows listed above.
+
 Acceptance of M1: no discrepancies; the coverage rule of 0.3 holds against
 the baseline's table, with no rejected proof; at the full tier the new
 solver is **not worse** than the baseline (definition in 0.3) in both main

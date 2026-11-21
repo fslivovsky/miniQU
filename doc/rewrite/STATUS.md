@@ -185,3 +185,23 @@ Open points (replace the list above where they overlap):
   machine time.
 - `bench/results/baseline-t180/` is untracked and its run (PID 38377, started by the infrastructure worker)
   was still in its proof phase when this revision was written; whoever owns it commits or discards it.
+
+## M1 planned as ten tasks (coordinator, 2026-11-21)
+
+State at planning time: no `src/` yet; P0.1-P0.4 not started; only docs, harness v1 and `regress.sh` v1
+exist. The task order is in ROADMAP "M1 execution plan" (T01-T10) and supersedes the M1.x / P0.x order;
+the deviations and their reasons are listed there. Decisions added:
+
+26. Order: test tooling, base, frontend, core data, mode-0 search, proofs, reduce + GC, `-dl` + mode 1,
+    mode 2 + minimisation, gate tooling. Proofs come before reduce/GC so that the `gc` stress row is
+    Lean-checked from the start.
+27. The old solver stays in the root CMake build as `miniQU-old` until T10 (ARCH 2 amended).
+28. `--arenaorder` is deferred to M2; the default-on `Checker` is not connected when `ccminmode > 0`
+    (M1 only, ARCH 8.1 amended); unimplemented options are rejected by the app until their task lands.
+29. M1 benchmark configurations: `default`, `-dl`, `-mode=1`, `-mode=2`, `-ccmin-mode=3`, all spelled so
+    that the baseline binary accepts the same arguments. M1 adds no technique, so there is no on/off
+    ablation; the comparison is new binary against frozen baseline per configuration.
+
+Note for whoever runs benchmarks: a baseline run started earlier (`bench/run.py ... --tag baseline-t900`,
+then `baseline-dl-t180`, 64 jobs on cores 64-127) was still running at planning time; do not start timed
+runs on cores 64-127 while it is alive (`pgrep -f bench/run.py`), and do not kill it.

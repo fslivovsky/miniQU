@@ -87,8 +87,11 @@ Build rules:
   --build --preset release -j16`. Targets: `miniQU` (binary), `miniqu`
   (static library), `qlrup-trim`, `unit-tests` (all unit test executables),
   and `ctest --preset <p>` runs them plus a 20-seed fuzz.
-- The old solver stays buildable only through its own `Makefile`; the root
-  `CMakeLists.txt` no longer references `minisat/`.
+- Until the M1 parity gate the root `CMakeLists.txt` still builds the old
+  solver, under the target name `miniQU-old` (its flags are untouched and
+  `-Werror` does not apply to it); the last M1 task removes that target, after
+  which the old tree is buildable only through its own `Makefile`. The frozen
+  baseline binary in the work directory is the reference throughout.
 
 ---------------------------------------------------------------------------
 
@@ -814,7 +817,10 @@ is live and of the right kind, and aborts with the offending step. It cannot
 validate original steps against the circuit (the Lean checker does). It is on
 by default in `debug`/`asan` builds whenever no QLRUP file is requested, so
 that every fuzz run exercises proof generation, and is available as `--check`
-in all builds. Its scope by input and mode:
+in all builds. M1 only: minimisation is switched off while a tracer is
+connected (7.5), so the default-on `Checker` is *not* connected when
+`ccminmode > 0` (otherwise debug/asan builds would never minimise); an
+explicit `--check` wins and disables minimisation. M2.3 removes both rules. Its scope by input and mode:
 
 | | modes 0 and 1 | mode 2 |
 |---|---|---|
@@ -889,7 +895,8 @@ keep working. Non-integer arguments are application arguments, not options:
 Options that exist from M1 (old names; defaults as in the old solver):
 `mode dl cert qcir earlytseitin verb ccminmode legacyanalyze phasesaving
 luby rfirst rinc vardecay gcfrac minlearnts proofbinary cpulim memlim`, plus
-`check`, `log`, `arenaorder`, `seed` (7.3). The old `cla-decay` and
+`check`, `log`, `seed` (7.3); `arenaorder` arrives with its M2 experiment
+(an option with a single legal value would be a dead option). The old `cla-decay` and
 `rnd-freq` are dropped (constraint activities and random decisions are not
 ported); `-rnd-init -rnd-seed=s` is `--seed=s`.
 
