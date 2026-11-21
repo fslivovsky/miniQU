@@ -109,6 +109,12 @@ int main(int argc, char** argv)
 
         std::unique_ptr<QCIRParser> qcir_parser;
 
+        bool qcir_input = argc == 2 && (hasEnding(std::string(argv[1]), "qcir") || qcir);
+        if (S.proof && (!qcir_input || mode == 2)) {
+            printf("ERROR! Proofs are only available for QCIR input in modes 0 and 1.\n");
+            exit(1);
+        }
+
         if (argc == 2 && (hasEnding(std::string(argv[1]), "qcir") || qcir)) {
             std::string filename_string(argv[1]);
             qcir_parser = std::make_unique<QCIRParser>(filename_string);

@@ -52,6 +52,8 @@ static DoubleOption  opt_garbage_frac      (_cat, "gc-frac",     "The fraction o
 static IntOption     opt_min_learnts_lim   (_cat, "min-learnts", "Minimum learnt clause limit",  0, IntRange(0, INT32_MAX));
 static BoolOption    opt_legacy_analyze    (_cat, "legacy-analyze", "Use the old conflict analysis in mode 0 as well (for comparison)", false);
 static StringOption  opt_trace             (_cat, "trace",       "If given, write trace to this file.");
+static StringOption  opt_proof             (_cat, "proof",       "If given, write a QLRUP proof to this file (QCIR input, modes 0 and 1; see doc/proof-format.md).");
+static BoolOption    opt_proof_binary      (_cat, "proof-binary", "Write the proof in binary format.", false);
 
 
 //=================================================================================================
@@ -114,11 +116,24 @@ Solver::Solver() :
   , propagation_budget (-1)
   , asynch_interrupt   (false)
   , trace              (false)
+  , proof              (false)
+  , proof_binary       (opt_proof_binary)
+  , record_ids         (false)
+  , proof_file         (NULL)
 {
     if (opt_trace) {
         trace = true;
         trace_file.open(opt_trace);
     }
+    if (opt_proof) {
+        proof = true;
+        proof_file = fopen(opt_proof, "wb");
+        if (proof_file == NULL)
+            fprintf(stderr, "ERROR! Could not open proof file: %s\n", (const char*)opt_proof), exit(1);
+        if (proof_binary)
+            fputs("QLRUPb1\n", proof_file);
+    }
+    record_ids = trace || proof;
     watches[Clauses] = std::make_unique<WatchLists>(WatcherDeleted(ca));
     watches[Terms]   = std::make_unique<WatchLists>(WatcherDeleted(ca));
 }
@@ -126,6 +141,8 @@ Solver::Solver() :
 
 Solver::~Solver()
 {
+    if (proof_file != NULL)
+        fclose(proof_file);
 }
 
 
@@ -217,12 +234,17 @@ bool Solver::addClause_(vec<Lit>& ps)
     return addClauseInternal(ps_copy);
 }
 
-bool Solver::addClauseInternal(const vec<Lit>& ps) {
+bool Solver::addClauseInternal(const vec<Lit>& ps, int proof_gate) {
     vec<Lit> ps_copy;
     ps.copyTo(ps_copy);
     // Check if clause is satisfied and remove false/duplicate literals:
     sort(ps_copy);
     Lit p; int i, j;
+
+    if (proof) {
+        addOriginalWithProof(ps_copy, Clauses, proof_gate);
+        return ok;
+    }
 
     #ifndef NDEBUG
     printf("Adding clause: ");
@@ -274,6 +296,124 @@ bool Solver::addClauseInternal(const vec<Lit>& ps) {
 }
 
 
+// Adds an original clause/term (sorted literals) when proof logging is enabled. In contrast to
+// the code above, the constraint is not simplified under the current assignment, since the
+// constraints in the proof have to follow from the definition of a single gate.
+void Solver::addOriginalWithProof(vec<Lit>& lits, bool ct, int proof_gate) {
+    // Remove duplicate literals, skip tautological clauses and contradictory terms.
+    int i, j;
+    Lit p;
+    for (i = j = 0, p = lit_Undef; i < lits.size(); i++)
+        if (lits[i] == ~p)
+            return;
+        else if (lits[i] != p)
+            lits[j++] = p = lits[i];
+    lits.shrink(i - j);
+
+    uint64_t id = running_id++;
+    proofOriginal(id, ct, proof_gate, lits);
+
+    int size = lits.size();
+    reduce(lits, ct == Clauses);
+    if (lits.size() < size) {
+        vec<uint64_t> premises;
+        premises.push(id);
+        id = running_id++;
+        proofDerived(id, ct, lits, premises);
+        proofDelete(premises[0]);
+    }
+    if (input_status != l_Undef)
+        return;
+    if (lits.size() == 0) {
+        input_status = (ct == Clauses) ? l_False : l_True;
+        if (ct == Clauses) ok = false;
+        return;
+    }
+
+    CRef cr = ca.alloc(lits, false, ct);
+    (ct == Clauses ? clauses : terms).push(cr);
+    constraint_ID.insert(cr, id);
+    if (lits.size() > 1) {
+        attachClause(cr);
+        return;
+    }
+    // A unit clause is satisfied by, and a unit term falsified by, assigning its literal.
+    Lit unit = (ct == Clauses) ? lits[0] : ~lits[0];
+    if (value(unit) == l_Undef)
+        uncheckedEnqueue(unit, cr, ct);
+    else if (value(unit) == l_False) {
+        // The complementary unit was added earlier: resolve the two.
+        assert(reason(var(unit)) != CRef_Undef && reasonType(var(unit)) == ct);
+        vec<uint64_t> premises;
+        premises.push(id);
+        premises.push(constraint_ID[reason(var(unit))]);
+        vec<Lit> empty;
+        proofDerived(running_id++, ct, empty, premises);
+        input_status = (ct == Clauses) ? l_False : l_True;
+        if (ct == Clauses) ok = false;
+    }
+}
+
+//=================================================================================================
+// Proof logging (see doc/proof-format.md):
+
+void Solver::proofNumber(uint64_t n) {
+    if (proof_binary) {
+        while (n >= 128) {
+            putc_unlocked((int)(n & 127) | 128, proof_file);
+            n >>= 7; }
+        putc_unlocked((int)n, proof_file);
+    } else
+        fprintf(proof_file, "%" PRIu64 " ", n);
+}
+
+void Solver::proofLits(const vec<Lit>& lits) {
+    for (int i = 0; i < lits.size(); i++) {
+        uint64_t v = proof_var[var(lits[i])];
+        if (proof_binary)
+            proofNumber(2 * v + sign(lits[i]));
+        else
+            fprintf(proof_file, "%s%" PRIu64 " ", sign(lits[i]) ? "-" : "", v);
+    }
+    proofNumber(0);
+}
+
+void Solver::proofOriginal(uint64_t id, bool ct, int gate, const vec<Lit>& lits) {
+    if (proof_binary) {
+        putc_unlocked('o', proof_file);
+        proofNumber(id);
+        proofNumber(ct);
+    } else
+        fprintf(proof_file, "o %" PRIu64 " %c ", id, ct == Clauses ? 'c' : 't');
+    proofNumber(gate);
+    proofLits(lits);
+    if (!proof_binary) fputc('\n', proof_file);
+}
+
+void Solver::proofDerived(uint64_t id, bool ct, const vec<Lit>& lits, const vec<uint64_t>& premise_ids) {
+    if (proof_binary) {
+        putc_unlocked('a', proof_file);
+        proofNumber(id);
+        proofNumber(ct);
+    } else
+        fprintf(proof_file, "%" PRIu64 " %c ", id, ct == Clauses ? 'c' : 't');
+    proofLits(lits);
+    for (int i = 0; i < premise_ids.size(); i++)
+        proofNumber(premise_ids[i]);
+    proofNumber(0);
+    if (!proof_binary) fputc('\n', proof_file);
+}
+
+void Solver::proofDelete(uint64_t id) {
+    if (proof_binary)
+        putc_unlocked('d', proof_file);
+    else
+        fputs("d ", proof_file);
+    proofNumber(id);
+    proofNumber(0);
+    if (!proof_binary) fputc('\n', proof_file);
+}
+
 void Solver::attachClause(CRef cr) {
     const Clause& c = ca[cr];
     bool ct = c.term();
@@ -310,6 +450,7 @@ void Solver::removeClause(CRef cr) {
         detachClause(cr);
     // Don't leave pointers to free'd memory!
     if (locked(c)) vardata[var(c[0])].reason = CRef_Undef;
+    if (proof) proofDelete(constraint_ID[cr]);
     c.mark(1); 
     ca.free(cr);
 }
@@ -428,7 +569,7 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool& l
     bool other_type = !primary_type;
     vec<uint64_t> premise_ids;
 
-    if (trace)
+    if (record_ids)
         premise_ids.push(constraint_ID[confl]);
 
     #ifndef NDEBUG
@@ -545,7 +686,7 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool& l
             clearSeenAt(rightmost_depth);
             return;
         }
-        if (trace) {
+        if (record_ids) {
             uint64_t id;
             assert(constraint_ID.has(confl, id));
             id = constraint_ID[confl];
@@ -706,7 +847,7 @@ void Solver::analyzeQ(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool& 
         Clause& c = ca[cr];
         if (c.learnt())
             claBumpActivity(c);
-        if (trace)
+        if (record_ids)
             premise_ids.push(constraint_ID[cr]);
         for (int i = from; i < c.size(); i++) {
             Var v = var(c[i]);
@@ -838,7 +979,7 @@ void Solver::finishLearnt(vec<Lit>& out_learnt, int& out_btlevel, bool ct, const
 {
     bool primary_type = (ct == ConstraintTypes::Clauses);
 
-    // Clause/term minimization. Skipped when tracing since the trace would lack premises.
+    // Clause/term minimization. Skipped when tracing or writing a proof, which would lack premises.
     out_learnt.copyTo(analyze_toclear);
     int i, j;
     if (ccmin_mode == 2) {
@@ -864,7 +1005,7 @@ void Solver::finishLearnt(vec<Lit>& out_learnt, int& out_btlevel, bool ct, const
                         break; }
             }
         }
-    } else if (ccmin_mode == 3 && !trace) {
+    } else if (ccmin_mode == 3 && !record_ids) {
         i = out_learnt.size();
         j = minimize(out_learnt, ct);
     } else {
@@ -925,6 +1066,8 @@ void Solver::finishLearnt(vec<Lit>& out_learnt, int& out_btlevel, bool ct, const
         auto id = running_id;
         traceConstraint(id, ct, out_learnt, premise_ids);
     }
+    if (proof)
+        proofDerived(running_id, ct, out_learnt, premise_ids);
 
 }
 
@@ -1685,7 +1828,7 @@ lbool Solver::search(int nof_conflicts)
                 CRef cr = ca.alloc(learnt_clause, true, ct);
                 ca[cr].lbd(lbd);
                 learnts.push(cr);
-                if (trace) {
+                if (record_ids) {
                     auto id = running_id++;
                     constraint_ID.insert(cr, id);
                 }
@@ -1873,6 +2016,8 @@ lbool Solver::solve_()
     if (trace) {
         trace_file.flush();
     }
+    if (proof)
+        fflush(proof_file);
     return status;
 }
 
@@ -2032,9 +2177,9 @@ void Solver::relocAll(ClauseAllocator& to)
     // Constraint IDs are only kept for tracing.
     CMap<uint64_t> constraint_ID_;
     auto reloc = [&](CRef& cr) {
-        uint64_t id = trace ? constraint_ID[cr] : 0;
+        uint64_t id = record_ids ? constraint_ID[cr] : 0;
         ca.reloc(cr, to);
-        if (trace)
+        if (record_ids)
             constraint_ID_.insert(cr, id);
     };
 
@@ -2118,6 +2263,13 @@ void Solver::updateDecisionVars() {
 }
 
 void Solver::getInitialTerm() {
+    if (proof) {
+        // A term obtained from a satisfying assignment of the clauses is not derived from the
+        // terms of the encoding. This should not happen for QCIR input, where propagation in the
+        // terms detects that the output gate is true.
+        fprintf(stderr, "ERROR! Proof logging does not support terms obtained from satisfying assignments.\n");
+        exit(1);
+    }
     Clause& initial_term = ca[initial_term_ref];
     int initial_term_size = 0;
     for (int i = 0; i < clauses.size(); i++) {
@@ -2255,15 +2407,20 @@ void Solver::updateDependencyWatchers() {
 void Solver::allocInitialTerm() {
     vec<Lit> all_variables(nVars());
     initial_term_ref = ca.alloc(all_variables, false, Terms);
-    if (trace)
+    if (record_ids)
         constraint_ID.insert(initial_term_ref, 0);
 }
 
-lbool Solver::addTerm(const vec<Lit>& term) {
+lbool Solver::addTerm(const vec<Lit>& term, int proof_gate) {
     vec<Lit> term_copy;
     term.copyTo(term_copy);
 
     sort(term_copy);
+
+    if (proof) {
+        addOriginalWithProof(term_copy, Terms, proof_gate);
+        return input_status;
+    }
 
     // Check for contradictions.
     for (int i = 1; i < term_copy.size(); i++) {

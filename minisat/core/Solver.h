@@ -60,7 +60,8 @@ public:
     void    setVarType(Var x, bool is_existential, int depth);
 
     bool    addClause (const vec<Lit>& ps);                     // Add a clause to the solver. 
-    bool    addClauseInternal (const vec<Lit>& ps);             // Add a clause to the solver (using internal variables). 
+    bool    addClauseInternal (const vec<Lit>& ps, int proof_gate = 0); // Add a clause to the solver (using internal variables). For proofs, 'proof_gate'
+                                                                // is the number of the gate whose definition implies the clause (0: output).
     bool    addEmptyClause();                                   // Add the empty clause, making the solver contradictory.
     bool    addClause (Lit p);                                  // Add a unit clause to the solver. 
     bool    addClause (Lit p, Lit q);                           // Add a binary clause to the solver. 
@@ -68,7 +69,8 @@ public:
     bool    addClause (Lit p, Lit q, Lit r, Lit s);             // Add a quaternary clause to the solver. 
     bool    addClause_(      vec<Lit>& ps);                     // Add a clause to the solver without making superflous internal copy. Will
                                                                 // change the passed vector 'ps'.
-    lbool   addTerm(const vec<Lit>& term);                      // Add a term.
+    lbool   addTerm(const vec<Lit>& term, int proof_gate = 0);  // Add a term.
+    void    setProofVar(Var x, int number);                     // Set the number of a variable in proofs.
                                                     
 
     // Solving:
@@ -113,6 +115,12 @@ public:
     void    traceReduction(vec<Lit>& lits, bool primary_type);
     void    traceConstraint(uint64_t id, bool constraint_type, const vec<Lit>& lits, const vec<uint64_t>& premise_ids);
     void    traceInitialTerm();
+    void    addOriginalWithProof(vec<Lit>& lits, bool ct, int proof_gate);
+    void    proofNumber(uint64_t n);
+    void    proofLits(const vec<Lit>& lits);
+    void    proofOriginal(uint64_t id, bool ct, int gate, const vec<Lit>& lits);
+    void    proofDerived(uint64_t id, bool ct, const vec<Lit>& lits, const vec<uint64_t>& premise_ids);
+    void    proofDelete(uint64_t id);
     int     computeLBD(vec<Lit>& lits);
     void    reduce(vec<Lit>& lits, bool primary_type);
 
@@ -173,6 +181,8 @@ public:
     int       restart_first;      // The initial restart limit.                                                                (default 100)
     double    restart_inc;        // The factor with which the restart limit is multiplied in each restart.                    (default 1.5)
     bool      trace;              // If true, proof tracing is activated.
+    bool      proof;              // If true, a QLRUP proof is written (see doc/proof-format.md).
+    bool      proof_binary;       // Write the proof in binary format.
     double    learntsize_factor;  // The intitial limit for learnt clauses is a factor of the original clauses.                (default 1 / 3)
     double    learntsize_inc;     // The limit for learnt clauses is multiplied with this factor each restart.                 (default 1.1)
 
@@ -305,7 +315,10 @@ protected:
     CRef                initial_term_ref;
     vec<CRef>           terms;
     Var                 max_alias;
-    CMap<uint64_t>      constraint_ID;    // Constraint IDs for tracing.
+    CMap<uint64_t>      constraint_ID;    // Constraint IDs for tracing and proofs.
+    bool                record_ids;       // Constraint IDs are needed (for tracing or proofs).
+    FILE*               proof_file;
+    vec<int>            proof_var;        // The number of each variable in proofs.
     vec<Lit>            outermost_assignment;
     uint64_t            running_id;
 
@@ -489,6 +502,7 @@ inline int      Solver::nVars         ()      const   { return next_var; }
 // TODO: nFreeVars() is not quite correct, try to calculate right instead of adapting it like below:
 inline int      Solver::nFreeVars     ()      const   { return (int)dec_vars - (trail_lim.size() == 0 ? trail.size() : trail_lim[0]); }
 inline void     Solver::setPolarity   (Var v, lbool b){ user_pol[v] = b; }
+inline void     Solver::setProofVar   (Var x, int number){ proof_var.growTo(x + 1, 0); proof_var[x] = number; }
 inline void     Solver::setDecisionVar(Var v, bool b) 
 { 
     if      ( b && !decision[v]) dec_vars++;

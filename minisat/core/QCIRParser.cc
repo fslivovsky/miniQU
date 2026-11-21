@@ -104,6 +104,12 @@ void QCIRParser::readQuantifierBlock(VariableType type, const string& variables_
   }
 }
 
+// Defines a gate and assigns it the next gate number (used in proofs).
+void QCIRParser::defineGate(const string& gate_id, GateType gate_type, const vector<string>& input_literals) {
+  addGate(gate_id, gate_type, input_literals);
+  gate_number[id_to_alias[gate_id]] = gate_number.size() + 1;
+}
+
 void QCIRParser::readGate(const string& gate_id, const string& gate_type_string, const string& gate_inputs_string) {
   auto input_literals = split(gate_inputs_string, ',');
   auto known_gate = id_to_alias.find(gate_id);
@@ -116,22 +122,22 @@ void QCIRParser::readGate(const string& gate_id, const string& gate_type_string,
     }
   }
   if (gate_type_string == QBFParser::AND_STRING) {
-    addGate(gate_id, GateType::And, input_literals);
+    defineGate(gate_id, GateType::And, input_literals);
   } else if (gate_type_string == QBFParser::OR_STRING) {
-    addGate(gate_id, GateType::Or, input_literals);
+    defineGate(gate_id, GateType::Or, input_literals);
   } else if (gate_type_string == "xor" && input_literals.size() == 2) {
     // xor(a, b) = or(and(a, -b), and(-a, b)). Auxiliary gate names cannot clash with identifiers.
     auto& a = input_literals[0];
     auto& b = input_literals[1];
-    addGate(gate_id + "#1", GateType::And, {a, negateLiteral(b)});
-    addGate(gate_id + "#2", GateType::And, {negateLiteral(a), b});
-    addGate(gate_id, GateType::Or, {gate_id + "#1", gate_id + "#2"});
+    defineGate(gate_id + "#1", GateType::And, {a, negateLiteral(b)});
+    defineGate(gate_id + "#2", GateType::And, {negateLiteral(a), b});
+    defineGate(gate_id, GateType::Or, {gate_id + "#1", gate_id + "#2"});
   } else if (gate_type_string == "ite" && input_literals.size() == 3) {
     // ite(c, a, b) = or(and(c, a), and(-c, b)).
     auto& c = input_literals[0];
-    addGate(gate_id + "#1", GateType::And, {c, input_literals[1]});
-    addGate(gate_id + "#2", GateType::And, {negateLiteral(c), input_literals[2]});
-    addGate(gate_id, GateType::Or, {gate_id + "#1", gate_id + "#2"});
+    defineGate(gate_id + "#1", GateType::And, {c, input_literals[1]});
+    defineGate(gate_id + "#2", GateType::And, {negateLiteral(c), input_literals[2]});
+    defineGate(gate_id, GateType::Or, {gate_id + "#1", gate_id + "#2"});
   } else {
     parseError("unsupported gate '" + gate_id + " = " + gate_type_string + "(...)' with " + std::to_string(input_literals.size()) + " inputs");
   }
@@ -259,49 +265,42 @@ void QCIRParser::initSolver(Minisat::Solver& solver, bool early_tseitin) {
         gate_alias_to_tseitin_universal[alias] = solver_var;
       }
       solver.setVarType(solver_var, group.existential, solver_depth);
+      // In proofs, variables are numbered in the order of the prefix, followed by the gates in
+      // the order of their definitions.
+      solver.setProofVar(solver_var, group.tseitin ? variable_gate_boundary - 1 + gate_number.at(alias) : alias);
       block.push(solver_var);
     }
   }
   finishBlock();
 
-  for (auto& clause: getClausalEncoding(false)) {
-    Minisat::vec<Minisat::Lit> minisat_clause;
-    for (auto l: clause) {
-      int v = abs(l);
-      bool negated = (l < 0);
-      minisat_clause.push(Minisat::mkLit(gate_alias_to_tseitin_existential[v], negated));
+  // Add the clauses and terms encoding each gate, followed by the output.
+  auto addConstraints = [&](const std::vector<std::vector<int>>& constraints, bool terms, int proof_gate) {
+    auto& alias_to_var = terms ? gate_alias_to_tseitin_universal : gate_alias_to_tseitin_existential;
+    for (auto& constraint: constraints) {
+      Minisat::vec<Minisat::Lit> lits;
+      for (auto l: constraint) {
+        lits.push(Minisat::mkLit(alias_to_var[abs(l)], l < 0));
+      }
+      if (terms) {
+        solver.addTerm(lits, proof_gate);
+      } else {
+        solver.addClauseInternal(lits, proof_gate);
+      }
     }
-    solver.addClauseInternal(minisat_clause);
-  }
-
-  for (auto& term: getClausalEncoding(true)) {
-    Minisat::vec<Minisat::Lit> minisat_term;
-    for (auto l: term) {
-      int v = abs(l);
-      bool negated = (l < 0);
-      minisat_term.push(Minisat::mkLit(gate_alias_to_tseitin_universal[v], negated));
+  };
+  auto output_alias = id_to_alias[output_id];
+  for (bool terms: {false, true}) {
+    for (unsigned int i = variable_gate_boundary; i < gates.size(); i++) {
+      if (gates[i].gate_type == GateType::And || gates[i].gate_type == GateType::Or) {
+        addConstraints(getClausalEncoding(i, terms), terms, variable_gate_boundary - 1 + gate_number.at(i));
+      }
     }
-    solver.addTerm(minisat_term);
+    addConstraints({{output_negated ? -output_alias : output_alias}}, terms, 0);
   }
 }
 
 string QCIRParser::getOriginalName(int alias) const {
   return gates.at(alias).gate_id;
-}
-
-std::vector<std::vector<int>> QCIRParser::getClausalEncoding(bool get_terms) {
-  std::vector<std::vector<int>> clauses;
-  for (unsigned int i = variable_gate_boundary; i < gates.size(); i++) {
-    auto& gate = gates[i];
-    if (gate.gate_type == GateType::And || gate.gate_type == GateType::Or) {
-      auto gate_clauses = getClausalEncoding(i, get_terms);
-      clauses.insert(clauses.end(), gate_clauses.begin(), gate_clauses.end());
-    }
-  }
-  // Output term.
-  auto output_alias = id_to_alias[output_id];
-  clauses.push_back( {output_negated ? -output_alias : output_alias});
-  return clauses;
 }
 
 std::vector<std::vector<int>> QCIRParser::getClausalEncoding(int gate_alias, bool get_terms) {
