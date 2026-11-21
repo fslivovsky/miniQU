@@ -1,0 +1,6 @@
+#QCIR-G14
+exists(a)
+forall(u)
+output(o)
+x = xor(a, u)
+o = and(x, -x)

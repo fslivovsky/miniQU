@@ -1,0 +1,9 @@
+#QCIR-G14
+exists(a, b)
+forall(u)
+exists(c)
+output(o)
+x = xor(a, u)
+i = ite(b, x, c)
+m = xor(i, -u)
+o = and(m, a)

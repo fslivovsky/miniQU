@@ -216,3 +216,24 @@ Answer to the open point "For the owner" above; no need to ask again before M3.2
   argues it is not needed for soundness) as a separate, optional step behind its own option, with the
   rightmost version kept as the comparison arm in the ablation. The relaxed variant needs the same
   evidence as any other technique: no discrepancies, proofs accepted by the Lean checker.
+
+## Paused during M1-T01 (2026-11-21 18:38)
+
+The run was stopped while the M1-T01 worker was validating the configuration matrix against the baseline;
+T01 is NOT finished. State left for whoever restarts T01:
+
+- Committed in 99f4f74: `tests/corpus.py`, `corpus_stats.py`, `matrix.txt`, `regress.py`, `regress.sh`,
+  `tests/fake/`. Committed afterwards as work in progress, not validated: `tests/fuzz_qdimacs.sh`,
+  `tests/run_regressions.sh`, `tests/regressions/`.
+- Not done or not recorded: the conflict histogram over seeds 1..400 required by the T01 spec, the proof
+  acceptance rate, the full-matrix validation run. Scratch output of the interrupted run is in
+  `/home/ec2-user/miniqu-work/regress` and may be incomplete.
+- Two defects observed from outside while T01 ran, to be fixed in T01:
+  1. `tests/qcir_fuzz.py` does not terminate for `--vars 80 --gates 400 --blocks 4 --cnf` and
+     `--vars 100 --gates 800 --blocks 10` (seeds 3, 4, 5): 15 such processes ran at 100% CPU for over an
+     hour and had to be killed by hand.
+  2. Timeouts in the regress engine do not kill the whole process tree: `tests/fake/stat-wrapper.sh`
+     processes with a baseline solver child were left running (reparented to init) for up to 45 minutes,
+     mostly with `-no-early-tseitin`. Kill the process group on timeout and on exit.
+- Baseline results (`bench/results/baseline-t180`, `baseline-dl-t180`, `baseline-t900`) are complete and
+  committed.

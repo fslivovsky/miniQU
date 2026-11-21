@@ -1,0 +1,11 @@
+#QCIR-G14
+forall(u)
+exists(e)
+forall(v)
+exists(f)
+output(o)
+c1 = or(-u, e)
+c2 = or(u, -e)
+c3 = or(-v, f)
+c4 = or(v, -f)
+o = and(c1, c2, c3, c4)

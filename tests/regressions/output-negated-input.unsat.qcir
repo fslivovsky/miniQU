@@ -1,0 +1,4 @@
+#QCIR-G14
+exists(a)
+forall(u)
+output(-u)
