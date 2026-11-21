@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Random QCIR generator with a built-in truth-table evaluator.
 
-Usage: qcir_fuzz.py SEED [--vars N] [--gates N] [--blocks N] [--cnf]
+Usage: qcir_fuzz.py SEED [--vars N] [--gates N] [--blocks N] [--cnf] [--no-expected]
 
 Writes the instance to stdout. The first line is a comment of the form
 "# expected: SAT" or "# expected: UNSAT", computed by brute force, so that
@@ -105,7 +105,9 @@ def write(nvars, blocks, gates, output, expected):
     def lit(l):
         return name(l) if l > 0 else '-' + name(-l)
 
-    lines = ['#QCIR-G14', '# expected: %s' % ('SAT' if expected else 'UNSAT')]
+    lines = ['#QCIR-G14']
+    if expected is not None:  # larger instances are not brute-forced
+        lines.append('# expected: %s' % ('SAT' if expected else 'UNSAT'))
     for existential, variables in blocks:
         lines.append('%s(%s)' % ('exists' if existential else 'forall', ', '.join(name(v) for v in variables)))
     lines.append('output(%s)' % lit(output))
@@ -121,10 +123,12 @@ def main():
     parser.add_argument('--gates', type=int, default=30)
     parser.add_argument('--blocks', type=int, default=6)
     parser.add_argument('--cnf', action='store_true', help='generate a CNF matrix')
+    parser.add_argument('--no-expected', action='store_true',
+                        help='skip the brute-force evaluation (needed above about 20 variables)')
     args = parser.parse_args()
     rng = random.Random(args.seed)
     instance = generate(rng, args.vars, args.gates, args.blocks, args.cnf)
-    print(write(*instance, evaluate(*instance)), end='')
+    print(write(*instance, None if args.no_expected else evaluate(*instance)), end='')
 
 
 if __name__ == '__main__':

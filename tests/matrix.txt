@@ -1,0 +1,31 @@
+# Configuration matrix of tests/regress.sh (see doc/rewrite/ROADMAP.md 0.1).
+#
+# name | solver options | proofs yes/no | counters that must be nonzero | kind
+#
+# proofs: whether the Lean checker verifies the proofs of this configuration.
+# counters: names of "c stat NAME VALUE" lines; each must be nonzero on at
+#   least 10% of the search-tier instances that finished.
+# kind: "normal" or "stress". Stress rows force rare paths (reduction, garbage
+#   collection, restarts) and fail the run when more than 2% of the search-tier
+#   instances time out; for normal rows that only warns.
+#
+# Normal configurations.
+default      |                                  | yes | conflicts restarts learned.clause learned.cube | normal
+dl           | -dl                              | yes | conflicts restarts learned.clause learned.cube dependencies | normal
+mode1        | -mode=1                          | yes | conflicts restarts learned.clause learned.cube | normal
+mode1-dl     | -mode=1 -dl                      | yes | conflicts restarts learned.clause learned.cube dependencies | normal
+mode2        | -mode=2                          | no  | conflicts restarts learned.clause learned.cube | normal
+mode2-dl     | -mode=2 -dl                      | no  | conflicts restarts learned.clause learned.cube dependencies | normal
+ccmin3       | -ccminmode=3                     | yes | conflicts restarts learned.clause learned.cube minimized | normal
+dl-ccmin3    | -dl -ccminmode=3                 | yes | conflicts restarts learned.clause learned.cube dependencies minimized | normal
+noearly      | -no-earlytseitin                 | yes | conflicts restarts learned.clause learned.cube | normal
+legacy       | -legacyanalyze                   | yes | conflicts restarts learned.clause learned.cube | normal
+# Stress configurations: reduce every 2 conflicts, no protected tier, garbage
+# collect on any waste; restart every conflict and reset dependencies often.
+gc           | --reduceint=2 --tier1glue=0 --gcfrac=0 | yes | conflicts restarts learned.clause learned.cube reductions reduced.clause reduced.cube collections relocated | stress
+gc-dl        | --reduceint=2 --tier1glue=0 --gcfrac=0 -dl | yes | conflicts restarts learned.clause learned.cube dependencies reductions reduced.clause reduced.cube collections relocated | stress
+gc-mode1     | --reduceint=2 --tier1glue=0 --gcfrac=0 -mode=1 | yes | conflicts restarts learned.clause learned.cube reductions reduced.clause reduced.cube collections relocated | stress
+gc-mode2     | --reduceint=2 --tier1glue=0 --gcfrac=0 -mode=2 | no | conflicts restarts learned.clause learned.cube reductions reduced.clause reduced.cube collections relocated | stress
+restart      | --no-luby --rfirst=1 --rinc=100 --depreset=1 | yes | conflicts restarts learned.clause learned.cube | stress
+restart-dl   | --no-luby --rfirst=1 --rinc=100 --depreset=1 -dl | yes | conflicts restarts learned.clause learned.cube dependencies depresets | stress
+restart-mode1-dl | --no-luby --rfirst=1 --rinc=100 --depreset=1 -mode=1 -dl | yes | conflicts restarts learned.clause learned.cube dependencies depresets | stress

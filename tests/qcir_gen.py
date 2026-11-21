@@ -3,8 +3,8 @@
 
 Usage: qcir_gen.py FAMILY SEED [SIZE [PARAM]]
 
-PARAM is the clause/variable ratio for 'qcnf' and the number of states for
-'reach'.
+PARAM is the clause/variable ratio for 'qcnf', the number of states for
+'reach', and the number of gates per unit of SIZE for 'game' and 'synth'.
 
 Families:
   qcnf    random prenex CNF with a fixed number of universal and existential
@@ -22,6 +22,7 @@ import sys
 
 RATIO = 2.4  # Clauses per existential variable of the outer block in 'qcnf'.
 STATES = 24  # Number of states in 'reach'.
+GATES = None  # Gates per unit of SIZE in 'game' (default 6) and 'synth' (default 3).
 
 
 class Circuit:
@@ -77,14 +78,15 @@ def synth(rng, n):
     c = Circuit()
     state = random.Random(rng.random())
     seed = rng.random()
-    lhs = random_circuit(random.Random(seed), c, xs + ks, 3 * n)
+    ngates = int((GATES or 3) * n)
+    lhs = random_circuit(random.Random(seed), c, xs + ks, ngates)
     if rng.random() < 0.5:
         # Hidden key: replace key inputs by constants in an identical circuit.
         true, false = c.gate('and', []), c.gate('or', [])
         consts = [state.choice([true, false]) for _ in ks]
-        rhs = random_circuit(random.Random(seed), c, xs + consts, 3 * n)
+        rhs = random_circuit(random.Random(seed), c, xs + consts, ngates)
     else:
-        rhs = random_circuit(state, c, xs, 3 * n)
+        rhs = random_circuit(state, c, xs, ngates)
     out = neg(c.xor(lhs, rhs))
     return [('exists', ks), ('forall', xs)], out, c
 
@@ -96,7 +98,7 @@ def game(rng, n):
         blocks.append(('exists' if i % 2 == 0 else 'forall', vs))
         names += vs
     c = Circuit()
-    out = random_circuit(rng, c, names, 6 * n)
+    out = random_circuit(rng, c, names, int((GATES or 6) * n))
     return blocks, out, c
 
 
@@ -126,20 +128,27 @@ def reach(rng, rounds, bits=2):
     return blocks, c.gate('or', wins), c
 
 
-def main():
-    family, seed = sys.argv[1], int(sys.argv[2])
+def render(family, seed, size=None, param=None):
+    """Return the QCIR text of one instance (the same as the command line gives)."""
+    global RATIO, STATES, GATES
     rng = random.Random('%s-%d' % (family, seed))
     defaults = {'qcnf': 40, 'synth': 12, 'game': 12, 'reach': 10}
-    size = int(sys.argv[3]) if len(sys.argv) > 3 else defaults[family]
-    if len(sys.argv) > 4:
-        global RATIO, STATES
-        RATIO = STATES = float(sys.argv[4])
+    if param is not None:  # each family reads only its own knob
+        RATIO = STATES = GATES = float(param)
+    size = defaults[family] if size is None else size
     blocks, out, c = {'qcnf': qcnf, 'synth': synth, 'game': game, 'reach': reach}[family](rng, size)
-    print('#QCIR-G14')
-    for kind, vs in blocks:
-        print('%s(%s)' % (kind, ', '.join(vs)))
-    print('output(%s)' % out)
-    print('\n'.join(c.lines))
+    lines = ['#QCIR-G14']
+    lines += ['%s(%s)' % (kind, ', '.join(vs)) for kind, vs in blocks]
+    lines.append('output(%s)' % out)
+    lines += c.lines
+    return '\n'.join(lines) + '\n'
+
+
+def main():
+    family, seed = sys.argv[1], int(sys.argv[2])
+    size = int(sys.argv[3]) if len(sys.argv) > 3 else None
+    param = sys.argv[4] if len(sys.argv) > 4 else None
+    print(render(family, seed, size, param), end='')
 
 
 if __name__ == '__main__':
