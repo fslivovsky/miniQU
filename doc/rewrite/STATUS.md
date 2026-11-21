@@ -205,3 +205,14 @@ the deviations and their reasons are listed there. Decisions added:
 Note for whoever runs benchmarks: a baseline run started earlier (`bench/run.py ... --tag baseline-t900`,
 then `baseline-dl-t180`, 64 jobs on cores 64-127) was still running at planning time; do not start timed
 runs on cores 64-127 while it is alive (`pgrep -f bench/run.py`), and do not kill it.
+
+## Owner decision on the rightmost condition E3 (2026-11-21)
+
+Answer to the open point "For the owner" above; no need to ask again before M3.2.
+
+- First build bounded variable elimination with the rightmost condition E3 as specified, and get that
+  version working, verified (fuzzing, Lean-checked proofs) and benchmarked.
+- Once that version exists, the coordinator may try relaxing E3 (for QCIR input, where the coordinator
+  argues it is not needed for soundness) as a separate, optional step behind its own option, with the
+  rightmost version kept as the comparison arm in the ablation. The relaxed variant needs the same
+  evidence as any other technique: no discrepancies, proofs accepted by the Lean checker.
