@@ -1,0 +1,18 @@
+{
+  "solver": "/home/ec2-user/miniqu-work/baseline/miniQU",
+  "solver_sha256": "10ff614c6694e5f8170c1cc65a616660236ef7158ae08af4e7ccf43b8b71c25b",
+  "solver_git": "c39005a",
+  "args": "",
+  "proof_args": "-proof-binary",
+  "timeout": 60.0,
+  "mem_gb": 8,
+  "jobs": 16,
+  "cores": "0-15",
+  "proof_check": true,
+  "proof_max_solve_sec": 20,
+  "checker": "/home/ec2-user/qu-check/.lake/build/bin/qlrup-check",
+  "date": "2026-11-21T16:28:36",
+  "host": "ip-172-31-34-83.eu-west-2.compute.internal",
+  "cmdline": "/home/ec2-user/miniQU/bench/run.py --solver baseline/miniQU --tag baseline-smoke --timeout 60 --jobs 16 --cores 0-15 --instances /home/ec2-user/miniQU/bench/smoke.txt --proof-check",
+  "note": ""
+}
