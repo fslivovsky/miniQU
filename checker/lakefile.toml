@@ -1,0 +1,20 @@
+name = "qlrup-checker"
+version = "0.1.0"
+defaultTargets = ["QlrupChecker", "qlrup-check"]
+
+[leanOptions]
+relaxedAutoImplicit = false
+
+# QBF semantics and the soundness of universal reduction.
+[[require]]
+name = "qbf-lean"
+git = "https://github.com/fslivovsky/formalization"
+rev = "64a2b5b93a1761d69de83bfc4675386d43a46434"
+
+[[lean_lib]]
+name = "QlrupChecker"
+precompileModules = true
+
+[[lean_exe]]
+name = "qlrup-check"
+root = "Main"
