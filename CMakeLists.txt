@@ -41,6 +41,9 @@ set_target_properties(miniqu-lib PROPERTIES OUTPUT_NAME "miniQU")
 add_executable(miniQU minisat/simp/Main.cc)
 target_link_libraries(miniQU miniqu-lib)
 
+# Proof trimmer (see doc/proof-format.md).
+add_executable(qlrup-trim tools/qlrup-trim.cc)
+
 if(STATIC_BINARIES)
   target_link_libraries(miniQU -static)
 endif()
@@ -57,7 +60,7 @@ add_test(NAME fuzz-prefix-order
 #--------------------------------------------------------------------------------------------------
 # Installation targets:
 
-install(TARGETS miniQU miniqu-lib
+install(TARGETS miniQU qlrup-trim miniqu-lib
         RUNTIME DESTINATION bin
         ARCHIVE DESTINATION lib)
 

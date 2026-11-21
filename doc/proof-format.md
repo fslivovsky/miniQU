@@ -30,7 +30,10 @@ of the constraint determines which of the two is meant.
 ## Semantics
 
 A proof is a sequence of steps that maintain a set of clauses and a set of
-terms, each constraint with a unique positive identifier.
+terms, each constraint with a positive identifier. Clauses and terms share one
+space of identifiers, and an identifier cannot be given to a new constraint
+while it is in use. Constraints are sets of literals and must not contain a
+literal together with its negation.
 
 Clauses are interpreted with respect to the prefix of the QCIR file extended by
 an existential variable for every gate, and terms with respect to the prefix
@@ -109,6 +112,15 @@ and
 
 with `'o'`, `'a'`, `'d'` single bytes and `<type>` the number `0` for a clause
 and `1` for a term.
+
+## Tools
+
+- `tests/qlrup_check.py FORMULA.qcir PROOF` is a simple reference checker.
+- `checker/` contains a checker written and verified in Lean; see
+  `checker/README.md`.
+- `tools/qlrup-trim.cc` removes the steps that are not needed to derive the
+  final empty constraint, and adds deletion steps after the last use of each
+  constraint (`qlrup-trim [--binary|--text] [--renumber] INPUT OUTPUT`).
 
 ## Text format details
 

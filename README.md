@@ -42,7 +42,9 @@ The most important options (see `--help` for all of them):
 | `-ccmin-mode=<0..3>` | 0 | Minimization of learnt clauses and terms: none (0), MiniSat's local (1) and recursive (2) minimization, or recursive minimization that takes reduction into account (3). |
 | `-early-tseitin`, `-no-early-tseitin` | on | QCIR only: quantify the variables that represent gates right after the innermost variable the gate depends on (see below). |
 | `-cert` | off | Print the assignment of the outermost quantifier block. |
-| `-trace=<file>` | | Write a proof trace. Disables minimization. |
+| `-proof=<file>` | | Write a proof in the QLRUP format (QCIR input, modes 0 and 1); see `doc/proof-format.md`. Disables minimization. |
+| `-proof-binary` | off | Write the proof in the binary format. |
+| `-trace=<file>` | | Write a trace in the older format. Disables minimization. |
 | `-verb=<0,1,2>` | 1 | Verbosity. |
 
 Whether dependency learning pays off depends on the instance: it can be
