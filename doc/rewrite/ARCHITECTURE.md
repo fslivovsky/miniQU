@@ -155,13 +155,13 @@ and deleted only through `constraint.cpp`, assignments only through
 | `arena.{hpp,cpp}` | `Arena`: region of 32-bit words, `Ref`, alloc/free accounting, `moveTo` |
 | `constraint.hpp` | `Constraint` header layout and accessors (section 5.2) |
 | `watch.hpp` | `Watch`, `Watches` (lists per literal and kind, dirty flags, lazy cleaning) |
-| `heap.hpp` | indexed binary max-heap on variable scores |
+| `heap.hpp` | indexed binary max-heap on variable scores; a heap may start at a variable offset (one heap per block) |
 | `ema.hpp` | exponential moving average with bias correction |
 | `options.{hpp,cpp}` | X-macro option table (section 9.1) |
 | `stats.{hpp,cpp}` | counters and their printing (9.2) |
 | `profile.{hpp,cpp}` | `START`/`STOP` timers (9.3) |
 | `limit.hpp` | `Limit` (next-event thresholds), `Inc` (increments), `Last` (9.4) |
-| `logging.{hpp,cpp}`, `message.{hpp,cpp}` | `LOG`, `PHASE`, `VERBOSE`, `MSG`, `fatal` (9.5) |
+| `logging.{hpp,cpp}`, `message.{hpp,cpp}` | `LOG`, `PHASE`, `VERBOSE`, `MSG`, `fatal` (9.5); `logging.cpp` also defines `Internal::log` (the one base file that includes `internal.hpp`, as in CaDiCaL, and only with `MINIQU_LOGGING`) |
 | `contract.hpp` | `REQUIRE` for API misuse (9.6) |
 | `file.{hpp,cpp}` | buffered input (plain/gzip via zlib), buffered output |
 | `util.hpp`, `random.hpp` | small helpers; PRNG |
@@ -176,6 +176,7 @@ and deleted only through `constraint.cpp`, assignments only through
 | `assign.cpp` | `assign`, `Var` data (level, reason, trail position) |
 | `propagate.{hpp,cpp}` | the one watch loop (template) and its instances for modes 0 and 1 (7.2) |
 | `propagate_ldq.cpp` | propagation for mode 2 (7.2) |
+| `check.cpp` | `check_invariants ()` (4.3, 9.6) |
 | `backtrack.cpp` | `backtrack (level)`, phase saving, heap re-insertion |
 | `decide.cpp` | block selection, eligibility, `decide ()` (7.3) |
 | `depend.cpp` | dependency learning: dependency lists, their watches, reset (7.4) |
@@ -240,7 +241,7 @@ literals are nonzero `int`s as in DIMACS:
 class Solver {
 public:
   Solver ();  ~Solver ();
-  bool set (std::string_view option, int value);       // before the first add_var
+  bool set (std::string_view option, int value);       // before the first add_var; unknown name: REQUIRE
   // Formula, in this order: all variables (prefix order), then constraints.
   void add_var (int var, Quant, bool decision = true, int proof_number = 0);
   void add_original (Kind, std::span<const int> lits, int proof_gate = 0);
@@ -257,6 +258,10 @@ private:
   std::unique_ptr<Impl> impl;
 };
 ```
+
+The class also befriends `Internal &internal_of (Solver &)`, defined in
+`solver.cpp` and used only by white-box unit tests (an end-to-end test
+propagates the state the real frontend built).
 
 Consecutive `add_var` calls with the same quantifier form one block. QDIMACS
 uses `add_var` + `add_original (Kind::Clause, ...)` only; the QCIR encoder
@@ -612,7 +617,11 @@ dirty literals. `watches (kind, p)` is the list of constraints of that kind
 to visit **when `p` becomes true**: clauses watching `~p`, cubes watching `p`
 (in terms of 4.1: constraints in which a watched literal just vanished). A
 constraint of size >= 2 watches its literals at positions 0 and 1, and each of
-the two watches carries the other literal as blocker.
+the two watches carries the other literal as blocker when it is attached;
+after propagation has moved watches, a blocker is still a literal of the
+constraint other than the watched one, but not necessarily the other
+watched literal (MiniSat does not update the blocker of the watch that
+stays).
 
 Clause and cube lists are separate arrays (as in miniQU) rather than one
 interleaved list per literal: a propagated literal visits the clause list and
@@ -683,8 +692,10 @@ false, `Cube` kind: true).
 conflicts), `trail` position. The kind of a reason is read from the
 constraint. The trail is one vector with `control` entries per decision
 level. `propagated` is the trail index up to which both kinds have been
-propagated; vivification (which propagates one kind only) saves and restores
-it explicitly.
+propagated completely (after a conflict it stays at the literal whose
+propagation found it: the scan stops at the first conflict, so the cube loop
+of that literal does not run); vivification (which propagates one kind
+only) saves and restores it explicitly.
 
 `propagate ()` returns a conflict as `Ref` (kind read from the constraint).
 For each trail literal it runs the clause loop and then the cube loop, as
@@ -710,8 +721,9 @@ secondary" rule):
 The MiniSat watch loop of 6.2 therefore exists **once**, as
 
 ```cpp
-enum class Lone : uint8_t { Conflict, Propagate, Ignore };
+enum class Lone : uint8_t { Conflict, Propagate, Ignore };           // internal.hpp
 template <Kind K, Lone R> Ref Internal::propagate_watches (Lit p);   // propagate.hpp
+template <Lone R> Ref Internal::propagate_trail ();                  // both kinds, clauses first
 ```
 
 with kind and rule as compile-time parameters (`kval` and the rule fold to

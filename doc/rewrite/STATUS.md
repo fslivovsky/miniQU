@@ -439,3 +439,76 @@ Notes for later tasks:
 - `-cert` needs the name of an input variable: `Circuit::name (number)` (the file's identifier). The app keeps the
   `Circuit` (or only the names) alive after encoding; `parse_qcir` returns the circuit by value.
 - `tests/encoding_diff.sh` needs the baseline binary and `encoding-dump`; the ctest entry sets `ENCODING_DUMP` itself.
+
+## M1-T04 finished: core data layer (worker, 2026-11-22)
+
+Built (namespace `miniqu`, formatted, no compiler warnings with GCC and Clang): `src/internal.{hpp,cpp}` (`struct
+Internal`, `add_var`, `solve` = status only), `src/prefix.{hpp,cpp}` (`Block`, `VarInfo`, `Prefix::add_var`, `qreduce`,
+`is_primary`), `src/constraint.cpp` (`add_original`, `new_constraint`, `mark_garbage`, `shrink_constraint`, `attach`,
+strict `detach`, `found_empty`), `src/assign.cpp`, `src/propagate.{hpp,cpp}` (the templated watch loop
+`propagate_watches<K, Lone>`, the driver `propagate_trail<Lone>`, `propagate ()` with mode-0 completion),
+`src/propagate_ldq.cpp` (mode 2: `fatal ("mode 2 not implemented yet")`), `src/backtrack.cpp`, `src/check.cpp`
+(`check_invariants`, all builds, fatal on violation), `src/solver.cpp` (the real `Solver`; contracts, user<->internal
+maps), `Internal::log` (constraint printing) in `src/logging.cpp`. Unit tests `original propagate backtrack solver
+regressions` (+ heap offset test); `regressions` parses every file of `tests/regressions` through the real frontend into
+the real `Solver`, modes 0/1, with and without early Tseitin, propagates at the root and runs `check_invariants`.
+
+Verification: `ctest --preset P` for P in release, debug, asan, release-clang: 21/21 pass (unit tests, `format`,
+`encoding-diff`). `tests/regress.sh -s 1:20 .../build/release/miniQU-old`: passed (there is no new binary yet, so no
+new proofs exist and nothing new was Lean-checked; this task emits no proof steps). The release builds print
+`lto-wrapper: warning: using serial compilation of 2 LTRANS jobs` when linking `unit-encode` (already before this task)
+and now also `unit-regressions`: a GCC LTO partitioning note from the linker, not a compiler warning.
+
+Behaviour of the old `propagate` that was ambiguous, and what the port does:
+1. **Order of kinds**: per trail literal the clause loop runs before the cube loop, as in the old code.
+2. **After a conflict** the old code set `qhead = trail.size ()` but did *not* leave the `for ct_` loop: after a clause
+   conflict the cube loop of the same literal still ran, could assign further literals (which were then propagated,
+   since the while loop tests `qhead < trail.size ()` again) and could overwrite the conflict, its kind and `q` with a
+   later one; a cube propagation could even assign the secondary literal `q` of a pending mode-0 clause conflict,
+   which then skipped completion and left a "conflict" that was not falsified. The port stops at the **first**
+   conflict (remaining watches of the list are copied, the cube loop of that literal does not run) and leaves
+   `propagated` at the conflicting literal, so `propagated` means "propagated completely in both kinds" (ARCH 7.2
+   amended). Backtracking resets it to `min (propagated, start of the undone levels)`.
+3. **Conflict condition**: old `value(first) == l_vanishing || (mode == 0 && first is secondary)` after no replacement
+   was found; `first` cannot be disabling there (that case was handled before). Same in the port, with the secondary
+   case selected by `Lone` at compile time. Completion (mode 0) assigns the vanishing value of the remembered literal
+   (`~q` for a clause, `q` for a cube), reason none, current level; with the first-conflict rule that literal is always
+   unassigned when completion runs (asserted).
+4. **Phase saving 1** follows MiniSat's `c > trail_lim.last ()`: only the implied literals of the highest undone level
+   are saved, not its decision.
+
+Deviations from the spec / ARCH (ARCH updated in the same commit where marked):
+- `Heap` takes a variable offset (`Heap (scores, first)`): with one heap per block, position tables over all variables
+  would cost blocks x variables words (`heap.hpp`, ARCH 3.1).
+- `Watches::resize` (variables are created one at a time) and a const `operator()`.
+- INV-WATCH as checked: both watched literals have a watch whose blocker is *another literal of the constraint*, not
+  necessarily the other watched literal (MiniSat never updates the blocker of the watch that stays; ARCH 6.1 amended);
+  plus, once propagation is complete, a vanished watched literal only in a disabled constraint.
+- Unit originals of different kinds can never meet on one variable (after `qreduce` a unit clause is existential, a
+  unit cube universal), so "already assigned by the other kind" is an assertion, not a branch; the unit test checks a
+  unit clause and a unit cube together decide nothing.
+- After the formula is decided, further originals are counted and consume their ids but are not stored (old proof
+  path). `stats.originals[kind]` counts originals that survive the tautology check (= future `o` steps).
+- Ids as the old proof path: the given original one id, its reduction (if any) the next, the empty constraint from two
+  complementary units another one.
+- `Solver::set` REQUIREs a known option name and returns false only for an out-of-range value (`miniqu.hpp`, ARCH 3.5).
+  The app (T05) must check names against `option_table ()` before calling it.
+- `miniqu.hpp` befriends `Internal &internal_of (Solver &)` for white-box tests (ARCH 3.5).
+- `enum class Lone` is declared in `internal.hpp` (member template declarations need it); `propagate_trail<Lone>` is the
+  shared driver of both kinds (ARCH 7.2).
+- `detach` is strict only; the lazy form is `mark_garbage` (smudge), since smudging cleans only garbage entries.
+  `mark_garbage` asserts size >= 2 (units are never deleted).
+- `Block::unassigned` is maintained in every mode (the old code skipped it under `-dl`); `assign` and `backtrack` keep it.
+- `check_invariants` lives in a new `check.cpp` (ARCH 3.2) and is compiled in all builds (needed by `--check`).
+- `logging.cpp` includes `internal.hpp` for `Internal::log` (ARCH 3.1); `LOG` now calls `log` unqualified so that it
+  reaches `Internal::log` inside member functions.
+
+Left for later tasks:
+- Proof hooks: no `Proof` interface exists, so `mark_garbage` and `add_original` contain no `if (proof)` call sites;
+  T06 adds them (ids are already allocated exactly as the proof needs). `Solver::connect_tracer` is
+  `fatal ("proofs not implemented yet")`; `flush_proof` does nothing.
+- `Solver::val` / `certificate` are `fatal ("certificates not implemented yet")`; `freeze` only checks its argument
+  (nothing eliminates yet). `Proof *proof`, `lim`, `inc`, `last`, `scores`, `terminated`, `redundant` exist but are not
+  used by this task's code.
+- Heaps are filled in `add_var` (as the old `newVar`); with `--seed` T05 must rebuild them after setting scores.
+- `Profiles` is not yet a member of `Internal` (no profiled phase exists).
