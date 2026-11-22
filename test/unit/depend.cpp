@@ -24,10 +24,13 @@ static void test_watches () {
   CHECK_EQ (internal.heaps[0].size (), 5u);
   const Depend &depend = internal.depend;
 
+  // Recording leaves the heap alone ('learn_dependency' takes 4 out after
+  // its backtrack).
   internal.record_dependency (4, 1);
   CHECK (depend.on[4] == std::vector<Var> ({1}));
   CHECK (depend.watching[1] == std::vector<Var> ({4}));
-  CHECK (!internal.heaps[0].contains (4));
+  CHECK (internal.heaps[0].contains (4));
+  internal.heaps[0].remove (4);
   internal.record_dependency (4, 0);
   CHECK (depend.on[4] == std::vector<Var> ({0, 1}));
   CHECK (depend.watching[0] == std::vector<Var> ({4}));
@@ -156,8 +159,29 @@ static void test_verdicts () {
     }
 }
 
+// The heap holds what the old code's heap holds: a decision with every
+// variable assigned empties it, and a reset puts back every decision
+// variable, assigned or not.
+static void test_heap_contents () {
+  Internal internal;
+  with_dl (internal, "ee");
+  add (internal, Clause, {1});
+  CHECK (internal.propagate () == Ref::none);
+  CHECK (internal.decide ());
+  CHECK (internal.trail == lits ({1, -2}));
+  internal.reset_dependencies ();
+  CHECK_EQ (internal.heaps[0].size (), 2u);
+  CHECK (!internal.decide ());
+  CHECK (internal.heaps[0].empty ());
+  internal.backtrack (0);
+  CHECK (internal.heaps[0].contains (1) && !internal.heaps[0].contains (0));
+  internal.reset_dependencies ();
+  CHECK (internal.heaps[0].contains (0));
+}
+
 int main () {
   test_watches ();
+  test_heap_contents ();
   test_reset_schedule ();
   test_learn_dependency ();
   test_verdicts ();

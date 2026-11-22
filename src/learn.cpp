@@ -116,9 +116,15 @@ void Internal::learn_empty (Kind kind) {
   found_empty (kind);
 }
 
+// In the old order: record, backtrack, then take 'x' out of the heap in
+// case an earlier dependency update or reset had put it there while it
+// was assigned.
 void Internal::learn_dependency (Var x, Var y) {
-  backtrack (level (x) - 1);
   record_dependency (x, y);
+  backtrack (level (x) - 1);
+  Heap &heap = heap_of (x);
+  if (heap.contains (x))
+    heap.remove (x);
 }
 
 } // namespace miniqu

@@ -6,10 +6,11 @@
 
 using namespace miniqu;
 
-// Decides 'dimacs' as 'decide.cpp' will: popped from the heap of its block.
+// Decides 'dimacs' and takes it out of the heap of its block, as a
+// decision does (which variable 'decide.cpp' takes is not tested here).
 static void pop_and_decide (Internal &internal, int dimacs) {
   const Var v = var (L (dimacs));
-  CHECK (internal.heaps[internal.prefix.depth (v)].pop () == v);
+  internal.heaps[internal.prefix.depth (v)].remove (v);
   decide (internal, dimacs);
   CHECK (internal.propagate () == Ref::none);
 }

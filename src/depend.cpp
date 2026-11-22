@@ -43,11 +43,11 @@ void Internal::add_dependency_var () {
   depend.watching.emplace_back ();
 }
 
-// 'x' depends on 'y' and watches it from now on.  Called right after the
-// backtrack that unassigned both, so 'x' leaves the heap until 'y' is
-// assigned.
+// 'x' depends on 'y' and watches it from now on.  Called right before the
+// backtrack that unassigns both, as in the old 'search', so that the
+// backtrack leaves 'x' out of the heap ('learn_dependency').
 void Internal::record_dependency (Var x, Var y) {
-  assert (opts.dl && y < x && !val (mk_lit (x)) && !val (mk_lit (y)));
+  assert (opts.dl && y < x);
   stats.dependencies++;
   LOG ("learnt dependency of %u on %u", x + 1, y + 1);
   std::vector<Var> &on = depend.on[x];
@@ -61,9 +61,6 @@ void Internal::record_dependency (Var x, Var y) {
     old.pop_back ();
   }
   depend.watching[y].push_back (x);
-  Heap &heap = heap_of (x);
-  if (heap.contains (x))
-    heap.remove (x);
 }
 
 void Internal::update_dependency_watches () {
@@ -129,9 +126,10 @@ void Internal::reset_dependencies () {
   for (std::vector<Var> &watching : depend.watching)
     watching.clear ();
   depend.propagated = 0;
+  // Root-level assigned variables too, as the old 'resetDependencies'.
   Heap &heap = heaps[0];
   for (Var v = 0; v < prefix.size (); v++)
-    if (prefix.vars[v].decision && !val (mk_lit (v)) && !heap.contains (v))
+    if (prefix.vars[v].decision && !heap.contains (v))
       heap.push (v);
 }
 

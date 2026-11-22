@@ -5,15 +5,18 @@
 
 #include <cassert>
 #include <cstdint>
-#include <span>
 #include <vector>
 
 namespace miniqu {
 
 // Indexed binary max-heap on variables, ordered by a score vector owned by
-// the solver (so that bumping writes the score and calls 'update').  Equal
-// scores are ordered by the smaller variable first, which makes decisions
-// reproducible and independent of the history of heap operations.
+// the solver (so that bumping writes the score and calls 'update').
+// Scores are compared strictly, and every operation does what the
+// baseline's MiniSat heap ('minisat/mtl/Heap.h') does, step by step: the
+// order of equal scores then follows from the history of heap operations
+// exactly as in the baseline, so that an unseeded run (all initial scores
+// 0) makes the baseline's decisions as far as the rest of the port is
+// faithful (ARCHITECTURE 7.3).
 // The score vector must outlive the heap and cover every variable pushed.
 //
 // A heap only ever holds variables from 'offset' on, and its position table
@@ -34,10 +37,7 @@ class Heap {
     return position[v - offset];
   }
 
-  bool before (Var a, Var b) const {
-    const double sa = (*scores)[a], sb = (*scores)[b];
-    return sa > sb || (sa == sb && a < b);
-  }
+  bool before (Var a, Var b) const { return (*scores)[a] > (*scores)[b]; }
 
   void place (Var v, uint32_t i) {
     heap[i] = v;
@@ -56,6 +56,7 @@ class Heap {
     place (v, i);
   }
 
+  // On equal scores of the two children the left one is taken.
   void sift_down (uint32_t i) {
     const Var v = heap[i];
     const uint32_t n = static_cast<uint32_t> (heap.size ());
@@ -111,6 +112,9 @@ public:
     return result;
   }
 
+  // MiniSat's 'remove' only sifts the last variable down from the freed
+  // position, even if it beats the parent there, so that 'top' may then
+  // miss the best score; kept, since the decisions depend on it.
   void remove (Var v) {
     assert (contains (v));
     const uint32_t i = position[v - offset];
@@ -119,39 +123,15 @@ public:
     position[v - offset] = absent;
     if (i < heap.size ()) {
       place (last, i);
-      sift_up (i);
-      sift_down (position[last - offset]);
-    }
-  }
-
-  // Restores the order after the score of 'v' changed in either direction;
-  // inserts 'v' if it is not in the heap.
-  void update (Var v) {
-    if (!contains (v)) {
-      push (v);
-      return;
-    }
-    sift_up (position[v - offset]);
-    sift_down (position[v - offset]);
-  }
-
-  void clear () {
-    for (Var v : heap)
-      position[v - offset] = absent;
-    heap.clear ();
-  }
-
-  // Replaces the contents by exactly the given variables.
-  void build (std::span<const Var> vars) {
-    clear ();
-    for (Var v : vars) {
-      uint32_t &p = position_of (v);
-      assert (p == absent);
-      heap.push_back (v);
-      p = static_cast<uint32_t> (heap.size () - 1);
-    }
-    for (uint32_t i = static_cast<uint32_t> (heap.size ()) / 2; i-- > 0;)
       sift_down (i);
+    }
+  }
+
+  // Restores the order after the score of the contained 'v' increased: it
+  // only moves up (MiniSat's 'decrease', which bumping calls).
+  void update (Var v) {
+    assert (contains (v));
+    sift_up (position[v - offset]);
   }
 };
 

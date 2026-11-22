@@ -11,10 +11,11 @@
 // secondary), and every variable that reduction removes from an initial
 // cube ('model.cpp').
 //
-// Initial scores are 0, so that the first decisions follow variable order,
-// unless '--seed=s' is given: then each variable, in creation order, starts
-// with a score drawn by MiniSat's generator seeded with s, which is the
-// baseline's '-rnd-init -rnd-seed=s'.  This is the only effect of the seed.
+// Initial scores are 0, so that the first decisions follow the order the
+// heap operations give equal scores (the baseline's, 'heap.hpp'), unless
+// '--seed=s' is given: then each variable, in creation order, starts with a
+// score drawn by MiniSat's generator seeded with s, which is the baseline's
+// '-rnd-init -rnd-seed=s'.  This is the only effect of the seed.
 //
 // Heuristic only: nothing here affects soundness or proofs.
 
