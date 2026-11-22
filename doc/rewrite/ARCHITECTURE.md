@@ -221,10 +221,16 @@ and deleted only through `constraint.cpp`, assignments only through
 
 | file | contents |
 |---|---|
-| `miniqu.hpp`, `solver.cpp` | public `class Solver`: contracts, user <-> internal variable map, forwarding to `Internal` |
-| `circuit.{hpp,cpp}` | prenex circuit: variables, blocks, AND/OR gates (xor/ite expanded), cone-of-influence removal, polarities, gate depths |
-| `parse_qcir.cpp`, `parse_qdimacs.cpp` | parsers; report errors with line numbers |
-| `encode.cpp` | dual Plaisted-Greenbaum encoding of a `Circuit` into a `Solver` (4.4) |
+| `miniqu.hpp`, `solver.cpp` | public `class Solver`: contracts, user <-> internal variable map, forwarding to `Internal`; `tracer.hpp`: the abstract `Tracer` (8.1) |
+| `circuit.{hpp,cpp}` | prenex circuit in proof numbers: variables, blocks (adjacent equal quantifiers merged), AND/OR gates in one flat input array (xor/ite expanded), forward references resolved, cone-of-influence removal, polarities, gate depths |
+| `parse.hpp`, `parse_qcir.cpp`, `parse_qdimacs.cpp` | parsers (character by character through `InputFile`); report errors with file and line number |
+| `encode.{hpp,cpp}` | dual Plaisted-Greenbaum encoding of a `Circuit` into a `Solver` (4.4), and `encode_qdimacs`; uses only `miniqu.hpp` |
+
+The frontend sources are the CMake object library `miniqu-frontend`, kept apart from the static library
+`miniqu` so that unit tests link them against `test/unit/fake_solver.cpp` (a recording substitute for
+`Solver`) and the app against the real solver. `encoding-dump` (`test/tools/`) prints what the frontend
+passes to the fake solver; `tests/encoding_diff.sh` compares it with the original constraints in the
+baseline's proofs.
 | `app.cpp` | `main`: options, parsing, limits, signals, result line, exit code, `V` line |
 
 The public API (`miniqu.hpp`) is small and single-shot. User variables and

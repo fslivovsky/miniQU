@@ -45,11 +45,27 @@ file(GLOB MINIQU_SOURCES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp
 file(GLOB MINIQU_HEADERS CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/src/*.hpp)
 file(GLOB MINIQU_UNIT_TESTS CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/test/unit/*.cpp)
 file(GLOB MINIQU_UNIT_HEADERS CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/test/unit/*.hpp)
+file(GLOB MINIQU_TOOL_SOURCES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/test/tools/*.cpp)
 
-add_library(miniqu STATIC ${MINIQU_SOURCES})
+# The frontend talks to the solver through miniqu.hpp only, so it is a set of
+# objects that is linked either with the real solver or with the fake one of
+# the unit tests.
+set(MINIQU_FRONTEND_SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/circuit.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/parse_qcir.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/parse_qdimacs.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/encode.cpp)
+set(MINIQU_LIBRARY_SOURCES ${MINIQU_SOURCES})
+list(REMOVE_ITEM MINIQU_LIBRARY_SOURCES ${MINIQU_FRONTEND_SOURCES})
+
+add_library(miniqu STATIC ${MINIQU_LIBRARY_SOURCES})
 target_include_directories(miniqu PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_compile_options(miniqu PRIVATE ${MINIQU_WARNINGS})
 target_link_libraries(miniqu PUBLIC ZLIB::ZLIB)
+
+add_library(miniqu-frontend OBJECT ${MINIQU_FRONTEND_SOURCES})
+target_compile_options(miniqu-frontend PRIVATE ${MINIQU_WARNINGS})
+target_link_libraries(miniqu-frontend PUBLIC miniqu)
 
 # Proof trimmer (see doc/proof-format.md).
 add_executable(qlrup-trim tools/qlrup-trim.cc)
@@ -60,24 +76,53 @@ endif()
 
 enable_testing()
 
+# A link-time substitute for the solver, which records what the frontend
+# does.  It is not a unit test of its own.
+set(MINIQU_FAKE_SOLVER ${CMAKE_CURRENT_SOURCE_DIR}/test/unit/fake_solver.cpp)
+list(REMOVE_ITEM MINIQU_UNIT_TESTS ${MINIQU_FAKE_SOLVER})
+add_library(miniqu-fake-solver STATIC ${MINIQU_FAKE_SOLVER})
+target_include_directories(miniqu-fake-solver PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/test/unit)
+target_compile_options(miniqu-fake-solver PRIVATE ${MINIQU_WARNINGS})
+target_link_libraries(miniqu-fake-solver PUBLIC miniqu)
+
+# Unit tests of the frontend run against the fake solver.
+set(MINIQU_FRONTEND_TESTS circuit parse_qcir parse_qdimacs encode)
+
 # One executable per file in test/unit, each a ctest test of the same name.
 add_custom_target(unit-tests)
 foreach(test_source ${MINIQU_UNIT_TESTS})
   get_filename_component(test_name ${test_source} NAME_WE)
   add_executable(unit-${test_name} ${test_source})
-  target_link_libraries(unit-${test_name} PRIVATE miniqu)
+  if(test_name IN_LIST MINIQU_FRONTEND_TESTS)
+    target_link_libraries(unit-${test_name} PRIVATE miniqu-frontend miniqu-fake-solver)
+  else()
+    target_link_libraries(unit-${test_name} PRIVATE miniqu)
+  endif()
   target_include_directories(unit-${test_name} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/test/unit)
   target_compile_options(unit-${test_name} PRIVATE ${MINIQU_WARNINGS})
   add_dependencies(unit-tests unit-${test_name})
   add_test(NAME unit-${test_name} COMMAND unit-${test_name})
 endforeach()
 
+# Prints the encoding of a file as the fake solver sees it; tests/encoding_diff.sh
+# compares it with the original constraints of the baseline's proofs.
+add_executable(encoding-dump test/tools/encoding_dump.cpp)
+target_link_libraries(encoding-dump PRIVATE miniqu-frontend miniqu-fake-solver)
+target_include_directories(encoding-dump PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/test/unit)
+target_compile_options(encoding-dump PRIVATE ${MINIQU_WARNINGS})
+add_test(NAME encoding-diff
+         COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/tests/encoding_diff.sh 1 50
+         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+set_tests_properties(encoding-diff PROPERTIES
+                     ENVIRONMENT ENCODING_DUMP=$<TARGET_FILE:encoding-dump>)
+
 # Formatting is checked, not applied: .clang-format is the authority.
 find_program(CLANG_FORMAT clang-format)
 if(CLANG_FORMAT)
   add_test(NAME format
            COMMAND ${CLANG_FORMAT} --dry-run -Werror
-                   ${MINIQU_SOURCES} ${MINIQU_HEADERS} ${MINIQU_UNIT_TESTS} ${MINIQU_UNIT_HEADERS}
+                   ${MINIQU_SOURCES} ${MINIQU_HEADERS} ${MINIQU_FAKE_SOLVER} ${MINIQU_UNIT_TESTS} ${MINIQU_UNIT_HEADERS}
+                   ${MINIQU_TOOL_SOURCES}
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
 else()
   message(WARNING "clang-format not found: the format test is not registered")

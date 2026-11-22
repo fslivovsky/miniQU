@@ -349,3 +349,93 @@ Decisions and deviations (ARCH 2 updated for the first two):
   `Options::set` does (unknown or out of range gives false).
 - `Limit`, `Inc`, `Last` contain only the M1 fields: restart, reduce, plus the user limits `conflicts` and
   `decisions` (-1 = unset) in `Limit`.
+
+
+## M1-T03 finished: frontend (worker, 2026-11-22)
+
+Built (namespace `miniqu`, formatted, no warnings with GCC and Clang): `src/miniqu.hpp` (public `Solver`, ARCH 3.5,
+declarations only), `src/tracer.hpp` (ARCH 8.1), `src/circuit.{hpp,cpp}`, `src/parse.hpp` + `parse_qcir.cpp` +
+`parse_qdimacs.cpp`, `src/encode.{hpp,cpp}`. There is no `solver.cpp`; `Solver` is defined only by
+`test/unit/fake_solver.cpp`. CMake: the four frontend sources form the object library `miniqu-frontend` (not part of
+the static library `miniqu`); unit tests `circuit parse_qcir parse_qdimacs encode` link it with `miniqu-fake-solver`;
+tool `encoding-dump` (`test/tools/`); ctest test `encoding-diff` runs `tests/encoding_diff.sh 1 50`.
+
+Verification (all measured):
+- `ctest --preset P`, P in release, debug, asan, release-clang: 16/16 pass each (unit tests, `format`, `encoding-diff`).
+- `tests/encoding_diff.sh 1 500`: 1006 instances (500 seeds x both tiers + 6 regressions), 0 differences, with and without
+  `-no-early-tseitin`. The check is not vacuous: a tool wrapper that deletes one line is reported on every instance.
+- The 30 smallest files of `/home/ec2-user/benchmarks/qcir` (list by size) plus 6 regressions: 215048 constraints
+  compared, 0 differences. The script interrupts the baseline as soon as it prints `Parse time` (it writes the `o`
+  lines while it parses), so no baseline solving time is spent.
+- `tests/regress.sh -s 1:20 .../build/release/miniQU-old`: passed. No proofs were produced by new code (no solver
+  yet), so there was nothing for the Lean checker to check.
+- The add_var order (prefix, group order, decision flag, proof number) is not visible in the baseline's proofs; it is
+  covered by hand-derived expectations in `test/unit/encode.cpp` (with and without early Tseitin, a gate without
+  dependencies, first block universal, no block at all, output an input literal with an unused gate, `free` block,
+  QDIMACS with a free variable).
+
+Memory and time on the 5 largest benchmark files (`encoding-dump --count`, release build, `taskset -c 0-63`, wall time
+and peak RSS from `/usr/bin/time -v`; baseline = `miniQU -verb=1`, VmHWM read from `/proc` when it printed `Parse time`
+and wall time to that point, which includes its encoding into the solver):
+
+| file | size | new wall | new peak RSS | baseline wall to parse | baseline RSS at parse |
+|---|---|---|---|---|---|
+| 2.2.qcir | 1.6 GB | 69.5 s | 6.0 GB | 139.6 s | 40.5 GB |
+| 2.1.qcir | 495 MB | 19.2 s | 1.9 GB | 41.4 s | 12.8 GB |
+| 5.2-3.qcir | 411 MB | 16.8 s | 1.6 GB | 34.9 s | 10.8 GB |
+| 5.2-2.qcir | 79 MB | 3.0 s | 0.34 GB | 7.1 s | 2.3 GB |
+| lift3.tlsf.qcir | 67 MB | 2.2 s | 0.26 GB | 6.1 s | 2.0 GB |
+
+(RSS in GiB = kB / 2^20: new 6314180, 1975268, 1686192, 357256, 271116 kB; baseline 42485184, 13448788, 11345956,
+2388184, 2074552 kB.) The new frontend uses 6 to 7 times less memory than the baseline's parser and is 2 times
+faster. This is parse + circuit + encode into a recording fake that only counts; the real solver will add its own
+memory. Totals reported by `--count` for 2.2.qcir: 109148560 variables, 88487180 clauses, 75224781 cubes.
+
+Design decisions and deviations from the spec (ARCH 3.5 updated):
+- **Circuit merges adjacent blocks of equal quantifier at insertion**, instead of keeping them separate and merging in
+  the encoder. The depth of a gate (the index of the innermost block) decides where its variables go; the baseline
+  computes it with merged blocks, so unmerged indices would put gate variables elsewhere. `free` is an existential
+  statement wherever it occurs, as in the baseline.
+- **Forward references.** The baseline accepts gates used before their definition (the output statement usually comes
+  first, and `g = and(h)` before `h = ...` is accepted). The new parser accepts them too: `Circuit::reference` hands out a
+  provisional number (>= 2^30) and `resolve ()` replaces them in one pass. Numbers are always definition order, as the
+  proof format says. The baseline orders the variables of the groups by *first mention* of an identifier, so for files
+  with forward references between gates the order of gate variables inside one group can differ from the baseline.
+  The constraints are identical (checked on forward-reference files); no benchmark relies on this.
+- Gates removed by `remove_redundant` still get both variables in `encode`, exactly as `initSolver` of the old code
+  (they appear in `gates_at_depth`), so that the prefix is the same as in the baseline; they get no constraints.
+- The encoder passes the raw constraints of a gate (duplicate literals, complementary literals, e.g. `and(a, -a)`) to
+  `Solver::add_original`; the header documents that the solver removes duplicates and drops tautologies, as the old
+  `addOriginalWithProof` does. The next task must implement exactly that, since the `o` lines of the proof show the
+  reduced constraint. An empty clause from QDIMACS (a line `0`) is also passed through as an empty constraint.
+- Messages: the baseline prints `Done parsing` and `Removed N redundant gates` on stderr always; the new parsers print one
+  `c parsed ...` line at verbosity >= 1 through `VERBOSE`.
+- `encode.hpp` and `tracer.hpp` are additional headers (the spec named only `parse.hpp`).
+
+Behaviour against the baseline on malformed or unusual input (each case run on both binaries; file and line number in
+the new messages):
+- Both reject: undefined identifier, gate defined twice, gate named like a variable, variable quantified twice, xor
+  arity != 2, ite arity != 3, unknown gate type, missing output, repeated output, `output(-)`, `output()`,
+  quantifier statement after a gate, malformed line, trailing characters, empty gate input (`and(a,,b)`, `and(,a)`).
+  (Baseline: `output(a, a)` ends with "undefined output" because it reads the identifier `a,a`; new: "output takes exactly
+  one literal".)
+- Both accept, same meaning: gates used before their definition (also xor/ite), a trailing comma `and(a,)`, header and
+  comments, case-insensitive keywords, any amount of blanks around tokens, empty `and()` / `or()`.
+- Baseline accepts, new parser gives a clean error (list of divergences): (1) cyclic definitions (`g = and(h)`,
+  `h = or(g)` or `g = and(g)`): the baseline answers with garbage, new: "gate 'g' depends on itself"; (2) an empty
+  identifier in a quantifier list (`exists(a,,b)` creates a variable named ""); (3) whitespace inside an identifier
+  or between the identifiers of a list (`exists(a b)` is the single variable `ab` for the baseline, whose parser deletes
+  all blanks of the line); (4) identifiers that start with '-' in a definition. The characters `( ) , =` cannot occur in
+  identifiers of the new parser. A statement must fit on one line, as in the baseline.
+- QDIMACS: a variable that occurs in a clause but is not quantified is an outermost existential variable (the old
+  parser uses an uninitialised map entry: undefined behaviour). Quantifier lines are accepted between clauses, the
+  header counts are not checked (both as the old parser); errors (missing `0`, non-number, number out of range, variable
+  quantified twice, negative variable in the prefix, bad header) end with file and line.
+
+Notes for later tasks:
+- `Solver::add_var` contract used by the encoder: user variable numbers are not dense (gate variables are
+  `n + 2 (p - n) - 1` and `n + 2 (p - n)`), strictly increasing numbers are not guaranteed, consecutive calls of one
+  quantifier form a block; input variables use their proof number, QDIMACS variables proof number 0.
+- `-cert` needs the name of an input variable: `Circuit::name (number)` (the file's identifier). The app keeps the
+  `Circuit` (or only the names) alive after encoding; `parse_qcir` returns the circuit by value.
+- `tests/encoding_diff.sh` needs the baseline binary and `encoding-dump`; the ctest entry sets `ENCODING_DUMP` itself.
