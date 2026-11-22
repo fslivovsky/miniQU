@@ -41,7 +41,7 @@ def solve(solver, path, options, timeout, proof=None):
         p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
     except subprocess.TimeoutExpired:
         return None, timeout, 'TIMEOUT'
-    m = re.search(r'^conflicts\s*:\s*(\d+)', p.stdout, re.M)
+    m = re.search(r'^(?:c stat conflicts |conflicts\s*:\s*)(\d+)', p.stdout, re.M)  # new solver, baseline
     verdict = {10: 'SAT', 20: 'UNSAT'}.get(p.returncode, 'ERROR%d' % p.returncode)
     return (int(m.group(1)) if m else None), time.time() - start, verdict
 
@@ -74,7 +74,7 @@ def measure(args, seed):
 def report(rows, check):
     sets = sorted({r['set'] for r in rows})
     for label, _ in CONFIGS:
-        print('\n== %s: conflicts of the baseline (instances per bucket) ==' % label)
+        print('\n== %s: conflicts of the solver (instances per bucket) ==' % label)
         print('%-12s' % 'set' + ''.join('%11s' % l for l in LABELS) + '%9s%9s%10s' % ('timeout', 'in range', 'max sec'))
         for name in sets + ['all']:
             sub = [r for r in rows if name in ('all', r['set'])]
