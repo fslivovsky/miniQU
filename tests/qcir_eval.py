@@ -18,8 +18,8 @@ def main():
                 continue
             head, args = line[:-1].split('(', 1)
             args = [a for a in args.split(',') if a]
-            if head in ('exists', 'forall'):
-                blocks.append((head == 'exists', args))
+            if head in ('exists', 'forall', 'free'):  # free variables are outermost existential
+                blocks.append((head != 'forall', args))
             elif head == 'output':
                 output = args[0]
             else:
@@ -42,9 +42,17 @@ def main():
         return full & ~table[l[1:]] if l.startswith('-') else table[l]
 
     for name, kind, args in gates:
-        t = full if kind == 'and' else 0
-        for l in args:
-            t = (t & lit(l)) if kind == 'and' else (t | lit(l))
+        if kind == 'ite':
+            c, a, b = (lit(l) for l in args)
+            t = (c & a) | (full & ~c & b)
+        elif kind == 'xor':
+            t = 0
+            for l in args:
+                t ^= lit(l)
+        else:
+            t = full if kind == 'and' else 0
+            for l in args:
+                t = (t & lit(l)) if kind == 'and' else (t | lit(l))
         table[name] = t
     t = lit(output)
     for existential, vs in reversed(blocks):
