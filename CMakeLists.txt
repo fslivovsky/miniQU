@@ -17,6 +17,13 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 find_package(ZLIB REQUIRED)
 
+# Link-time optimisation (the release presets): GCC's default of a serial link-time
+# compilation prints "lto-wrapper: warning: using serial compilation"; "auto" lets it
+# use the jobserver or the available cores.  clang keeps CMake's own flags.
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+  set(CMAKE_CXX_COMPILE_OPTIONS_IPO -flto=auto -fno-fat-lto-objects)
+endif()
+
 # GCC's sanitizer runtimes are not found by the dynamic loader: they live in GCC's own directory, and
 # on some distributions the packages lack the symlinks named after the soname (libasan.so.6).  Link
 # against a directory of such symlinks in the build tree.
