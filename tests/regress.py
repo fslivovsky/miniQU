@@ -15,6 +15,7 @@ import csv
 import os
 import re
 import shlex
+import shutil
 import signal
 import subprocess
 import sys
@@ -144,9 +145,12 @@ class Context:
         """Returns (status, detail): status is ok, skipped, timeout or failed."""
         proof = os.path.join(tmp, 'f.proof')
         extra = shlex.split(self.args.proof_opts) + ['-proof=' + proof]
-        run_solver(self.args.solver, path, config.options, self.args.timeout, extra=extra)
-        if not os.path.exists(proof) or os.path.getsize(proof) == 0:
-            return 'skipped', ''   # the solver timed out or wrote no proof
+        run = run_solver(self.args.solver, path, config.options, self.args.timeout, extra=extra)
+        if run.verdict == 'TIMEOUT' or not os.path.exists(proof) or os.path.getsize(proof) == 0:
+            # Proof logging makes a run slower, and a killed solver leaves a truncated file that is no proof.
+            if os.path.exists(proof):
+                os.remove(proof)
+            return 'skipped', ''
         try:
             _, out = run_group([self.args.checker, path, proof], self.args.check_timeout)
         except subprocess.TimeoutExpired:
@@ -206,6 +210,7 @@ class Context:
 def smoke(args, config):
     """Run bench/smoke.txt through bench/run.py and compare with bench/smoke-expected.csv."""
     run_dir = os.path.join(args.work, 'smoke-' + re.sub(r'\W+', '_', config.name))
+    shutil.rmtree(run_dir, ignore_errors=True)   # run.py resumes: results of an older binary must not count
     cmd = [sys.executable, os.path.join(REPO, 'bench', 'run.py'), '--solver', args.solver,
            '--args=' + shlex.join(config.options), '--tag', 'regress', '--results-dir', run_dir,
            '--timeout', '120', '--jobs', str(args.jobs), '--cores', '0-63',
@@ -297,7 +302,7 @@ def main():
         with ThreadPoolExecutor(args.jobs) as pool:
             results = list(pool.map(lambda item: ctx.process(*item), work_items))
         search_runs = {c.name: [] for c in configs}
-        counts = {c.name: {'timeouts': 0, 'proofs': 0, 'proof_timeouts': 0} for c in configs}  # timeouts: all tiers
+        counts = {c.name: {'timeouts': 0, 'proofs': 0, 'proof_timeouts': 0, 'proofs_skipped': 0} for c in configs}  # timeouts: all tiers
         for (tier, seed), (records, instance_failures) in zip(work_items, results):
             failures += instance_failures
             for name, run in records.items():
@@ -307,12 +312,14 @@ def main():
                 status = run.proof
                 counts[name]['proofs'] += status == 'ok'
                 counts[name]['proof_timeouts'] += status == 'timeout'
+                counts[name]['proofs_skipped'] += status == 'skipped'
         n_search = sum(1 for t, _ in work_items if t == 'search')
         for config in configs:
             c = counts[config.name]
             print('=== configuration %s:%s' % (config.name, ' ' + shlex.join(config.options) if config.options else ' (default options)'))
-            print('  tiny seeds %d..%d, search seeds %d..%d: %d timeouts, %d proofs checked, %d proof checks timed out (warning only)' %
-                  (first, first + half - 1, first + half, last, c['timeouts'], c['proofs'], c['proof_timeouts']))
+            print('  tiny seeds %d..%d, search seeds %d..%d: %d timeouts, %d proofs checked, %d proof checks timed out, %d proof runs unfinished (warnings only)' %
+                  (first, first + half - 1, first + half, last, c['timeouts'], c['proofs'], c['proof_timeouts'],
+                   c['proofs_skipped']))
             search_timeouts = sum(r.verdict == 'TIMEOUT' for r in search_runs[config.name])
             if config.stress and search_timeouts > STRESS_TIMEOUTS * n_search:
                 failures.append('FAIL [%s] stress configuration: %d of %d search instances timed out (limit %.0f%%)' %
