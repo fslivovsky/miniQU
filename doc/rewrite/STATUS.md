@@ -313,3 +313,46 @@ only hand-written instances.
 Notes for later tasks: the fake `stat-wrapper.sh` takes its counter list from `tests/matrix.txt`, so a new
 counter name must be added there only. Counter names in the matrix are the interface the new solver's
 `c stat NAME VALUE` output must satisfy (ROADMAP 0.1).
+
+## M1-T01 finished (worker, 2026-11-22 00:40)
+
+Both defects of the pause note are fixed: `tests/qcir_fuzz.py` now refuses `--vars` above 22 without
+`--no-expected` (the hang was the exponential brute force; the search tier never uses it), and
+`tests/regress.py` runs every child in its own process group and kills the group on timeout, on normal exit
+of the child, and on SIGINT/SIGTERM/exit of the engine (verified: a script with a `sleep` grandchild leaves
+nothing behind after a timeout). No background processes left.
+
+Corpus (search tier, baseline, seeds 1..400, `tests/corpus_stats.py --check`; log
+`/home/ec2-user/miniqu-work/regress/final-stats.log`; five sets: qcnf-sat, qcnf-mixed, qcnf-unsat, reach-48,
+reach-44; families game, synth and large qcir_fuzz.py were dropped, the baseline solves them in <10
+conflicts). Conflicts, instances per bucket (0-9 / 10-99 / 100-999 / 1000-9999 / >=10000):
+
+| set | default | in range | `-dl` | in range |
+|---|---|---|---|---|
+| qcnf-mixed | 0/0/1/72/7 | 91% | 0/0/9/58/13 | 84% |
+| qcnf-sat | 0/0/1/77/2 | 98% | 0/11/38/31/0 | 86% |
+| qcnf-unsat | 0/1/13/45/21 | 72% | 0/0/10/52/18 | 78% |
+| reach-44 | 14/1/36/29/0 | 81% | 6/10/20/44/0 | 80% |
+| reach-48 | 11/4/30/35/0 | 81% | 7/7/16/48/2 | 80% |
+| all | 25/6/81/258/30 | 85% | 13/28/93/233/33 | 82% |
+
+Targets: >=70% in [100,10000) met (85% and 82%); no timeouts, max baseline time 0.4 s (default), 15.5 s
+(`-dl`, reach-48), under 20 s. Proofs (default options, binary, Lean checker): 400 of 400 accepted, max
+check time 5.4 s (target 90% met). Full sample, no reduction, no retuning round needed.
+
+Acceptance runs (logs in `/home/ec2-user/miniqu-work/regress/`):
+- `tests/regress.sh -s 1:100 -M all tests/fake/stat-wrapper.sh`: exit 0, "REGRESSION TESTS PASSED (4
+  warnings)" (timeouts of the wrapped baseline, mostly `noearly`: 9; warnings only, not stress rows).
+- `... tests/fake/zero-stat.sh`: exit 1, "FAILED: 99 problem(s)", all 99 are coverage failures (counter
+  nonzero on 0%), no verdict problem.
+- `... tests/fake/always-sat.sh`: exit 1, "FAILED: 796 problem(s)", 697 wrong verdicts plus coverage failures.
+- `tests/regress.sh -s 1:20 .../baseline/miniQU` (old interface): exit 0, 20 proofs checked, coverage skipped
+  with a note, smoke passed.
+- `tests/fuzz_qdimacs.sh BASELINE 1 300` with '', `-dl`, `-mode=1`, `-mode=2`: 0 failures; 600 instances agreed
+  each (599 and 1 timeout for `-mode=2`). No baseline disagreement found, so nothing was added to
+  `tests/regressions/` for that.
+- `tests/run_regressions.sh BASELINE`: 7 instances, 0 failures (proofs Lean-checked).
+
+Caveats: the checks of required counters could only be validated against fake solvers; the real counter
+names must be printed by the new solver as `c stat NAME VALUE` at -verb=1. Sanitizer/debug builds do not
+apply (tests only, no C++ changed).
