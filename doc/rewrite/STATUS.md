@@ -711,3 +711,159 @@ Notes for later tasks:
   must either add its reasons to the chain (M2.3) or stay off while a tracer is connected.
 - The `tests/regress.sh` smoke step is still vacuous after its first run (T05 note); the smoke numbers above come from a
   fresh `bench/run.py` run.
+
+
+## M1-T07: learnt-database reduction (old policy), arena garbage collection, stress options, header measurement
+
+Commits on `rewrite/cadical-style`: reduce and collect (`3c06676`), one-pass `check_invariants` and
+`bench/header_measure.py`, and the 12-byte header with the documentation (the last commit of this task).
+
+What exists now:
+- `src/reduce.cpp`: `init_reduce`, `adjust_learnt_limit` (called by `learn` once per learnt constraint, port of the old
+  `learntsize_adjust_*` counters: 100, then x1.5; `max_learnts` x1.1), `reducing`, `protect_reasons`/`unprotect_reasons`,
+  `reduce`. Per kind, candidates are redundant, not a reason, glue > `tier1glue`; the worse half by (glue, size, both
+  descending, then id ascending) goes through `mark_garbage` (proof `d` steps).
+- `src/collect.cpp`: `collecting`, `garbage_collect` (ARCH 5.3 steps 1-4 plus the model buffer). `gcfrac = 0` collects at
+  every safe point. `check_invariants` runs after every collection in builds with assertions and with `--check`.
+- `reduceint` is accepted by the app (rejection removed); `profile` now prints with `--profile=N` (rows of profiles not
+  wired yet, `search`, `analyze`, `propagate`, stay 0.00); `Profiles::enable` sets the level when the search starts.
+- `check_invariants` also checks: no list or reason refers to a moved constraint, clean watch lists hold no garbage or
+  moved constraint; the watch check is one pass over all lists (it was a list scan per constraint, quadratic, and made
+  asan stress runs 30% slower).
+- `assertions_enabled` moved to `contract.hpp` (was duplicated in `model.cpp` and `solver.cpp`).
+- Tests: `unit-reduce` (schedule, both triggers, selection with tier1glue 2 and 0, reasons kept and unprotected,
+  deletion steps through a recording tracer, collection after reduce by `gcfrac`), `unit-collect` (due, nothing wasted,
+  deleted constraints, contents/ids/glue preserved, first-met constraints contiguous in watch order, reasons remapped,
+  repeated collection gives identical references, units). Shared fixtures: `test/unit/database.hpp`, `recorder.hpp`
+  (moved out of `proof.cpp`).
+
+Decisions and deviations (ARCH amended in the same commit where marked):
+- **Loop** (ARCH 7.1 amended): `reduce` does not end the iteration; the loop decides right after it. The old size
+  trigger stays true after a reduction, so `else if (reducing ()) reduce ();` would reduce forever (found by reading the
+  old `search`, which decides after `reduceDB`). The old behaviour (several halvings in a row at consecutive decisions
+  while the trigger holds) is thereby kept.
+- **`reduceint` schedule** (ARCH 9.1 amended): after a reduction `lim.reduce = conflicts + reduceint * reductions`
+  (`reductions` already counting this one), not `+=`: the conflict counter can overshoot the limit by several
+  conflicts and `+=` would then reduce in a burst. First fire at `conflicts >= reduceint`.
+- **Half of the candidates**, not half of all learnt constraints of the kind as the old `reduceDB` (`learnt_counts / 2`
+  counts the protected ones too). Learnt units are irredundant now, so they are not in the old trigger's count either.
+  `max_learnts` starts at a third of the stored irredundant constraints (old: `num_clauses`).
+- The constants of the old schedule (1/3, 1.1, 100, 1.5) are `constexpr` in `reduce.cpp`, not options: the owner's list of
+  M1 options has none of them, and the stress options cover the events.
+- **Model buffer**: not copied but allocated afresh (it is dead between two cubes); only its id is kept (ARCH 5.3 step 5).
+- **Header** (ARCH 5.2 amended): see below, 12 bytes.
+
+### Header measurement (ROADMAP M1.3, review S3)
+
+`bench/header_measure.py`: baseline and new release binary, default options, `-verb=1`, one core each (cores 0-7, 8 in
+parallel), `/usr/bin/time -v`; per instance propagations, conflicts, CPU seconds, props/s = propagations / (CPU time -
+parse time), peak RSS. Groups: the ten largest by file size among the instances the baseline solved in
+`baseline-t180`, and the ten of the 30 longest baseline runs with the most baseline propagations; an instance that either
+binary does not solve in 180 s, or with different verdicts, is replaced by the next one. **A ratio measurement, not a
+benchmark claim**: the two binaries take different search paths (different conflict counts, see tables), one run each.
+Results: `bench/results/header-orig16/` (16-byte header), `bench/results/header-h12/` (12-byte header).
+
+Geometric means of new/baseline, 16-byte header:
+
+| group | instances | props/s | RSS | CPU time |
+|---|---|---|---|---|
+| largest | 10 | 1.004 | 0.818 | 0.802 |
+| propagations | 10 | 1.290 | 1.093 | 0.939 |
+| all | 20 | 1.138 | 0.946 | 0.868 |
+
+12-byte header:
+
+| group | instances | props/s | RSS | CPU time |
+|---|---|---|---|---|
+| largest | 10 | 1.018 | 0.801 | 0.792 |
+| propagations | 10 | 1.301 | 1.076 | 0.931 |
+| all | 20 | 1.151 | 0.928 | 0.859 |
+
+Per instance, 16-byte header (the baseline columns of the second run are within a few percent of these):
+
+| group | instance | props base | props new | props/s base | props/s new | ratio | conflicts base | conflicts new | RSS base MB | RSS new MB | RSS ratio | time base | time new |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| largest | 5.2-2.qcir | 542843356 | 651091731 | 7.34e+06 | 7.63e+06 | 1.04 | 10992 | 16941 | 2332 | 1882 | 0.81 | 80.8 | 90.0 |
+| largest | 1.3.qcir | 21542927 | 6782483 | 4.31e+06 | 3.01e+06 | 0.70 | 313 | 120 | 1682 | 1341 | 0.80 | 9.5 | 5.5 |
+| largest | 1.4.qcir | 21616315 | 6781054 | 4.33e+06 | 3.07e+06 | 0.71 | 300 | 120 | 1681 | 1340 | 0.80 | 9.4 | 5.5 |
+| largest | 3.1.qcir | 193562586 | 394936826 | 7.17e+06 | 8.23e+06 | 1.15 | 425 | 739 | 1503 | 1189 | 0.79 | 31.0 | 50.8 |
+| largest | 11.1.qcir | 147907027 | 162470145 | 7.25e+06 | 7.96e+06 | 1.10 | 1193 | 1281 | 631 | 491 | 0.78 | 22.0 | 21.5 |
+| largest | 9.1.qcir | 7021615 | 9900703 | 5.4e+06 | 6.31e+06 | 1.17 | 326 | 187 | 475 | 384 | 0.81 | 2.5 | 2.4 |
+| largest | 5.2-1.qcir | 250482366 | 110053225 | 8.01e+06 | 9.15e+06 | 1.14 | 31558 | 12637 | 462 | 373 | 0.81 | 32.4 | 12.8 |
+| largest | 10.1.qcir | 13162569 | 5175879 | 5.7e+06 | 5.28e+06 | 0.93 | 637 | 251 | 413 | 322 | 0.78 | 3.3 | 1.6 |
+| largest | 10.2.qcir | 3463109 | 7165204 | 4.68e+06 | 6.02e+06 | 1.29 | 204 | 407 | 413 | 322 | 0.78 | 1.7 | 1.8 |
+| largest | 8.1.qcir | 31011476 | 31816864 | 1.07e+07 | 1.08e+07 | 1.01 | 723 | 1127 | 165 | 177 | 1.08 | 3.5 | 3.3 |
+| propagations | klieber2017q-066-16-eq.qcir | 2861859791 | 3520581348 | 2.68e+07 | 3.49e+07 | 1.30 | 3343658 | 4048979 | 11 | 11 | 1.06 | 106.6 | 100.8 |
+| propagations | test_5_5_domino.pg-15.qcir | 2299480813 | 2785816494 | 1.44e+07 | 1.91e+07 | 1.33 | 13378891 | 15257634 | 11 | 11 | 1.01 | 159.4 | 145.5 |
+| propagations | klieber2017q-086-21-t1.qcir | 2266775483 | 3073768426 | 2.81e+07 | 3.87e+07 | 1.38 | 1869484 | 2524968 | 10 | 11 | 1.07 | 80.7 | 79.4 |
+| propagations | klieber2017q-076-19-eq.qcir | 1892686950 | 1958511289 | 2.76e+07 | 3.28e+07 | 1.19 | 1858429 | 2107057 | 14 | 14 | 1.00 | 68.5 | 59.8 |
+| propagations | klieber2017q-084-21-eq.qcir | 1777041076 | 1823859970 | 2.17e+07 | 3.06e+07 | 1.41 | 2157859 | 2177921 | 14 | 16 | 1.10 | 81.8 | 59.5 |
+| propagations | bt-2x5_17.ig.qcir | 1717642508 | 1968348491 | 1.5e+07 | 1.73e+07 | 1.15 | 2097002 | 2424041 | 29 | 31 | 1.05 | 114.3 | 113.6 |
+| propagations | bt-3x4_19.ig.qcir | 1617324173 | 2326751094 | 1.66e+07 | 2.02e+07 | 1.22 | 1473858 | 2125027 | 31 | 32 | 1.03 | 97.3 | 114.9 |
+| propagations | klieber2017q-100-25-t1.qcir | 1604417303 | 2478228150 | 2.84e+07 | 3.97e+07 | 1.40 | 1214171 | 1808393 | 11 | 12 | 1.14 | 56.5 | 62.4 |
+| propagations | klieber2017q-076-19-t1.qcir | 1603826840 | 1486807220 | 2.82e+07 | 3.8e+07 | 1.35 | 1539807 | 1411458 | 8 | 8 | 1.00 | 56.8 | 39.1 |
+| propagations | amba2f9n.sat.qcir | 1569742266 | 2107432587 | 2.26e+07 | 2.74e+07 | 1.21 | 1480707 | 2019764 | 19 | 29 | 1.56 | 69.4 | 76.9 |
+
+Per instance, 12-byte header:
+
+| group | instance | props base | props new | props/s base | props/s new | ratio | conflicts base | conflicts new | RSS base MB | RSS new MB | RSS ratio | time base | time new |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| largest | 5.2-2.qcir | 542843356 | 651091731 | 7.39e+06 | 7.87e+06 | 1.07 | 10992 | 16941 | 2332 | 1847 | 0.79 | 80.3 | 87.4 |
+| largest | 1.3.qcir | 21542927 | 6782483 | 4.28e+06 | 3.07e+06 | 0.72 | 313 | 120 | 1681 | 1316 | 0.78 | 9.5 | 5.5 |
+| largest | 1.4.qcir | 21616315 | 6781054 | 4.28e+06 | 3.08e+06 | 0.72 | 300 | 120 | 1681 | 1315 | 0.78 | 9.5 | 5.4 |
+| largest | 3.1.qcir | 193562586 | 394936826 | 7.1e+06 | 8.41e+06 | 1.18 | 425 | 739 | 1503 | 1167 | 0.78 | 31.1 | 49.7 |
+| largest | 11.1.qcir | 147907027 | 162470145 | 7.23e+06 | 8.08e+06 | 1.12 | 1193 | 1281 | 631 | 482 | 0.76 | 22.0 | 21.2 |
+| largest | 9.1.qcir | 7021615 | 9900703 | 5.49e+06 | 6.6e+06 | 1.20 | 326 | 187 | 475 | 377 | 0.79 | 2.5 | 2.3 |
+| largest | 5.2-1.qcir | 250482366 | 110053225 | 7.96e+06 | 8.95e+06 | 1.12 | 31558 | 12637 | 462 | 366 | 0.79 | 32.6 | 13.1 |
+| largest | 10.1.qcir | 13162569 | 5175879 | 5.72e+06 | 5.28e+06 | 0.92 | 637 | 251 | 413 | 316 | 0.76 | 3.3 | 1.6 |
+| largest | 10.2.qcir | 3463109 | 7165204 | 4.62e+06 | 6.07e+06 | 1.32 | 204 | 407 | 413 | 316 | 0.77 | 1.8 | 1.8 |
+| largest | 8.1.qcir | 31011476 | 31816864 | 1.08e+07 | 1.07e+07 | 1.00 | 723 | 1127 | 165 | 169 | 1.03 | 3.5 | 3.3 |
+| propagations | klieber2017q-066-16-eq.qcir | 2861859791 | 3520581348 | 2.6e+07 | 3.51e+07 | 1.35 | 3343658 | 4048979 | 11 | 11 | 0.99 | 110.1 | 100.4 |
+| propagations | test_5_5_domino.pg-15.qcir | 2299480813 | 2785816494 | 1.44e+07 | 1.89e+07 | 1.31 | 13378891 | 15257634 | 11 | 11 | 1.00 | 159.3 | 147.1 |
+| propagations | klieber2017q-086-21-t1.qcir | 2266775483 | 3073768426 | 2.82e+07 | 3.86e+07 | 1.36 | 1869484 | 2524968 | 10 | 11 | 1.15 | 80.2 | 79.7 |
+| propagations | klieber2017q-076-19-eq.qcir | 1892686950 | 1958511289 | 2.76e+07 | 3.43e+07 | 1.24 | 1858429 | 2107057 | 14 | 16 | 1.10 | 68.7 | 57.1 |
+| propagations | klieber2017q-084-21-eq.qcir | 1777041076 | 1823859970 | 2.28e+07 | 3.09e+07 | 1.36 | 2157859 | 2177921 | 14 | 15 | 1.08 | 78.1 | 59.1 |
+| propagations | bt-2x5_17.ig.qcir | 1717642508 | 1968348491 | 1.49e+07 | 1.73e+07 | 1.16 | 2097002 | 2424041 | 29 | 31 | 1.04 | 115.0 | 113.7 |
+| propagations | bt-3x4_19.ig.qcir | 1617324173 | 2326751094 | 1.65e+07 | 2.04e+07 | 1.24 | 1473858 | 2125027 | 31 | 33 | 1.06 | 98.2 | 114.1 |
+| propagations | klieber2017q-100-25-t1.qcir | 1604417303 | 2478228150 | 2.83e+07 | 4.01e+07 | 1.42 | 1214171 | 1808393 | 11 | 12 | 1.14 | 56.7 | 61.8 |
+| propagations | klieber2017q-076-19-t1.qcir | 1603826840 | 1486807220 | 2.83e+07 | 3.84e+07 | 1.36 | 1539807 | 1411458 | 8 | 8 | 1.01 | 56.7 | 38.7 |
+| propagations | amba2f9n.sat.qcir | 1569742266 | 2107432587 | 2.17e+07 | 2.69e+07 | 1.24 | 1480707 | 2019764 | 19 | 23 | 1.22 | 72.3 | 78.4 |
+
+Reading: propagation speed is not below the baseline (geometric mean 1.14 / 1.15, the two large `1.3`/`1.4` instances are
+0.70 / 0.72: 2.2 million gates parsed, 100-300 conflicts, so the number is dominated by the first propagations and the
+cold arena). The first RSS result had one instance clearly above the baseline that parsing does not explain (`amba2f9n`
+1.56; with a 0.5 s and 3 s timeout the new binary's RSS is below the baseline's, so the excess grows during the search),
+so by the rule of the task the 12-byte variant was implemented (`constraint.hpp` only, plus the constants in
+`unit-constraint`) and measured: props/s 1.151 vs 1.138 (the difference is noise), RSS ratios lower on every instance
+(amba 1.22, geometric means 0.928 vs 0.946 and 1.076 vs 1.093 on the propagation group). **Decision: keep the 12-byte
+header**, since it is no slower and smaller. Costs: constraint size at most 2^27-1 literals (fatal error beyond),
+ids below 2^44 (asserted), glue saturating at 16383, 6 reserved bits (M2 needs 3). The remaining RSS excess on the
+long, small-memory runs is not the header; likely sources are the different learnt-database trajectory (the new binary
+has up to 40% more conflicts there) and `std::vector` watch lists growing by doubling; not investigated further.
+
+### Acceptance (all with `taskset -c 0-63`; logs in `/home/ec2-user/miniqu-work/logs/t07/`; R = release, A = asan)
+
+| command | result |
+|---|---|
+| build + `ctest` in release, debug, asan, release-clang | no warnings (besides the known `lto-wrapper` note); 29/29 tests pass each |
+| `tests/regress.sh -S -s 1:300 -M default,gc,restart R` (proofs checked by Lean) | PASSED: 0 wrong verdicts, 0 rejected proofs, 0 timeouts in any row, 300 proofs checked per row; gc row: reductions 98%, reduced.clause 93%, reduced.cube 91%, collections 98%, relocated 98% of the finished search instances (default row: the old trigger reduces on 58%) |
+| `tests/regress.sh -S -s 1:100 -M default,gc,restart -t 90 A` | PASSED: 0 sanitizer reports, 100 proofs checked per row, `checked` (internal replay) = conflicts; gc row: reduced.clause 92%, reduced.cube 92%, collections 96%, relocated 96% |
+| `tests/fuzz_qdimacs.sh R 1 300 --reduceint=2 --tier1glue=0 --gcfrac=0` (R = the release binary) | 0 failures, 0 timeouts, 600 instances agreed |
+| same with A, seeds 1 100 | 0 failures, 0 timeouts, 200 instances agreed |
+| smoke set, `bench/run.py --tag m1-t07-smoke --timeout 60 --jobs 32 --cores 64-95 --proof-check` | 31/33 solved (the same two `jctc` instances time out as in T05/T06; baseline 33/33), verdicts equal `bench/smoke-expected.csv`, 31/31 proofs accepted; total wall of the 31 common instances 29.6 s vs 30.5 s for the baseline; `bench/results/m1-t07-smoke/` |
+
+Notes:
+- The A run of the `gc` row needs a longer solver timeout than the default 20 s: with `--reduceint=2 --tier1glue=0` the
+  search takes 30 times more conflicts on some instances (seed 60: 1751 conflicts by default, 54886 with the stress
+  options), and asan makes that 7-13 times slower than the release build (3.3 s release, 29 s asan, 43 s with the
+  invariant check after each of its 234 collections). With the default 20 s, 6-7 of 50 search instances timed out in A
+  (limit 2%); with `-t 90` none do, and in R none do at 20 s. The tests were not changed; if the 20 s limit is meant to
+  hold for A too, the stress `reduceint` or the timeout of A runs has to change (coordinator).
+- `reduced.cube` reaches 91-92% in the gc row, so the corpus was not extended.
+- `jctc1-pass`, `jctc9-pass` still time out at 60 s (as before this task: not caused by reduction).
+
+Notes for later tasks:
+- T08: `adjust_learnt_limit` is called from `learn` only; dependency learning has no learnt constraint and must not call
+  it. Dependencies need no Ref, so the safe-point rule of the collector is unaffected.
+- T09/M2: tiers replace the `tier1glue` test in `reduce`; the loop shape of ARCH 7.1 (reduce, then decide) stays.
+- The model buffer is reallocated by every collection (it is `prefix.size ()` literals).

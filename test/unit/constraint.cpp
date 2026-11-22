@@ -13,14 +13,14 @@ static std::vector<Lit> lits_of (std::initializer_list<int> dimacs) {
 }
 
 int main () {
-  static_assert (sizeof (Constraint) == 16);
-  static_assert (Constraint::words (3) == 7);
+  static_assert (sizeof (Constraint) == 12);
+  static_assert (Constraint::words (3) == 6);
 
   Arena arena (16);
   const std::vector<Lit> ls = lits_of ({1, -2, 3});
-  const uint64_t big = 0x123456789abcdef0ull;
+  const uint64_t big = 0xabc89abcdefull;
   const Ref r = alloc_constraint (arena, ls, Kind::Cube, true, big);
-  CHECK_EQ (arena.size (), 7u);
+  CHECK_EQ (arena.size (), 6u);
 
   Constraint &c = deref (arena, r);
   CHECK_EQ (c.size (), 3u);
@@ -48,19 +48,23 @@ int main () {
   CHECK (!c.garbage () && c.reason () && !c.redundant ());
   CHECK_EQ (c.glue (), 77u);
 
-  // Glue saturates at 2^20 - 1.
-  c.set_glue (1u << 20);
-  CHECK_EQ (c.glue (), (1u << 20) - 1);
+  // Glue saturates, and neither it nor the id disturbs the other.
+  c.set_glue (Constraint::glue_max + 1);
+  CHECK_EQ (c.glue (), Constraint::glue_max);
   c.set_glue (UINT32_MAX);
-  CHECK_EQ (c.glue (), (1u << 20) - 1);
+  CHECK_EQ (c.glue (), Constraint::glue_max);
+  CHECK_EQ (c.id (), big);
+  c.set_id (Constraint::id_max);
+  CHECK_EQ (c.glue (), Constraint::glue_max);
+  c.set_id (big);
   CHECK (c.reason () && c.kind () == Kind::Cube);
   c.set_glue (0);
   CHECK_EQ (c.glue (), 0u);
 
-  // Ids use both words.
+  // Ids use the whole word and the low bits of the next.
   const Ref r2 = alloc_constraint (arena, lits_of ({-4}), Kind::Clause,
-                                   false, UINT64_MAX);
-  CHECK_EQ (deref (arena, r2).id (), UINT64_MAX);
+                                   false, Constraint::id_max);
+  CHECK_EQ (deref (arena, r2).id (), Constraint::id_max);
   CHECK (deref (arena, r2).kind () == Kind::Clause);
   CHECK_EQ (deref (arena, r).id (), big);
 

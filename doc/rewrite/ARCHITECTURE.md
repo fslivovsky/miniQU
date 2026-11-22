@@ -533,34 +533,37 @@ benchmark set.
 ### 5.2 Constraint layout
 
 ```
-word 0      size                         number of literals
-word 1      bit field:
-              kind       1   Clause / Cube
-              redundant  1   learnt; may be deleted
-              garbage    1   deleted, memory not yet reclaimed
-              moved      1   relocated during GC; lits[0] holds the new Ref
-              reason     1   protected in reduce (set only inside reduce)
-              (7 bits reserved: `used` 2 and `keep` 1 for M2 tiers, scheduling
-               marks and a gate-definition mark for M3+. A bit gets its name
-               and its accessors in the package that first uses it.)
-              glue      20   LBD, saturating
-word 2,3    id                           64-bit proof id (two words)
-word 4...   lits[size]
+word 0      bits 0-4   kind        1   Clause / Cube
+                       redundant   1   learnt; may be deleted
+                       garbage     1   deleted, memory not yet reclaimed
+                       moved       1   relocated during GC; lits[0] holds the new Ref
+                       reason      1   protected in reduce (set only inside reduce)
+            bits 5-31  size       27   number of literals (at most 134217727;
+                                       a larger constraint is a fatal error)
+word 1      proof id, bits 0-31
+word 2      bits 0-11  proof id, bits 32-43 (ids stay below 2^44)
+            bits 12-25 glue       14   LBD, saturating
+            bits 26-31 reserved    6   (`used` 2 and `keep` 1 for M2 tiers,
+                                       scheduling marks for M3+. A bit gets its
+                                       name and its accessors in the package
+                                       that first uses it.)
+word 3...   lits[size]
 ```
 
-Sixteen bytes of header for every constraint (the old solver: 4 bytes, 12
-for learnt constraints, so a binary original grows from 12 to 24 bytes).
-This layout is **provisional until measured**: ROADMAP M1.3 compares
-propagations per second and peak RSS with the baseline on the largest
-instances. If the header costs measurably, the fallback is 12 bytes (size and
-flags packed into one word, glue narrowed), which the accessor-only rule
-below keeps local to `constraint.hpp`. The id is stored inline and
-always present: the old solver kept ids in a hash map keyed by `CRef`, which
-has to be rebuilt at every garbage collection and costs a hash lookup per
-antecedent during analysis; ids are also what makes log output and sort
-orders stable across garbage collections. MiniSat's per-clause `activity`
-float and the `abstraction` word are not kept (database reduction sorts by
-glue and size; subsumption computes signatures in the occurrence pass).
+Twelve bytes of header for every constraint (the old solver: 4 bytes, 12
+for learnt constraints, so a binary original grows from 12 to 20 bytes).
+This is the variant that the measurement of ROADMAP M1.3 kept (task T07,
+STATUS.md): the first layout, with 16 bytes (a 32-bit size word, a flag word
+with a 20-bit glue, and the id in two full words), was measured first and
+gave the same propagation speed within noise but a higher peak RSS; the
+accessor-only rule below made the switch local to `constraint.hpp`. The id
+is stored inline and always present: the old solver kept ids in a hash map
+keyed by `CRef`, which has to be rebuilt at every garbage collection and
+costs a hash lookup per antecedent during analysis; ids are also what makes
+log output and sort orders stable across garbage collections. MiniSat's
+per-clause `activity` float and the `abstraction` word are not kept
+(database reduction sorts by glue and size; subsumption computes signatures
+in the occurrence pass).
 
 `Constraint` is a non-copyable view type with accessors (`size ()`,
 `lits ()` returning `std::span<Lit>`, `begin ()/end ()`, flag getters and
@@ -592,7 +595,9 @@ right size in this order:
 4. the reference lists (`irredundant`, `redundant`, per kind), dropping
    garbage, relocating whatever has not been reached yet (unit constraints,
    the initial-cube buffer);
-5. any `Ref` held by an inprocessing pass must not exist at this point:
+5. the buffer of the initial cube (`model.cpp`) is allocated afresh in the new
+   arena: its contents are dead between two cubes, only its id is kept;
+6. any `Ref` held by an inprocessing pass must not exist at this point:
    passes do not call the collector while they hold references (occurrence
    lists are rebuilt, not relocated).
 
@@ -677,11 +682,17 @@ solve ():
     else if terminated or limit hit           return unknown
     else if restarting ()                     restart ()
     else if (M2) rephasing () / switching ()  rephase () / switch_mode ()
-    else if reducing ()                       reduce ()
-    else if (M3) inprocessing ()              inprocess ()
-    else if !decide ()                        // no eligible decision variable
-        conflict = initial_cube ()            // 4.5; then analyze
+    else
+        if reducing ()                        reduce ()      // then go on:
+        if (M3) inprocessing ()               inprocess ()   // not an iteration
+        if !decide ()                         // no eligible decision variable
+            conflict = initial_cube ()        // 4.5; then analyze
 ```
+
+`reduce` does not end the iteration. The old size trigger (`#learnt -
+#assigned >= max_learnts`) can stay true after a reduction (reasons and the
+better half survive), and the old `search` decides right after `reduceDB`;
+ending the iteration would reduce again before the next decision, forever.
 
 Each `...ing ()` predicate compares a counter with a threshold in `lim`
 (9.4); each action updates its threshold. `analyze` dispatches on the mode,
@@ -955,7 +966,7 @@ added. From M1:
 | option | default (M1) | range | stress value | meaning |
 |---|---|---|---|---|
 | `gcfrac` | 20 | 0..100 | 0 | percent of wasted arena that triggers a collection; 0 = collect at every safe point (5.3) |
-| `reduceint` | 0 | 0..1e9 | 2 | if nonzero: also reduce when `conflicts >= lim.reduce`, then `lim.reduce += reduceint * (reductions + 1)`. 0 in M1 leaves the old size-based trigger alone; M2.2 makes this the schedule |
+| `reduceint` | 0 | 0..1e9 | 2 | if nonzero: also reduce when `conflicts >= lim.reduce`, then `lim.reduce = conflicts + reduceint * reductions` (`reductions` counts this one; the base is the current conflict count so that a burst of conflicts does not cause a burst of reductions). 0 in M1 leaves the old size-based trigger alone; M2.2 makes this the schedule |
 | `tier1glue` | 2 | 0..1e9 | 0 | learnt constraints with glue up to this value are never reduced (the old hard-wired "glue > 2"); becomes the tier-1 limit in M2.2 |
 | `luby`, `rfirst`, `rinc` | 1, 100, 200 (%) | `rfirst` 1.., `rinc` 100.. | `--no-luby --rfirst=1 --rinc=100` | restart after every conflict |
 | `depreset` | 20 | 1..1e9 | 1 | reset dependencies every n-th restart |
