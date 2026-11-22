@@ -645,7 +645,7 @@ Acceptance (all with `taskset -c 0-63`; logs in `/home/ec2-user/miniqu-work/logs
 | `tests/regress.sh -S -s 1:60 -M default -P '' R` (text proofs) | PASSED: 60 proofs checked, 0 rejected, 0 timeouts |
 | `tests/regress.sh -S -s 1:100 -M default A` | PASSED, 0 aborts; `checked` = 152367 = `conflicts` summed over the search tier, nonzero on 100% of the instances (every learnt and empty constraint replayed); 100 Lean-checked proofs |
 | `tests/run_regressions.sh R` (with proofs) | `7 instances, 0 failures` |
-| `qlrup-trim` on 20 new proofs (corpus search seeds 401-420, text and binary) | 40/40 trimmed proofs and their originals accepted by Lean (11 false, 9 true); trimmed to 2%-100% of the size |
+| `qlrup-trim` on 20 new proofs (corpus search seeds 401-420, text and binary) | 40/40 trimmed proofs and their originals accepted by Lean (12 false, 8 true); trimmed to 2%-101% of the size (trimming adds deletions) |
 | smoke set: `bench/run.py --tag m1-t06-smoke-proof --timeout 60 --jobs 32 --cores 64-95 --proof-check --proof-max-solve-sec 60` | 31/33 solved (the same two jctc instances as in T05 time out), verdicts equal `bench/smoke-expected.csv`, **31/31 proofs accepted** (Lean total 64.7 s, largest proof 27.9 MB); proof files deleted; `bench/results/m1-t06-smoke-proof/` |
 
 Byte compatibility: on all six `.qcir` instances of `tests/regressions/` the new text and binary proofs are
