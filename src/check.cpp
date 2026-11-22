@@ -16,6 +16,7 @@
 #include "internal.hpp"
 
 #include <algorithm>
+#include <unordered_map>
 #include <vector>
 
 namespace miniqu {
@@ -26,22 +27,38 @@ namespace miniqu {
       fatal ("invariant violated: " __VA_ARGS__); \
   } while (0)
 
-// The blocker of a watch is another literal of the constraint, though not
-// necessarily the other watched one: propagation replaces watched literals
-// without updating the blocker of the watch that stays.
-static bool watched (const Watches &watches, const Constraint &c, Ref ref,
-                     unsigned i) {
-  const Kind kind = c.kind ();
-  const std::vector<Watch> &list = watches (kind, watch_key (kind, c[i]));
-  return std::any_of (list.begin (), list.end (), [&] (const Watch &w) {
-    return w.ref == ref && w.blocker != c[i] &&
-           std::find (c.begin (), c.end (), w.blocker) != c.end ();
-  });
+// For every live constraint of size >= 2, which of its literals 0 and 1 are
+// watched: bit i of the entry is set if the list of literal i holds the
+// constraint.  The blocker of a watch is another literal of the
+// constraint, though not necessarily the other watched one: propagation
+// replaces watched literals without updating the blocker of the watch that
+// stays.  One pass over all lists, so that checking after every garbage
+// collection of a stress run stays affordable.
+static std::unordered_map<Ref, uint8_t>
+watched_positions (const Watches &watches, const Arena &arena, Var vars) {
+  std::unordered_map<Ref, uint8_t> result;
+  for (Kind kind : {Kind::Clause, Kind::Cube})
+    for (Var v = 0; v < vars; v++)
+      for (bool negative : {false, true}) {
+        const Lit p = mk_lit (v, negative);
+        for (const Watch &w : watches (kind, p)) {
+          const Constraint &c = deref (arena, w.ref);
+          if (c.garbage ())
+            continue;
+          for (unsigned i = 0; i < 2; i++)
+            if (watch_key (kind, c[i]) == p && w.blocker != c[i] &&
+                std::find (c.begin (), c.end (), w.blocker) != c.end ())
+              result[w.ref] |= (uint8_t) (1u << i);
+        }
+      }
+  return result;
 }
 
 void Internal::check_invariants () const {
   const Var vars = prefix.size ();
   std::vector<uint8_t> marked (2 * (size_t) vars, 0);
+  const std::unordered_map<Ref, uint8_t> watched =
+      watched_positions (watches, arena, vars);
   for (Kind kind : {Kind::Clause, Kind::Cube})
     for (const auto *lists : {&irredundant, &redundant})
       for (Ref ref : (*lists)[index (kind)]) {
@@ -66,9 +83,9 @@ void Internal::check_invariants () const {
                          (unsigned long) c.id ());
         if (c.size () < 2)
           continue;
-        CHECK_INVARIANT (
-            watched (watches, c, ref, 0) && watched (watches, c, ref, 1),
-            "constraint %lu not watched", (unsigned long) c.id ());
+        CHECK_INVARIANT (watched.contains (ref) && watched.at (ref) == 3,
+                         "constraint %lu not watched",
+                         (unsigned long) c.id ());
         CHECK_INVARIANT (
             propagated < trail.size () ||
                 (kval (kind, c[0]) >= 0 && kval (kind, c[1]) >= 0) ||
