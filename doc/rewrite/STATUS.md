@@ -1201,3 +1201,157 @@ scores, not a lost behaviour. The timeouts of the row are inherent to the option
 - The two `jctc` smoke instances (`jctc1-pass`, `jctc9-pass`, solved by the baseline in 0.1 s and 1.3 s) still time out
   with the new solver at 120 s in every row of the smoke test (known since T05); the benchmark stage will meet it.
 - Certificate semantics under `-dl` could not be shown to be a problem (above), and a targeted test is not written.
+
+## Coordinator decisions after M1 round 1 (coordinator, 2026-11-22)
+
+Every open point of T01-T10 is settled here: as a worker task (T11, T12 below), as a decision, or as a deferral.
+Decisions are binding for the verifier and the reviewer. Measurements of this entry: release binary 59b1a69, search
+seeds 151-300 (150 instances, `/home/ec2-user/miniqu-work/stress-t08/inst`), 20 s, 16 parallel on cores 16-47 while a
+regress run of another agent was using the machine (so times are upper bounds); script, per-configuration summary and
+the conflict table in `bench/results/m1-triage/` (`m.sh`, `sum.py`, `stress-options.txt`, `fid.csv`), raw CSVs in
+`/home/ec2-user/miniqu-work/triage/`.
+
+### D1. Stress rows and their timeout limits (T07.1, T08, T09.1, T09.2, T10.1, T10.3)
+
+What the stress rows protect: every scheduled event (reduction, collection with relocation, restart, dependency
+reset) fires many times per instance, with verdicts cross-checked and proofs Lean-checked on the instances that
+finish, and a timeout rate that would expose a new hang. Measured (timeouts of 150; longest finished run; medians per
+finished instance):
+
+| row / candidate | timeouts | max s | median events | decision |
+|---|---|---|---|---|
+| `gc` `--reduceint=2` (mode 0) | 0 (0/1000 in T10) | 6.2 | 68 reductions = collections | **unchanged**, limit 2% |
+| `gc-dl`, reduceint 2 / 10 / 30 | 0 / 0 / 0 | 20.0 / 12.3 / 4.3 | 62 / 27 / 12 | **`--reduceint=30`**, limit 2% |
+| `gc-mode1`, reduceint 2 (T08) / 10 / 30 / 100 / 300 | 44 / 9 / 1 / 0 / 0 | - / 19.8 / 13.8 / 8.7 / 4.3 | - / 41 / 25 / 14 / 8 (default options: 6, on 60% of the instances) | **`--reduceint=100`**, limit 5% |
+| `gc-mode2`, reduceint 2 / 10 / 30 | 0 / 0 / 0 | 18.0 / 4.7 / 1.6 | 61 / 23 / 12 | **`--reduceint=10`**, limit 2% |
+| `restart` (mode 0) | 0 (0/1000 in T10) | | | **unchanged**, limit 2% |
+| `restart-dl` as is | 6 (36/1000 in T10) | | 100% restarts | **options unchanged, limit 8%** |
+| `restart-dl`, constant interval 2 / 4 / 16 / 50, Luby 1 / 4 / 10 | 5 / 6 / 5 / 3, 2 / 1 / 0 | | | not taken |
+| `restart-mode1-dl` as is | 63 (357/1000 in T10) | | | replaced |
+| same, constant interval 2 / 4 / 8 / 16 / 50 (depreset 1, 1, 2, 4, 1) | 58 / 49 / 34 / 20 / 18 | | | not taken |
+| same, Luby with rfirst/depreset 1/1, 4/1, 10/2, 10/5, 20/2, 20/5, 30/3 | 23 / 21 / 21 / 22 / 22 / 21 / 21 | 13.2 (1/1) | 1/1: 2620 restarts, 976 dependency resets | **`--rfirst=1 --depreset=1 -mode=1 -dl`** (Luby on), limit 25% |
+| `-mode=1 -dl` default (Luby 100, depreset 20) | 1 | 11.3 | 44 restarts, 2 resets | (the normal row) |
+
+Reasons:
+- **gc rows.** `--reduceint=2 --tier1glue=0` deletes nearly everything that is learnt; mode 0 survives that (0 timeouts
+  in 1000 release instances), `-dl`, mode 1 and mode 2 need 10 to 100 times the conflicts (T07, T08, T09 measured it),
+  which the asan binary (7-13 times slower) cannot do in 90 s. The new values keep 12 to 23 reductions and collections
+  per instance at the median (default options: about 6, and only on 60% of the instances), with `reductions`,
+  `collections` and `relocated` nonzero on 91-98% of the instances, so the coverage assertion keeps a wide margin. The
+  extreme interval 2 remains in the mode-0 row, and with `-dl`, `-mode=1`, `-mode=2` in `tests/fuzz_qdimacs.sh`
+  (T09 ran it for mode 2: 0 failures, 0 timeouts in release), which T12 makes part of the gate.
+- **restart-dl.** The baseline with the same schedule (`-no-luby -rfirst=1 -rinc=1.000001 -dl`) times out on the same
+  six seeds (T08). The options stay; the limit is twice the measured rate (3.6% of 1000 release, 4% of 150 asan).
+- **restart-mode1-dl.** 18 seeds (155 174 180 184 185 189 199 209 214 215 230 234 239 244 270 280 290 299, all
+  UNSAT) time out under *every* restart schedule tried that is more frequent than the default, constant or Luby, with
+  any `depreset`, and the baseline times out on the same 18 with restart-every-conflict (28 of 150 in total, T08).
+  With default options they are solved in 1-4 s after 20-51 restarts. So no choice of options reaches 2%; the Luby
+  schedule with base 1 is taken because it has the fewest timeouts (23, against 63) and at the same time the most
+  restarts and resets on the instances that finish. Limit 25% = the baseline's rate under its closest schedule (19%)
+  plus a margin. Observation for M2.4 (EMA restarts) and M2.6: `-mode=1 -dl` is fragile against frequent restarts on
+  this family in the baseline as well; any new restart schedule is to be checked on these seeds.
+- **Limits above 2%** are a property of the row in `tests/matrix.txt` (optional sixth field), not a global change. ROADMAP
+  0.1 is amended with the rule: only with a measurement against the baseline.
+- **asan timeout.** The gate command for the asan binary is `tests/regress.sh -t 90 ...` (as T07-T10 ran it); 20 s
+  stays the default and the limit of release runs. ROADMAP 0.1 amended.
+- If a row exceeds its new limit in T12's validation or after T11, the worker reports the numbers and changes nothing.
+
+### D2. The two `jctc` smoke instances and the order of equal scores (T05.3, T07.2, T10.4, T10 fidelity note)
+
+Re-measured, 30 s, eight seeds: `jctc1-pass` baseline solves seeds 6 and 8 (and seed 0 in 0.09 s), new solves seeds 4
+and 8; `jctc9-pass` baseline solves seed 2 (and seed 0 in 1.2 s), new none; conflict rates are the same (2000-2900 /s
+in both). So with random initial scores the two binaries are alike, and the difference is in the unseeded run, where
+all initial scores are equal. `src/heap.hpp` breaks ties by the smaller variable index (ARCH 7.3 said so); the baseline's
+MiniSat heap compares scores strictly, so its order of equal scores follows from the heap operations. Experiment (a
+scratch copy, `/home/ec2-user/miniqu-work/triage/src-tb`, one line: `before` returns `sa > sb`):
+
+- `jctc1-pass` is solved in 1.7 s (6685 conflicts; baseline 623); `jctc9-pass` still times out at 30 s.
+- `search-1014`: 13 conflicts against the baseline's 13 (before: 15); with `-no-earlytseitin` 11 against 11 (before:
+  timeout, the instance of T10's fidelity note); `-dl` 1196 against 1210.
+- Search seeds 151-230, conflicts new/baseline (`fid.csv`: seed, baseline, current, experiment, then the same with
+  `-dl`): default geometric mean 0.88 with 14 of 80 identical counts and largest factor 7.8 (current: 0.98, 4
+  identical, largest factor 56); `-dl` 1.11 with 7 identical, largest factor 21 (current: 1.17, 2 identical, 34). Many
+  counts are now within a few percent of the baseline's (5193/5298, 7345/7696, 101/101).
+
+**Decision:** the heap orders equal scores as the baseline does (ARCH 7.3 amended). It costs nothing, the run stays
+deterministic, and it removes most of the heuristic drift from the M1 comparison, which is a comparison of a port.
+Task T11 implements it and looks for the cause of the remaining divergence. `jctc9-pass` unsolved at seed 0 is
+**accepted** if it remains after T11: the baseline solves it on 1 of 8 seeds, the benchmark protocol compares seeded
+run sets, and a seed-0 loss on an instance that both binaries lose on most seeds is not a parity gap.
+
+### D3. Machine and benchmark protocol (T05.2, T06.8)
+
+The machine has 96 cores. Timed runs: upper half of the cores, `--jobs nproc/2`, `--mem-gb 8`; everything else on the
+lower half, at most 16 jobs (ROADMAP 0.3 amended). `bench/run.py`, `tests/regress.sh`, `tests/regress.py` and the
+other scripts still hard-code `64-127`, `0-63` and 48 jobs: T12 derives them from `nproc`. Old results measured on
+the 128-core machine serve verdict checks only.
+
+### D4. Accepted as built (no task)
+
+- **T01.** The 15.5 s `-dl` instance is the *baseline's* time in the corpus histogram; `regress.py` takes its reference
+  verdict from the baseline's default run first, and the new solver's longest `-dl` run on the corpus is 2.2 s. The
+  `noearly` row is a normal row: its timeouts (11%) only warn, T10 showed the baseline has them at the same rate with
+  seeds, and its coverage counters hold; D2/T11 is expected to lower the seed-0 gap. The synthetic counters of the stat
+  wrapper are obsolete: every counter of the matrix has since been asserted on the real binary (T07-T10). Rate-checking
+  only the default proofs in the histogram is enough, because every row's proofs are Lean-checked by `regress.sh`.
+- **T02.** All listed deviations (sanitizer runtime symlinks, `miniqu-old-lib` since removed, `const Arena &` in
+  `Watches`, process-wide verbosity, first-guess profile levels, tmpdir) are accepted.
+- **T03.** Gate order inside a group for files with forward references: accepted without scanning the 376 files.
+  QCIR requires definition before use, the constraints are identical, and a numbering that disagreed with
+  `doc/proof-format.md` would be rejected by the Lean checker in the benchmark proof runs, which is a blocking failure
+  by rule. `tests/encoding_diff.sh` needing the baseline binary is a documented prerequisite (`bench/README.md`).
+- **T04.** `Solver::set` aborting on an unknown name, and the assertion for "unit of the other kind", are accepted.
+- **T05.5.** The four differences of the binary (QCIR by file name, result file always written, `V` line when the input
+  decides the formula, stdin notice as a comment) are accepted.
+- **T05.4 / arena.** A failing arena `realloc` ends through `fatal` (exit 1). Accepted for M1: the harness limits memory
+  by watching RSS and never by an address-space limit, so no benchmark result depends on it. Deferred to **M2.1** (the
+  first package that touches `arena.cpp`): report it like `std::bad_alloc` (`INDETERMINATE`).
+- **T06.1 `--trace`.** The new content is confirmed: originals as lines without premises, reductions of originals as
+  derived lines, no deletions, QCIR literals as proof numbers, no `u` lines. The old premises were QDIMACS positions
+  that no longer exist as ids, and the old QCIR trace never worked, so there is no consumer to stay compatible with.
+- **T06.2-T06.7.** Default `Checker` when no tracer is connected (a debug run with only `--trace` is unchecked unless
+  `--check`), the `Proof` API as built, user numbers as proof numbers for QDIMACS, the two error messages through
+  `fatal`, and initial cubes staying live in the `Checker` (debug and `--check` only) are accepted. T06.6 is closed by
+  T09: minimisation is off while any tracer is connected.
+- **T07.4.** (a) decide right after `reduce`, (b) `lim.reduce = conflicts + reduceint * reductions`, (d) the old
+  schedule's constants as `constexpr` are accepted. (c) "half of the candidates" and the size tie-break instead of the
+  dropped constraint activity are accepted as known sources of drift against the baseline; T11 reports whether they
+  are the first divergence. The whole policy is replaced in M2.2.
+- **T07.5.** The header measurement stands as a ratio measurement; the 12-byte header is confirmed.
+- **T09.3.** `--trace` rejected in mode 2 (the old trace there held no learnt constraint, so it was not usable);
+  minimisation off for all `ccminmode` values under a tracer (the old proofs with modes 1 and 2 missed the removed
+  literals, i.e. were not checkable; M2.3 makes minimisation proof-producing); the definition of `minimized`; the
+  duplicate watch entry not ported. All accepted. Consequence to keep in mind when reading results: the proof runs of
+  the `ccmin3` rows check the search without minimisation; minimisation itself is covered by verdicts only until M2.3.
+- **T09.4, T10.2.** The partial reruns are accepted as evidence for the commits they covered, because the code changes
+  in between are stated and narrow. They are superseded anyway: T12 reruns the gate on the final binary after T11.
+- **T10.5 `V` line.** The new solver keeps printing a `V` line when the input decides the formula (ARCH 10.4): every
+  such certificate was valid or well-formed, and a caller of `--cert` gets a line in every solved case. The baseline's
+  missing line counts as the baseline's behaviour in `check_cert.py`, not as a discrepancy.
+- **Commit trailers (T08, T09).** The commits carry the attribution lines of the session that made them. Accepted;
+  history is not rewritten.
+- **Release link note** `lto-wrapper: using serial compilation`: not a warning of the code; T12 silences it with
+  `-flto=auto`.
+
+### D5. Deferred
+
+- **Certificates under `-dl`** (T10.6): no invalid certificate in 24000 checked runs, so ARCH 10.4 stays as it is
+  (inherited behaviour). A targeted generator for blocks left partially assigned is deferred to **M3.1**, where the
+  extension stack changes how certificates are built and the check has to be redone in any case.
+- **Peak RSS on long, small runs** (T07.3, `amba2f9n` 23 MB against 19 MB): the M1 memory rule is amended (ROADMAP,
+  acceptance of M1): below 64 MB of baseline RSS the limit is an absolute excess of 16 MB. The cause (trajectory of the
+  learnt database or watch-list growth) is looked at once in T11's re-measurement and otherwise left to **M2.2**, which
+  replaces the reduction policy.
+- **Propagation rate 0.70 on `1.3.qcir`, `1.4.qcir`** (T07.3): total CPU time there is 5.5 s against 9.5 s, so it is
+  not a loss for the user; whether the rate is a real slowdown of early propagation or an artefact of where the two
+  binaries stop the "parse" clock is settled by T11's re-measurement (with the baseline's tie order the conflict
+  counts should be close enough to compare directly). If it is real it becomes a task of the next round, not of M2.
+- **Full benchmark runs** (T10.7): the benchmark stage, after T11 and T12.
+
+### Worker tasks of round 2 (in this order)
+
+- **M1-T11** (solver): baseline order of equal scores in the heap; first-divergence diagnosis against the baseline;
+  re-measurement of fidelity, header table, smoke.
+- **M1-T12** (tooling): `tests/matrix.txt` per D1 with the per-row limit; `nproc`-derived cores and jobs; QDIMACS
+  fuzz with the gc options in the gate; `--profile` rows that are still 0.00 (T07.4e); members that nothing uses
+  (T04); `-flto=auto`; then the full gate on the final binary.

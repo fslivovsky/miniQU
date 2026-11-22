@@ -84,8 +84,8 @@ specified in ARCH 9.1; each milestone adds its own:
 
 | from | name | options | combined with | counters that must be nonzero |
 |---|---|---|---|---|
-| M1 | `gc` | `--reduceint=2 --tier1glue=0 --gcfrac=0` | default, `-dl`, `-mode=1`, `-mode=2` | `reductions`, `reduced`, `collections`, `relocated` |
-| M1 | `restart` | `--no-luby --rfirst=1 --rinc=100 --depreset=1` | default, `-dl`, `-mode=1 -dl` | `restarts`; with `-dl` also `dependencies`, `depresets` |
+| M1 | `gc` | `--reduceint=N --tier1glue=0 --gcfrac=0`; N = 2 (default), 30 (`-dl`), 100 (`-mode=1`), 10 (`-mode=2`), see the note below | default, `-dl`, `-mode=1`, `-mode=2` | `reductions`, `reduced`, `collections`, `relocated` |
+| M1 | `restart` | `--no-luby --rfirst=1 --rinc=100 --depreset=1`; with `-mode=1 -dl`: `--rfirst=1 --depreset=1` (Luby) | default, `-dl`, `-mode=1 -dl` | `restarts`; with `-dl` also `dependencies`, `depresets` |
 | M2 | `tier` | `--tier1glue=0 --tier2glue=0` and `--tier2glue=1`, each with `--reduceint=2 --gcfrac=0` | default, `-dl` | as `gc`, plus `promoted`, `used` |
 | M2 | `root` | root simplification with every throttle at its minimum | default, `-dl`, `-mode=1` | `rootunits`, `rootstrengthened`, `rootdeleted` |
 | M2 | `min` | `--ccminmode=2`, `--ccminmode=3` (now with proofs) | default, `-dl`, `-mode=1` | `minimized` |
@@ -120,6 +120,20 @@ every conflict while deleting almost every learnt constraint need not
 terminate. The arithmetic growth of `reduceint` (ARCH 9.1) is what keeps `gc`
 terminating.
 
+*Amended after M1 round 1 (STATUS "Coordinator decisions after M1 round 1",
+with the measurements):* the stress options are per row, and a row of
+`tests/matrix.txt` may carry its own timeout limit in an optional sixth
+field (percent, default 2). M1 values: `gc` 2%, `gc-dl` 2%, `gc-mode1` 5%,
+`gc-mode2` 2%, `restart` 2%, `restart-dl` 8%, `restart-mode1-dl` 25%. A
+limit above 2% is allowed only with a measurement showing that the baseline
+(or the closest configuration it has) times out at a comparable rate on the
+same instances, i.e. that the timeouts are a property of the algorithm under
+that schedule and not of the port. The solver limit of the gate is 20 s for
+the `release` binary and 90 s (`-t 90`) for the `asan` binary, which is 7 to
+13 times slower. The extreme setting `--reduceint=2` stays exercised with
+`-dl`, `-mode=1` and `-mode=2` by `tests/fuzz_qdimacs.sh` (verdicts only,
+timeouts counted), which is part of every gate from M1 on.
+
 ### 0.2 Correctness beats everything
 
 Any disagreement (with the baseline, with `tests/qcir_eval.py`, between two
@@ -135,7 +149,21 @@ adds what this section needs). All 376 instances.
 
 #### Fixed run parameters
 
-Every timed run uses `--cores 64-127 --jobs 48 --mem-gb 16`, one core per
+*Amended (machine change, STATUS "Coordinator decisions after M1 round 1"):*
+the instance type changed from 128 to 96 cores after this section was
+written. Every timed run now uses the upper half of the cores
+(`nproc/2 .. nproc-1`), `--jobs nproc/2` and `--mem-gb 8`, one core per job;
+these are the defaults of `bench/run.py`, computed from `nproc`. Every other
+heavy command uses the lower half (`taskset -c 0-$((nproc/2-1))`), at most 16
+parallel jobs. Timings are comparable only between runs of the same instance
+type and harness settings: `baseline-t180`, `baseline-dl-t180` and
+`baseline-t900` (64 jobs on the 128-core machine) serve verdict checks only,
+and each comparison needs a same-machine baseline run tagged
+`baseline-c<NPROC>-<config>-t<TIMEOUT>` whose `meta.json` matches. The
+numbers in the rest of this subsection are the original ones and are kept
+for the record.
+
+Originally: every timed run uses `--cores 64-127 --jobs 48 --mem-gb 16`, one core per
 job. `compare.py` refuses to compare runs whose `jobs`, `mem_gb`, `cores`,
 `timeout` or instance list differ (they are in `meta.json`); the override
 flag prints "NOT COMPARABLE" at the top of the report.
@@ -432,7 +460,10 @@ the baseline's table, with no rejected proof; at the full tier the new
 solver is **not worse** than the baseline (definition in 0.3) in both main
 configurations; modes 1 and 2 pass their quick-tier gate; peak memory not
 higher than the baseline's on any instance by more than 10% (expected to be
-much lower on large files); the port-fidelity report shows no unexplained
+much lower on large files; for instances where the baseline's peak RSS is
+below 64 MB the rule is an absolute excess of at most 16 MB, since there the
+allocator and the learnt-database trajectory dominate: coordinator decision
+after M1 round 1); the port-fidelity report shows no unexplained
 systematic shift; reviewer accepts structure and readability.
 
 Porting notes (behaviour that is easy to lose; each has a test or assertion):

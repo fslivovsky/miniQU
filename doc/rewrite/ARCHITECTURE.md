@@ -774,8 +774,11 @@ are never in a heap and are not counted in `unassigned`.
 
 Scores are EVSIDS (`bump.cpp`): bump by an increment that grows by
 `1/decay` per conflict, rescale on overflow. Initial scores are 0 with
-`--seed=0` (the default: the run is deterministic and ties are broken by
-variable index); with `--seed=s`, `s > 0`, every variable starts with a
+`--seed=0` (the default: the run is deterministic; equal scores are ordered
+by the heap operations alone, exactly as the baseline's MiniSat heap with
+its strict score comparison, so that an unseeded run follows the baseline's
+search as far as the port is faithful: decision after M1 round 1, replacing
+"ties are broken by variable index"); with `--seed=s`, `s > 0`, every variable starts with a
 score drawn uniformly from `[0, 1e-5)` by the PRNG seeded with `s`. This is
 the baseline's `-rnd-init -rnd-seed=s` and is the **only** thing the seed
 changes: it perturbs the first decisions and thereby the whole search, which
