@@ -237,3 +237,79 @@ T01 is NOT finished. State left for whoever restarts T01:
      mostly with `-no-early-tseitin`. Kill the process group on timeout and on exit.
 - Baseline results (`bench/results/baseline-t180`, `baseline-dl-t180`, `baseline-t900`) are complete and
   committed.
+
+## Owner decision: M1-T01 is time-boxed (2026-11-22)
+
+- M1-T01 (test tooling) must be finished by 01:30 on 2026-11-22, 90 minutes after its restart.
+- The corpus thresholds of the T01 spec (>= 70% of search-tier instances with 100 to 10000 baseline
+  conflicts, >= 90% of proofs accepted within 120 s, seeds 1..400) are targets for this task, not gates.
+  The worker reports the numbers it measured, on a smaller sample if necessary, and which targets were
+  missed.
+- For the reviewer: do not block M1 because these T01 targets were missed or measured on a reduced sample,
+  as long as the tooling works (stress configurations exist, the coverage assertion fires, timeouts kill
+  the process tree) and the shortfall is reported honestly. Treat the shortfall as a suggestion for later
+  tuning, not as a blocking item. This relaxation applies to T01 only.
+
+## M1-T01 finished: test tooling (worker, 2026-11-22)
+
+Delivered and validated with the frozen baseline (`/home/ec2-user/miniqu-work/baseline/miniQU`) and the fake
+solvers in `tests/fake/`; no solver code and no checker code was touched. Files: `tests/corpus.py`,
+`corpus_stats.py`, `matrix.txt`, `regress.sh` + `regress.py` (engine), `fuzz_qdimacs.sh`,
+`run_regressions.sh`, `regressions/`, `fake/`.
+
+Fixes of the two defects noted in the pause entry:
+1. `qcir_fuzz.py` did not hang by itself: with `--vars 80` it brute-forces a truth table of 2^80 bits. It now
+   exits with an error above 22 variables unless `--no-expected` is given. The search tier does not use it.
+2. `regress.py` runs every solver, checker and `bench/run.py` child in its own process group
+   (`run_group`), kills the whole group on timeout and on exit, SIGINT or SIGTERM. Verified with a script
+   that forks a sleeping grandchild: nothing survives the timeout.
+
+Search tier (`tests/corpus.py --list-sets`): `qcnf-sat`, `qcnf-mixed`, `qcnf-unsat` (qcir_gen.py `qcnf`),
+`reach-48`, `reach-44` (`reach`); `game`, `synth` and larger `qcir_fuzz.py` instances were dropped (baseline
+needs under 10 conflicts, or no useful spread). Seed selects the set round-robin.
+
+Measured with `taskset -c 0-63 python3 tests/corpus_stats.py --check` (seeds 1..400, baseline, `-verb=1`,
+`conflicts :` line, 20 s timeout; raw numbers in `/home/ec2-user/miniqu-work/regress/final-stats.csv`).
+Instances per conflict bucket:
+
+| default | 0-9 | 10-99 | 100-999 | 1000-9999 | >=10000 | timeout | in [100,10000) | max s |
+|---|---|---|---|---|---|---|---|---|
+| qcnf-mixed | 0 | 0 | 1 | 72 | 7 | 0 | 91% | 0.4 |
+| qcnf-sat | 0 | 0 | 1 | 77 | 2 | 0 | 98% | 0.1 |
+| qcnf-unsat | 0 | 1 | 13 | 45 | 21 | 0 | 72% | 0.4 |
+| reach-44 | 14 | 1 | 36 | 29 | 0 | 0 | 81% | 0.2 |
+| reach-48 | 11 | 4 | 30 | 35 | 0 | 0 | 81% | 0.2 |
+| all | 25 | 6 | 81 | 258 | 30 | 0 | 85% | 0.4 |
+
+| `-dl` | 0-9 | 10-99 | 100-999 | 1000-9999 | >=10000 | timeout | in [100,10000) | max s |
+|---|---|---|---|---|---|---|---|---|
+| qcnf-mixed | 0 | 0 | 9 | 58 | 13 | 0 | 84% | 0.4 |
+| qcnf-sat | 0 | 11 | 38 | 31 | 0 | 0 | 86% | 0.1 |
+| qcnf-unsat | 0 | 0 | 10 | 52 | 18 | 0 | 78% | 1.2 |
+| reach-44 | 6 | 10 | 20 | 44 | 0 | 0 | 80% | 0.8 |
+| reach-48 | 7 | 7 | 16 | 48 | 2 | 0 | 80% | 15.5 |
+| all | 13 | 28 | 93 | 233 | 33 | 0 | 82% | 15.5 |
+
+Requirements: 85% / 82% in range (need 70%); baseline time at most 0.4 s / 15.5 s (need under 20 s; the
+`-dl` maximum is on one `reach-48` instance, so the 20 s solver timeout of `regress.sh` is tight for it);
+Lean-checked binary proofs of the default run: 400 of 400 accepted, longest check 5.4 s (need 90% in 120 s).
+
+Acceptance runs (logs in `/home/ec2-user/miniqu-work/regress/`):
+
+| command | result |
+|---|---|
+| `tests/regress.sh -s 1:100 -M all tests/fake/stat-wrapper.sh` | exit 0, `REGRESSION TESTS PASSED (4 warnings)`; warnings are timeouts of the baseline under the stress-free rows (`noearly` 9, `mode1-dl`, `mode2-dl`, `restart-mode1-dl` 1 each) |
+| same with `tests/fake/zero-stat.sh` | exit 1, `99 problem(s)`, all `counter X is nonzero on 0%` coverage failures, no verdict failure |
+| same with `tests/fake/always-sat.sh` | exit 1, `796 problem(s)`: 697 `wrong verdict SAT, expected UNSAT` plus coverage failures (no stat lines) |
+| `tests/regress.sh -s 1:20 /home/ec2-user/miniqu-work/baseline/miniQU` (old interface) | exit 0, coverage assertion skipped with a note |
+| `tests/run_regressions.sh /home/ec2-user/miniqu-work/baseline/miniQU` | `7 instances, 0 failures` (proofs Lean-checked) |
+| `tests/fuzz_qdimacs.sh BASELINE 1 300 OPT`, OPT = `''`, `-dl`, `-mode=1`, `-mode=2` | `0 failures, 0 timeouts, 600 instances agreed` for the first three; `-mode=2`: `0 failures, 1 timeouts, 599 instances agreed` |
+
+QDIMACS fuzz tiers: tiny `-v 14 -c 50 -s 4 -r 0.6 --min=2 --max=4` (checked against `qcir_eval.py`); large
+`-v 70 -c 300 -s 3 -r 0.8 --min=4 --max=4` (baseline conflicts on seeds 1..30: 275 to 9751, all in
+[100,10000)). No baseline disagreement with itself or the evaluator was found, so `tests/regressions/` holds
+only hand-written instances.
+
+Notes for later tasks: the fake `stat-wrapper.sh` takes its counter list from `tests/matrix.txt`, so a new
+counter name must be added there only. Counter names in the matrix are the interface the new solver's
+`c stat NAME VALUE` output must satisfy (ROADMAP 0.1).
