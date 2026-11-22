@@ -1355,3 +1355,173 @@ the 128-core machine serve verdict checks only.
 - **M1-T12** (tooling): `tests/matrix.txt` per D1 with the per-row limit; `nproc`-derived cores and jobs; QDIMACS
   fuzz with the gc options in the gate; `--profile` rows that are still 0.00 (T07.4e); members that nothing uses
   (T04); `-flto=auto`; then the full gate on the final binary.
+
+## M1-T11: baseline order of equal scores; first-divergence diagnosis; fidelity (worker, 2026-11-22)
+
+Commits 3a414a5 (heap), 0db1458 (rescale), a3afba8 (learnt literal order), aacdc59 (comment) and this STATUS commit.
+Release binary of all measurements below: sha256 `fa6fbf22…` (sources a3afba8; aacdc59 changes a comment only and
+gives the same release binary), copy in `/home/ec2-user/miniqu-work/t11/miniQU-final`. "Before" is the release
+binary of 59b1a69 (`t11/miniQU-before`).
+
+### Part A: the heap (3a414a5)
+
+`Heap::before` is the strict score comparison. Read against `minisat/mtl/Heap.h` and every call site of
+`minisat/core/Solver.cc`, five operations or call sites differed in a way that changes the order of equal scores;
+each now follows the old code, with a one-line comment:
+1. `remove` sifted up and then down; MiniSat's `remove` only sifts down (so the heap property may then be broken, as
+   in the baseline; only `--dl` removes).
+2. `update` (bumping) sifted up and down; MiniSat's `varBumpActivity` calls `decrease`, which only sifts up.
+3. `learn_dependency` backtracked and then recorded the dependency, so the backtrack pushed x and the record removed
+   it again; the old `search` records first (the backtrack then leaves x out), backtracks, then removes x if it is in
+   the heap.
+4. `reset_dependencies` pushed only unassigned variables; the old `resetDependencies` inserts every decision variable
+   (root-assigned ones too).
+5. `decide` under `--dl` returned as soon as no block had an unassigned variable; the old `pickBranchLit` runs the
+   dependency watches and pops the heap until it is empty, so the heap is empty before the initial-cube analysis.
+Equivalent already: push/pop (`insert`, `removeMin`), the child choice of `sift_down`, variable creation (pushed in
+index order into the heap of the block, one heap under `--dl`; the old `initOrderHeaps` inserts in the same order),
+re-insertion in `backtrack` (trail from the top down, same eligibility test), `update_dependency_watches`. The old
+`rebuildOrderHeap` is only called from `simplify`, which the old search never calls: `Heap::build` and `clear` had no
+caller in `src/` and are removed. `test/unit/heap.cpp` now compares 50000 random push/pop/update/remove operations
+with a transcription of the MiniSat heap and pins the tie order (push 0..4, pops 0 4 3 2 1) and the sift-down-only
+`remove`; `test/unit/depend.cpp` tests items 3-5.
+
+### Part B: first divergence
+
+Tools (work dir, not committed): instrumented baseline `/home/ec2-user/miniqu-work/t11/baseline-instr` (copy of
+`baseline-src`, build `t11/baseline-instr-build`), instrumented copy of the new tree made by `t11/instr-new.sh`
+(build `t11/new-instr-build`), `t11/evdiff.py INSTANCE [OPTS]` (first differing event with context). Both print to
+stderr, when `EVENTS` is set: decisions (proof number, level), conflicts (literals@level), each antecedent of the
+analysis, learnt constraints and dependencies, restarts, reductions (with the counts deleted), dependency resets, and
+with `EVTRAIL` every propagated literal with the literal that propagated it. Literals are proof numbers in both
+(the old `variable_names` of gates are the encoder's own numbers). The baseline copy has two switches that undo the
+two deliberate deviations described below: `-proof=/dev/null` and `STOPFIRST=1` (`t11/baseline-aligned.sh` uses both).
+
+Two unintended porting differences were found and fixed (class i):
+- **Learnt literal order** (a3afba8): `Prefix::qreduce` sorted the learnt literals; the old `finishLearnt` reduces
+  in place. The order decides which literal of the backjump level becomes position 1 (the first one of that level),
+  i.e. the second watch, and from there the watch lists and the propagation order. First seen on search-1014 `-dl`
+  at conflict 3 (two clauses in the watch list of literal -3354 in the other order). `qreduce` now keeps the order;
+  `test/unit/original.cpp` pins it.
+- **Rescale** (0db1458, found by reading `varBumpActivity`): the port divided by 1e100, the old code multiplies by
+  1e-100; the products differ in the last bit in about a quarter of the cases (measured on random doubles), which
+  changes ties after a rescale.
+
+After these, the first difference on the instances examined is always one of three **deliberate, documented**
+deviations (class ii; not changed):
+1. **Originals are not simplified** under the root assignment (ROADMAP porting note 1). The baseline without a proof
+   removes root-false literals from originals (MiniSat `addClause`), the port keeps them. With `-proof` the baseline
+   takes the same path as the port. Example: search-1014 default, conflict 1 learns `-19635 1319 1726 2131` (baseline)
+   against `-19635 505 912 1319 1726 2131` (new; 505 and 912 are false at level 0 and part of the reason of 19634).
+   In mode 2 the baseline has no proofs, so this one cannot be aligned there (search-179/180/185/245/285 `-mode=2`
+   differ at conflict 1 or 2 for this reason).
+2. **Propagation stops at the first conflict** (T04, "Behaviour of the old propagate" item 2). After a clause conflict
+   the old `propagate` still runs the cube loop of the same literal and keeps propagating whatever that assigns; this
+   moves cube watches and so changes later propagation orders. Example: search-1014 `-dl`, conflict 105 (baseline
+   `E -2 100 t` after the clause conflict; new: completion `100@32`); the decisions first differ at conflict 497.
+   Default-mode examples (with `-proof`): search-245 conflict 3, search-285 conflict 2, search-190 conflict 5,
+   search-244 conflict 2, search-243 conflict 1.
+3. **Reduction policy** (D4 / T07.4c, porting note 7, ARCH 4.3): the port deletes half of the *candidates* (the
+   baseline: half of *all* learnt constraints of the kind, counted with the protected and the glue-2 ones, as long
+   as candidates remain), breaks ties by size instead of activity, and stores learnt units irredundant, so they are
+   neither counted in the trigger `#learnt - #assigned >= max_learnts` nor in the halves. Example: search-243 default
+   (aligned baseline), reduction at conflict 730 deletes 63 clauses (baseline) against 60 (new); the first difference
+   is at conflict 737 (a clause the baseline deleted propagates in the new solver).
+
+With the aligned baseline (both switches) the event streams of these instances are **identical to the end**
+(including every antecedent of every analysis): default search-245, -285, -190, -244 (755-1010 conflicts); `-dl`
+search-195, -221, -196, -269, -249 (185-1230 conflicts); `-mode=1` search-220 (1002); `-mode=2` search-282, -291,
+-156. Of 66 non-identical runs examined with the aligned baseline (`bench/results/m1-t11-fidelity/firstdiff.csv`:
+36 `-dl` runs and the 10 with the fewest conflicts of default, `-mode=1`, `-mode=2`), 60 first differ after at least
+one reduction; the other 6 are the mode-2 runs of deviation 1 above and search-158 default, where the baseline
+reduces at conflict 726 and the new solver does not (the learnt units of the trigger, deviation 3).
+
+For the coordinator (alignment not done, per the task): deviation 3 is cheap to align while the old policy lives:
+count the learnt units in the trigger of `reducing ()` (one term) and take the halves over all learnt constraints
+of the kind, as the baseline does (a few lines in `reduce.cpp`); the size tie-break cannot follow the baseline
+without constraint activities, and M2.2 replaces the whole policy anyway. Deviation 2 is a few lines in
+`propagate_trail` (run the cube loop of the conflicting literal and go on propagating what it assigns, keeping the
+first conflict), but T04 documented the literal old behaviour as able to overwrite the conflict and to assign the
+literal of a pending completion, and ARCH 7.2 defines `propagated` by the first-conflict rule. Deviation 1 would need
+a second, simplifying path for originals without a proof, against porting note 1. Not examined: ccminmode 3 sorts
+its keys with `std::sort` where the old code uses MiniSat's `sort` (both unstable, so equal keys may come out in
+another order); the ccmin3 rows were not part of the diagnosis.
+
+### Part C: measurements
+
+**Fidelity**, search seeds 151-300, seed 0, 60 s, conflicts new / baseline over the instances both solved (all 150
+in every row; no timeouts), `bench/results/m1-t11-fidelity/` (`run.sh`, `summary.py`, CSVs; lower half, 16 jobs,
+counts only):
+
+| binary | config | geo. mean | min | max | identical |
+|---|---|---|---|---|---|
+| before (59b1a69) | default | 0.997 | 0.018 | 9.06 | 9 |
+| before | -dl | 1.006 | 0.040 | 34.3 | 3 |
+| before | -mode=1 | 0.899 | 0.001 | 4.62 | 1 |
+| before | -mode=2 | 1.114 | 0.086 | 31.7 | 11 |
+| after | default | 0.955 | 0.193 | 2.49 | 47 |
+| after | -dl | 1.004 | 0.122 | 6.07 | 55 |
+| after | -mode=1 | 0.957 | 0.128 | 4.87 | 22 |
+| after | -mode=2 | 0.982 | 0.112 | 4.53 | 44 |
+| after, vs aligned baseline | default / -dl / -mode=1 / -mode=2 | 0.953 / 0.995 / 0.985 / 1.006 | | | 63 / 93 / 62 / 51 |
+
+(An intermediate binary with Part A and the rescale fix only had 26 / 31 / 1 / 44 identical counts.)
+
+**Smoke** (`python3 bench/run.py --solver .../build/release/miniQU --tag m1-t11-smoke --timeout 120 --jobs 33 --cores
+48-95 --mem-gb 8 --instances bench/smoke.txt --proof-check --proof-cores 0-47`; `--proof-cores` added so that the
+checker stays on the lower half): **33/33 solved**, every verdict equal to `bench/smoke-expected.csv`, **33/33 proofs
+accepted** by the Lean checker, longest run 3.4 s. **`jctc1-pass` solved at seed 0 in 0.08 s with 623 conflicts and
+`jctc9-pass` in 1.06 s with 3858 conflicts, both exactly the baseline's counts** (baseline 623 in 0.07 s, 3858 in 1.2
+s); D2's accepted gap is gone.
+
+**noearly** (T10's note; `bench/results/m1-t11-fidelity/noearly.sh`, search seeds 1001-1200, 20 s, seed 0, both
+binaries on cores 48-95, 24 seeds at a time): timeouts **new 27, baseline 26** (1 only new, 0 only baseline; no verdict
+differs). T10 measured 30 against 22 on the old machine. search-1014 `-no-earlytseitin`: 11 conflicts, as the baseline.
+
+**Header table** (`bench/header_measure.py --new t11/miniQU-final --tag t11`, results `bench/results/header-t11/`):
+`1.3.qcir` props/s ratio **1.07** and `1.4.qcir` **1.08**, with **identical conflict counts** (313 / 313 and 300 /
+300); so the 0.72 of h12 was a different search, not slower propagation, and no profile was needed. `amba2f9n.sat`:
+RSS 22 MB against 18 MB (ratio 1.20, 4 MB above the baseline, inside D5's 16 MB rule), conflicts new 1586498,
+baseline 1480707. All 10 instances of the "largest" group now have identical conflict counts (props/s ratios
+1.02-1.24). Geometric means new/baseline: largest props/s 1.109, RSS 0.792, CPU 0.855; propagations group 1.319,
+1.023, 0.640; all 1.209, 0.900, 0.739. **The instance set is not the same as h12's**: the script skips instances
+that either binary does not solve in 180 s, and the new binary now solves `jctc17-vals-0,2-pass` and
+`jctc18-vals-0,2-pass` (larger than `10.2` and `8.1`, which h12 took in their place) and needs 194 s for
+`bt-2x5_17.ig` (replaced by `klieber2017q-088-22-eq`). The three h12 instances measured separately with the same
+function and a 600 s limit (`logs/t11/header-missing.txt`): `10.2` props/s ratio 1.03 (204 / 204 conflicts, RSS 314 /
+413 MB), `8.1` 0.99 (723 / 723, RSS 169 / 165 MB), `bt-2x5_17.ig` 1.16 (4117304 / 2097002 conflicts, RSS 42.5 / 29.5 MB,
+194 s / 114 s).
+
+### Acceptance (final binary; logs `/home/ec2-user/miniqu-work/logs/t11/`)
+
+- Clean rebuilds (`cmake --build --preset P --clean-first`) of release, debug, asan, release-clang: no compiler
+  warning (only the known `lto-wrapper` note in release); `ctest --preset P`: 36/36 pass in each.
+- `tests/regress.sh -S -s 1:300 -M all R`: **0 wrong verdicts, 0 rejected proofs**, coverage assertions hold in every
+  row. Stress rows over the old 2% limit, as expected (matrix unchanged, D1/T12): gc-mode1 45/150, restart-dl 6/150,
+  restart-mode1-dl 63/150 timeouts. Normal-row timeouts (warnings): mode1-dl 5, mode2-dl 3, dl-ccmin3 1, noearly 31,
+  gc-mode2 1; checker timeouts: mode1 1, mode1-dl 15, noearly 1, gc-mode1 12.
+- `tests/regress.sh -S -s 1:100 -M all -t 90 A`: **0 wrong verdicts, 0 rejected proofs, 0 sanitizer reports**,
+  coverage assertions hold. Stress rows over the old 2% limit (expected, matrix unchanged): gc-mode1 19/50,
+  restart-mode1-dl 20/50, restart-dl 3/50, gc-mode2 2/50; gc-dl 1/50 (at the limit, not over it). Normal-row timeouts
+  (warnings): mode1-dl 9, mode2-dl 1, noearly 10. No checker timeouts; every finished instance of a proof row had
+  its proof accepted.
+- `tests/fuzz_qdimacs.sh R 1 300 OPT` for OPT '', `-dl`, `-mode=1`, `-mode=2`: 0 failures, 0 timeouts, 600 instances
+  agreed in each. `tests/run_regressions.sh R`: 7 instances, 0 failures.
+
+### Notes and open points
+
+- Kept in the work dir: the instrumented baseline `/home/ec2-user/miniqu-work/t11/baseline-instr` (build
+  `baseline-instr-build`), `instr-new.sh` (regenerates the instrumented copy of the new tree from the working tree;
+  the copy itself was deleted), `evdiff.py`, `firstdiff.py`, `baseline-aligned.sh`, and the raw fidelity CSVs
+  (`fid-A.csv` = intermediate binary). Event output and proof files were deleted.
+- `bench/header_measure.py` still pins its runs to cores 0-7 (T12 derives cores from `nproc`); it ran with nothing
+  else on the machine. The fidelity runs and the instrumented runs used the lower half (counts only); smoke and noearly
+  ran on cores 48-95.
+- The heap's `remove` reproduces MiniSat's sift-down-only removal, so with `--dl` the heap property can be broken
+  after a dependency is learnt, exactly as in the baseline: decisions stay correct (any popped variable is
+  checked), only which variable comes first is affected. ARCH 7.3 already says "exactly as the baseline's MiniSat
+  heap"; no ARCH statement became false.
+- D2's accepted gap (`jctc9-pass` at seed 0) no longer exists; D5's question about `1.3`/`1.4` is answered (same
+  search, ratio 1.07/1.08).
+- The noearly row still has 31 of 150 timeouts in the release regress run (warnings only); the baseline has the same
+  rate on seeds 1001-1200 (26 of 200 against 27).
