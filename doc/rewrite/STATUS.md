@@ -618,3 +618,96 @@ Known issues / for later tasks:
 - No `Profiles` member yet (no `START`/`STOP` in the search); limits `lim.conflicts` / `lim.decisions` exist in
   `limit.hpp` but no option sets them, so the loop checks only `terminated`.
 - Without reduce, memory grows with the learnt constraints (651 MB after 4 s on `5.1-2.qcir`).
+
+## M1-T06 finished: proofs (worker, 2026-11-22)
+
+Built (formatted, no compiler warnings with GCC and Clang): `src/proof.{hpp,cpp}` (`Proof`: literal translation to
+proof numbers, fan-out to tracers, `strengthen`, `conclude`), `src/qlrup_tracer.{hpp,cpp}` (text and binary QLRUP
+through `OutputFile`), `src/trace_tracer.{hpp,cpp}` (older `-trace` format), `src/checker.{hpp,cpp}` (online
+`Checker`), the logging points of ARCH 8.2 that exist in M1 (originals, reduction of originals, complementary units,
+learnt and empty constraints, `mark_garbage` deletions, initial cubes), `Solver::connect_tracer` / `flush_proof`, and
+`--proof=FILE` / `-proof=FILE`, `-proof-binary`, `--trace=FILE`, `--check` in the app. Base additions:
+`Constraint::set_id`, `OutputFile::put_decimal`, `stats.checked` (steps the `Checker` replayed). Unit tests `unit-tracer`
+(text, binary and trace bytes of a fixed step list, ids/literals above 127; QLRUP model cube is fatal), `unit-checker`
+(accepts plain chains, a no-clash premise, a chain that needs reduction after every step, model cubes; rejects a missing
+literal, a missing/deleted premise, the other kind, two clashing literals, a reused id, no premises, complementary
+literals, unknown variables, wrong deletions, a non-empty conclusion; the gate variable of each kind at its own prefix
+position), `unit-proof` (the exact step sequence of originals with reductions and complementary units, ids equal
+without a proof, `Proof::strengthen` through the `Checker`, solving through the API with learnt clauses and with model
+cubes). ctest `fuzz` and `run-regressions` now check proofs with the Lean checker (`-n` dropped).
+
+Acceptance (all with `taskset -c 0-63`; logs in `/home/ec2-user/miniqu-work/logs/t06/`; R = release, A = asan):
+
+| command | result |
+|---|---|
+| build + `ctest --preset P`, P = release, debug, asan, release-clang | no warnings (only the known `lto-wrapper: using serial compilation` linker note); 27/27 tests pass each |
+| `tests/regress.sh -S -s 1:300 -M default R` (binary proofs) | PASSED: 300 proofs checked by Lean, 0 rejected, 0 wrong verdicts, 0 solver timeouts, 0 checker timeouts |
+| `tests/regress.sh -S -s 1:60 -M default -P '' R` (text proofs) | PASSED: 60 proofs checked, 0 rejected, 0 timeouts |
+| `tests/regress.sh -S -s 1:100 -M default A` | PASSED, 0 aborts; `checked` = 152367 = `conflicts` summed over the search tier, nonzero on 100% of the instances (every learnt and empty constraint replayed); 100 Lean-checked proofs |
+| `tests/run_regressions.sh R` (with proofs) | `7 instances, 0 failures` |
+| `qlrup-trim` on 20 new proofs (corpus search seeds 401-420, text and binary) | 40/40 trimmed proofs and their originals accepted by Lean (11 false, 9 true); trimmed to 2%-100% of the size |
+| smoke set: `bench/run.py --tag m1-t06-smoke-proof --timeout 60 --jobs 32 --cores 64-95 --proof-check --proof-max-solve-sec 60` | 31/33 solved (the same two jctc instances as in T05 time out), verdicts equal `bench/smoke-expected.csv`, **31/31 proofs accepted** (Lean total 64.7 s, largest proof 27.9 MB); proof files deleted; `bench/results/m1-t06-smoke-proof/` |
+
+Byte compatibility: on all six `.qcir` instances of `tests/regressions/` the new text and binary proofs are
+byte-identical to the baseline's (`cmp`; the searches coincide there). The format of every step is also pinned by the
+golden bytes of `unit-tracer`.
+
+Proof overhead (binary proof vs none, R pinned to core 70, three runs each, median wall seconds):
+
+| instance | no proof | binary proof | overhead | proof size |
+|---|---|---|---|---|
+| test_5_5_snaky.pg-7.qcir | 5.41 | 5.53 | +2.1% | 27.5 MB |
+| 9.1.qcir | 1.98 | 2.10 | +6.1% | 27.9 MB |
+| hadw10-11.qcir | 1.82 | 1.89 | +4.2% | 17.8 MB |
+| 9.3.qcir | 1.55 | 1.58 | +2.3% | 10.5 MB |
+| lift_gr1+2.tlsf.qcir | 1.48 | 1.51 | +1.7% | 7.9 MB |
+
+`-trace`: validated on 40 QDIMACS instances (`qbfuzz.py` seeds 1-20 with the tiny and large parameters of
+`tests/fuzz_qdimacs.sh`) against the baseline's trace of the same instance: every line of both files matches one of the
+two old line forms (`^id [01] (lit )*0 (premise )+0 $` and `^id [01] (lit )*0 0$`), ids are consecutive, every premise
+refers to an earlier id of the same kind (baseline: or to an original clause position); verdicts equal. On
+`prenex-pair.sat.qdimacs` the derived and initial-cube lines are identical to the baseline's. 8 QCIR traces checked for
+the same grammar. Signals: SIGINT after 2 s on `jctc1-pass.qcir` with `--proof` ends with INDETERMINATE, exit 0, and a
+proof file that ends with a complete step. `--check` in the release build: replays every step (`checked` = `conflicts`
+on three smoke instances) and runs `check_invariants` at every restart; with `--proof` the written proof is still
+accepted.
+
+Decisions and deviations (ARCH 8.1 amended in the same commit where marked):
+- **Proof API** (ARCH 8.1 amended): originals are logged only through `add_original (id, kind, gate, lits)`, since an
+  original is logged before reduction and is never the stored constraint when reduction shortens it; a `Constraint`
+  overload would be dead code. `add_derived_empty` is `add_derived (id, kind, {}, chain)`, and the steps whose
+  constraint is not stored take the id explicitly, so that `next_id` is consumed by the call site whether or not a proof
+  is written (`unit-proof` checks this). `new_constraint` takes the id as its first argument. `strengthen` takes its
+  fresh id from `next_id`; its M2 caller must renumber the same way without a proof.
+- **`conclude`** is called by `found_empty`; `Proof` remembers the id of the last empty constraint it logged (an empty
+  original, a reduction to empty, two complementary units, or an empty learnt constraint) and flushes every tracer.
+  Steps for originals that arrive after the formula was decided are still logged, as by the old solver.
+- **Default `Checker`** (ARCH 8.1 amended): connected by `Solver` with the first original (the prefix is then complete)
+  if `--check`, or in builds with assertions if the caller connected no tracer and `ccminmode == 0`; never in mode 2.
+  ARCH said "no QLRUP file"; `Solver` cannot tell tracers apart without RTTI, so a debug run with only `--trace` is not
+  checked by default (use `--check`).
+- **QDIMACS proof numbers**: `Solver::add_var` with proof number 0 now uses the user variable number (`miniqu.hpp`), so
+  the trace names QDIMACS variables as the file does and the `Checker` works on QDIMACS. The encoder is unchanged.
+- **Initial cubes** get a fresh id (`next_id++`) each time the buffer is filled; the `Checker` keeps each one live as a
+  premise-free cube (they are never deleted: nothing in the old solver deleted them either).
+- **`-trace` format** (ARCH 8.1 amended), intentional narrowings/changes for the coordinator to confirm: original
+  constraints are written as premise-free lines (the old trace wrote none and its premises meant QDIMACS file positions;
+  the new ids follow the proof, where a reduced original takes two ids and a tautology none, so a trace without them
+  could not be interpreted); reductions of originals appear as derived lines; deletions are not written (as before);
+  QCIR literals are proof numbers (the old trace used internal aliases 2g/2g+1 for gates and gave all QCIR clauses one
+  id, i.e. it never worked for QCIR); the old `u` reduction lines existed only in debug builds of the old solver and
+  are not reproduced.
+- **Messages**: "Proofs are only available for QCIR input in modes 0 and 1." and "Proof logging does not support terms
+  obtained from satisfying assignments." keep their text but go to stderr through `fatal` (`miniQU: error: ...`, exit 1)
+  instead of the old `ERROR! ...` (the first one on stdout). Unopenable proof/trace files are fatal errors. The
+  `--proof` check uses the input name, so it applies before parsing, like the old binary.
+- `--check` disabling minimisation (ARCH 8.1, M1) is not implemented: minimisation does not exist yet (T09), and
+  `--ccminmode` is still rejected by the app.
+
+Notes for later tasks:
+- T07: `mark_garbage` already emits the deletion; `reduce` needs no proof code. The model-cube buffer keeps its current
+  id across collections (relocation copies the header).
+- T08/T09: modes 1 and 2 must fill `chain` in their analyses; `connect_checker` already skips mode 2. Minimisation
+  must either add its reasons to the chain (M2.3) or stay off while a tracer is connected.
+- The `tests/regress.sh` smoke step is still vacuous after its first run (T05 note); the smoke numbers above come from a
+  fresh `bench/run.py` run.

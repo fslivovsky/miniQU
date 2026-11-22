@@ -1,0 +1,18 @@
+{
+  "solver": "/home/ec2-user/miniqu-work/build/release/miniQU",
+  "solver_sha256": "722b9ec88705c1724996224128748752000db9396d693abea8bad90df67ba5b6",
+  "solver_git": "60af2c6",
+  "args": "",
+  "proof_args": "-proof-binary",
+  "timeout": 60.0,
+  "mem_gb": 8,
+  "jobs": 32,
+  "cores": "64-95",
+  "proof_check": true,
+  "proof_max_solve_sec": 60.0,
+  "checker": "/home/ec2-user/qu-check/.lake/build/bin/qlrup-check",
+  "date": "2026-11-22T02:12:06",
+  "host": "ip-172-31-34-83.eu-west-2.compute.internal",
+  "cmdline": "bench/run.py --solver /home/ec2-user/miniqu-work/build/release/miniQU --tag m1-t06-smoke-proof --timeout 60 --jobs 32 --cores 64-95 --instances 3.2.qcir 5-5-6-10-3-7-EdAd.qcir 5-5-6-7-3-60-EdAd.qcir 5-5-6-9-3-3-EdAd.qcir 9.1.qcir 9.3.qcir DW-sat-08-22-1.qcir bt-2x4_13.ig.qcir bt2nd-2x4_8.ig.qcir chess_solving_mate_in_2_2002_WCCC-OPEN-45_01.qcir chess_solving_mate_in_2_2008_BEL-CH-16B_08.qcir chess_solving_mate_in_2_2011_ISC-7B_01.qcir chess_solving_mate_in_3_2010_UKR-CH_04.qcir 'ci.e#1.a#3.E#40.A#60.c#400.w#2.s#4.asp.qcir' 'ci.e#1.a#3.E#40.A#60.c#416.w#2.s#3.asp.qcir' 'ci.e#1.a#3.E#40.A#60.c#432.w#2.s#8.asp.qcir' connect-3x3_9_connect3.ig.qcir hadw10-11.qcir hadw6-7.qcir jctc1-pass.qcir jctc13-fail.qcir jctc4-fail.qcir jctc9-pass.qcir lift_gr1+2.tlsf.qcir load_balancer5.tlsf.qcir round_robin_arbiter3.tlsf.qcir sc-ungrounded-1x3X3x2_1.qcir test_5_5_L.pg-7.qcir test_5_5_el.pg-7.qcir test_5_5_elly.pg-7.qcir test_5_5_fatty.pg-7.qcir test_5_5_snaky.pg-7.qcir test_5_5_tippy.pg-7.qcir --proof-check --proof-max-solve-sec 60 --proof-timeout 600 --proof-dir /home/ec2-user/miniqu-work/proofs/smoke",
+  "note": ""
+}

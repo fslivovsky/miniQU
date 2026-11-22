@@ -826,15 +826,25 @@ translates internal literals to proof numbers, forwards to every connected
 tracer, and offers the composite operations the solver needs so that call
 sites stay one line:
 
-- `add_original (c, gate)`; `add_derived (c, chain)`;
-  `add_derived_empty (kind, chain)`
-- `delete_constraint (c)`
+- `add_original (id, kind, gate, lits)` (an original is logged as given,
+  before reduction, so it is never a stored `Constraint`)
+- `add_derived (c, chain)`, and `add_derived (id, kind, lits, chain)` for
+  steps whose constraint is not stored: the reduction of an original and
+  the empty constraint (empty `lits`)
+- `delete_constraint (c)`, and the same with `(id, kind, lits)` for the
+  original replaced by its reduction
 - `strengthen (c, new_lits, chain)`: derive the shortened constraint under a
-  fresh id, delete the old id, store the new id in `c`
-- `flush ()`, `conclude (kind)`
+  fresh id (`next_id++`), delete the old id, store the new id in `c`; the
+  M2 caller renumbers `c` the same way when no proof is written
+- `add_model_cube (c)`, `flush ()`, `conclude (kind)` (called by
+  `found_empty`; passes the id of the last empty constraint logged and
+  flushes every tracer)
 
 Ids are allocated by `Internal` (`next_id`, starting at 1) for every
-constraint whether or not a proof is written. Tracers shipped: `QlrupTracer`
+constraint whether or not a proof is written; `new_constraint` takes the
+id as an argument, and every initial cube gets a fresh one.  Literals are
+proof numbers; a QDIMACS variable (`add_var` with proof number 0) has its
+own number, so the trace and the `Checker` work for QDIMACS too. Tracers shipped: `QlrupTracer`
 (text/binary, `doc/proof-format.md`), `TraceTracer` (old `-trace` format),
 `Checker`.
 
@@ -843,9 +853,12 @@ of resolutions with at most one clashing literal, then reduction; on failure
 the variant with reduction after every step), checks that every referenced id
 is live and of the right kind, and aborts with the offending step. It cannot
 validate original steps against the circuit (the Lean checker does). It is on
-by default in `debug`/`asan` builds whenever no QLRUP file is requested, so
-that every fuzz run exercises proof generation, and is available as `--check`
-in all builds. M1 only: minimisation is switched off while a tracer is
+by default in `debug`/`asan` builds whenever the caller connected no tracer
+(as built: "no QLRUP file" became "no tracer at all", since `Solver` cannot
+tell tracers apart; `--check` adds it to any), so that every fuzz run
+exercises proof generation, and is available as `--check` in all builds.
+`Solver` connects it with the first original, when the prefix is complete;
+it counts replayed steps in `stats.checked`. M1 only: minimisation is switched off while a tracer is
 connected (7.5), so the default-on `Checker` is *not* connected when
 `ccminmode > 0` (otherwise debug/asan builds would never minimise); an
 explicit `--check` wins and disables minimisation. M2.3 removes both rules. Its scope by input and mode:
@@ -857,6 +870,10 @@ explicit `--check` wins and disables minimisation. M2.3 removes both rules. Its 
 
 `add_model_cube`: `QlrupTracer` reports a fatal error (not expressible),
 `TraceTracer` writes a step without premises, `Checker` as in the table.
+`TraceTracer` also writes original constraints as premise-free steps (the
+old trace wrote none and numbered QDIMACS clauses by file position, which
+the proof ids do not reproduce) and writes no deletions
+(`trace_tracer.cpp`).
 
 ### 8.2 Where steps are logged
 
