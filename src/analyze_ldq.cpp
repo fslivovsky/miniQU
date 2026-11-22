@@ -39,8 +39,9 @@
 // not apply to long-distance resolvents (the old code calls it only from
 // the other two analyses).
 //
-// No proof: long-distance steps are not expressible in QLRUP, '--proof' is
-// rejected in mode 2 and the internal 'Checker' is not connected.
+// No proof: long-distance steps are not expressible in QLRUP or the trace
+// format, so no tracer is connected in mode 2 ('--proof' and '--trace' are
+// rejected at start-up, the internal 'Checker' is not connected).
 
 #include "internal.hpp"
 
@@ -270,7 +271,7 @@ void LongDistanceAnalyzer::clear () {
 } // namespace
 
 void Internal::analyze_ldq (Ref conflict) {
-  assert (opts.mode == 2);
+  assert (opts.mode == 2 && !proof);
   const size_t levels = (size_t) decision_level () + 1;
   if (level_count.size () < levels) {
     level_count.resize (levels, 0);
@@ -279,9 +280,6 @@ void Internal::analyze_ldq (Ref conflict) {
   ldq.at.resize (prefix.blocks.size ());
   ldq.position.resize (2 * (size_t) prefix.size (), -1);
 
-  // Only a '--trace' tracer can be connected; it gets the learnt steps
-  // without antecedents (the old solver traced none in mode 2).
-  chain.clear ();
   const Kind kind = deref (arena, conflict).kind ();
   LOG (conflict, "analyzing");
   LongDistanceAnalyzer analyzer (*this, kind);

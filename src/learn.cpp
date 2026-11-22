@@ -38,8 +38,7 @@
 // Proof: the learnt constraint, or the empty one, is a derived step with
 // the chain collected by the analysis (conflict id, then the reason ids in
 // resolution order).  Reduction is part of the step, so INV-DERIVED holds.
-// A dependency derives nothing.  Mode 2 writes no proof; a '--trace' gets
-// its learnt constraints without antecedents.
+// A dependency derives nothing.  Mode 2 has no tracer.
 
 #include "internal.hpp"
 #include "proof.hpp"

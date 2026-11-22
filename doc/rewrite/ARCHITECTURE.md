@@ -664,8 +664,17 @@ literal or a secondary literal *to the left of* the watched primary (the
 literals that can block it), and it moves watches of position 0 as well. It
 therefore tolerates stale watch entries (a list entry whose constraint no
 longer has that literal at position 0 or 1) and skips them. This is the old
-`propagateLDQ` and is ported unchanged; the stale-entry tolerance is confined
-to `propagate_ldq.cpp`.
+`propagateLDQ` and is ported unchanged, with one exception (M1-T09): when
+the old position 0 comes back as position 1 the old code pushed a second
+entry into a list that still held one; the port does not. Originals are
+watched by their two leftmost literals, as in the old solver, which may
+both be secondary (or a primary one with a secondary one right of it);
+until a watch moves this can miss a unit or a conflict, never cause a wrong
+one. The stale-entry tolerance is confined to `propagate_ldq.cpp`, except
+that in mode 2 garbage collection removes garbage from *every* watch list
+(a stale entry of a deleted constraint can sit in a list that deleting did
+not smudge) and `check_invariants ()` accepts such entries and checks the
+long-distance unit rule for constraints whose watches are as above.
 
 ---------------------------------------------------------------------------
 
@@ -803,8 +812,17 @@ QLRUP checker replays.
 `learn.cpp`: minimisation (if enabled), `qreduce`, placing the asserting
 literal at position 0 and a literal of the backjump level at position 1,
 glue, proof step, allocation, watches, backjump, assignment, score decay.
+`analyze_ldq` places positions 0 and 1 itself and enters at
+`learn_watched`; long-distance resolvents are never minimised (the old code
+called minimisation only from the other two analyses), so `--ccminmode` has
+no effect in mode 2.
 The old code disabled minimisation when writing proofs because the chain did
-not cover the removed literals; M2 fixes that (ROADMAP).
+not cover the removed literals; M2 fixes that (ROADMAP). (As built in M1-T09:
+the old code disabled only `ccmin-mode=3` under a proof or trace and ran
+modes 1 and 2 regardless; the port disables all three while any tracer is
+connected.) `stats.minimized` counts the literals minimisation removes
+beyond those the following `qreduce` removes anyway, which is what the old
+`conflict literals ... deleted` line measures.
 
 Root-level literals are kept in learnt constraints in M1 as in the old code.
 M2 may resolve them away when their reason has the same kind (adding the unit
@@ -917,7 +935,9 @@ truncated proof of an unfinished run is worthless either way).
 
 Proof support matrix: QCIR input, modes 0 and 1, with or without `--dl`.
 Requests outside it (QDIMACS input, mode 2) are rejected at start-up with the
-old error message.
+old error message. `--trace` in mode 2 is rejected too (M1-T09; the old
+solver accepted it but traced no learnt constraint there, so the trace was
+incomplete), and `Solver` refuses any tracer in mode 2 (`REQUIRE`).
 
 ---------------------------------------------------------------------------
 

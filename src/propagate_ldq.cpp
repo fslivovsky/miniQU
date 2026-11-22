@@ -103,7 +103,8 @@ template <Kind K> Ref Internal::propagate_ldq_watches (Lit p) {
           continue;
         c[1] = l;
         c[k] = lost;
-        // The old position 0 still has its entry, which is valid again.
+        // If the old position 0 comes back as position 1, its entry is
+        // valid again and is not duplicated.
         if (l != first)
           watches (K, watch_key (K, l)).push_back (kept);
         return true;

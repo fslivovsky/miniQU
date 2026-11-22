@@ -10,7 +10,8 @@
 // prefix is complete: always with '--check', and by default in builds with
 // assertions when no tracer was connected by the caller (ARCHITECTURE 8.1;
 // in M1 also only without minimisation).  Long-distance steps (mode 2) are
-// not replayable, so it is never connected there.
+// not expressible in any tracer's format, so no tracer may be connected
+// there.
 
 #include "checker.hpp"
 #include "contract.hpp"
@@ -66,8 +67,10 @@ struct Solver::Impl {
 
   void connect_checker () {
     const Options &opts = internal.opts;
-    if (opts.mode == 2)
+    if (opts.mode == 2) {
+      REQUIRE (!proof, "no tracer can follow mode 2");
       return;
+    }
     if (opts.check || (assertions_enabled && !proof && !opts.ccminmode))
       connect (std::make_unique<Checker> (internal));
   }

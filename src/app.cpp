@@ -18,9 +18,11 @@
 // Proofs: '--proof=FILE' writes a QLRUP proof (binary with
 // '--proofbinary'), only for QCIR input outside mode 2 (checked before
 // parsing, with the old message); '--trace=FILE' writes the older trace
-// format for any input. Both files are opened here and handed to the solver
-// as tracers before the formula is added.  A signal only stops the search;
-// the proof is flushed after 'solve' returns (ARCHITECTURE 8.2).
+// format for any input, also outside mode 2 (the old solver accepted it in
+// mode 2 but traced no learnt constraint there).  Both files are opened
+// here and handed to the solver as tracers before the formula is added.  A
+// signal only stops the search; the proof is flushed after 'solve' returns
+// (ARCHITECTURE 8.2).
 
 #include "encode.hpp"
 #include "logging.hpp"
@@ -147,9 +149,12 @@ void App::connect_tracers (Solver &solver) const {
     solver.connect_tracer (std::make_unique<QlrupTracer> (
         open_output (*proof_path, "proof"), opts.proofbinary));
   }
-  if (trace_path)
+  if (trace_path) {
+    if (opts.mode == 2)
+      fatal ("Traces are only available in modes 0 and 1.");
     solver.connect_tracer (
         std::make_unique<TraceTracer> (open_output (*trace_path, "trace")));
+  }
 }
 
 void App::read_input (Solver &solver) {
