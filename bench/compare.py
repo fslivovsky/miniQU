@@ -11,52 +11,68 @@ cactus-plot data (sorted solve times per tag) as CSV.
 """
 import argparse
 import csv
-import json
 import os
 import sys
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-SOLVED = ("SAT", "UNSAT")
+from benchlib import DEFAULT_RESULTS, SOLVED, Run, coverage_table, table
+import paired
+
 MIN_TIME = 0.1  # seconds; times below this are clamped when computing ratios
-
-
-def load(results_dir, tag):
-    d = os.path.join(results_dir, tag)
-    try:
-        with open(os.path.join(d, "results.csv"), newline="") as f:
-            rows = {r["instance"]: r for r in csv.DictReader(f)}
-    except OSError:
-        sys.exit("compare.py: no results for tag %r in %s" % (tag, d))
-    try:
-        with open(os.path.join(d, "meta.json")) as f:
-            meta = json.load(f)
-    except OSError:
-        meta = {}
-    return rows, meta
 
 
 def wall(r):
     return float(r["wall"])
 
 
-def table(header, rows):
-    out = ["| " + " | ".join(header) + " |",
-           "|" + "|".join(["---"] + ["---:"] * (len(header) - 1)) + "|"]
-    out += ["| " + " | ".join(str(c) for c in row) + " |" for row in rows]
-    return out
+def write(text, path):
+    if path:
+        with open(path, "w") as f:
+            f.write(text)
+    else:
+        sys.stdout.write(text)
+
+
+def main_paired(args, tags_a, tags_b):
+    runs_a = [Run(args.results_dir, t) for t in tags_a]
+    runs_b = [Run(args.results_dir, t) for t in tags_b]
+    reasons = paired.incomparable_reasons(runs_a, runs_b)
+    if reasons and not args.force:
+        sys.stderr.write("compare.py: the run sets cannot be compared (--force overrides):\n")
+        sys.stderr.writelines("  %s\n" % r for r in reasons)
+        sys.exit(3)
+    text, comparison = paired.report(runs_a, runs_b, reasons, args.top * 3)
+    write(text, args.out)
+    sys.exit(2 if paired.problems(runs_a + runs_b) else 0)
 
 
 def main():
-    ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("tags", nargs="+")
-    ap.add_argument("--results-dir", default=os.path.join(HERE, "results"))
+    ap = argparse.ArgumentParser(
+        description=__doc__.split("\n\n")[0],
+        usage="compare.py TAG [TAG ...] [options]\n       compare.py --paired A_TAGS -- B_TAGS [options]")
+    ap.add_argument("tags", nargs="*")
+    ap.add_argument("--paired", action="store_true",
+                    help="A_TAGS -- B_TAGS: two run sets (one tag per seed), paired statistics")
+    ap.add_argument("--force", action="store_true", help="paired: compare even if the limits or seeds differ")
+    ap.add_argument("--results-dir", default=DEFAULT_RESULTS)
     ap.add_argument("--out", help="write markdown here instead of stdout")
     ap.add_argument("--cactus", help="write cactus-plot data CSV here")
     ap.add_argument("--top", type=int, default=10, help="rows in speedup/regression tables")
-    args = ap.parse_args()
+    argv = sys.argv[1:]
+    tags_b = []
+    if "--" in argv:
+        split = argv.index("--")
+        argv, tags_b = argv[:split], argv[split + 1:]
+    args = ap.parse_args(argv)
+    if args.paired:
+        if not args.tags or not tags_b:
+            ap.error("--paired needs A_TAGS -- B_TAGS")
+        main_paired(args, args.tags, tags_b)
+    if tags_b or not args.tags:
+        ap.error("a '--' separator is only used with --paired")
 
     tags = args.tags
-    data = {t: load(args.results_dir, t) for t in tags}
+    runs = {t: Run(args.results_dir, t) for t in tags}
+    data = {t: (runs[t].rows, runs[t].meta) for t in tags}
     common = set.intersection(*(set(data[t][0]) for t in tags))
     union = set.union(*(set(data[t][0]) for t in tags))
     insts = sorted(common)
@@ -172,12 +188,10 @@ def main():
         out += table(["run", "checked", "verified", "other statuses", "check s (sum)",
                       "check s (max)", "proof MB (sum)", "proof MB (max)"], rows) + [""]
 
-    text = "\n".join(out) + "\n"
-    if args.out:
-        with open(args.out, "w") as f:
-            f.write(text)
-    else:
-        sys.stdout.write(text)
+    if any(R(t, i)["proof_status"] not in ("", "n/a") for t in tags for i in insts):
+        out += ["## Proof coverage", ""] + coverage_table([runs[t] for t in tags])
+
+    write("\n".join(out) + "\n", args.out)
 
     # ---- cactus data ---------------------------------------------------------------
     if args.cactus:

@@ -9,10 +9,19 @@ killing the process group.  The verdict comes from the exit code (10 = SAT,
 results/TAG/meta.json.  The run is resumable: instances already present in
 the CSV are skipped.
 
+--seed S is recorded in meta.json and substituted for {seed} in --args;
+--seed-args (default "--seed={seed}") is appended only when S > 0, so seed 0
+is the deterministic default.  Every run is made with -verb=1 and the
+statistics it prints (the "c stat" lines of the new solver; conflicts,
+decisions, propagations and restarts of the baseline) go to stats.csv.
+
 With --proof-check, a second phase (after all timed runs, on separate cores
 so timings stay clean) re-runs the instances solved within
 --proof-max-solve-sec with -proof=FILE, checks the proof with the Lean
-checker qlrup-check, and deletes the proof file.
+checker qlrup-check, and deletes the proof file.  When the checker runs out of
+time or memory the proof is trimmed with qlrup-trim and checked again; a proof
+above --proof-max-gb is abandoned ("too_large").  A "{proof}" in --args is
+replaced by a proof file for timed proof-on runs (proof overhead).
 
 See bench/README.md for details and examples.
 """
@@ -40,9 +49,16 @@ DEFAULT_BENCH_DIR = "/home/ec2-user/benchmarks/qcir"
 DEFAULT_CHECKER = "/home/ec2-user/qu-check/.lake/build/bin/qlrup-check"
 DEFAULT_PROOF_DIR = "/home/ec2-user/miniqu-work/proofs"
 DEFAULT_LOG_DIR = "/home/ec2-user/miniqu-work/logs"
+DEFAULT_TRIM = "/home/ec2-user/miniqu-work/build/release/qlrup-trim"
 COLUMNS = ["instance", "family", "result", "exit", "wall", "cpu", "rss_mb",
-           "proof_status", "proof_check_sec", "proof_bytes"]
-PROOF_FSIZE_LIMIT = 20 * 2**30  # a proof run is aborted when its file exceeds this
+           "proof_status", "proof_check_sec", "proof_bytes", "proof_trim_bytes"]
+MAX_LONG_PROOF_JOBS = 6  # with a checker limit of an hour or more: 6 x 8 GB of proofs at most
+# Proof statuses that are bugs; every other status except ok is a gap in coverage.
+REJECTED_STATUSES = ("rejected", "wrong_verdict", "check_error")
+STAT_COLUMNS = ["instance", "counter", "value"]
+BASELINE_STATS = ("restarts", "conflicts", "decisions", "propagations")
+# Fields of meta.json that must agree for a run to be resumed.
+RESUME_KEYS = ("args", "seed_args", "seed", "timeout", "mem_gb", "jobs", "cores", "instances_sha256")
 
 
 def family_of(instance):
@@ -91,9 +107,9 @@ def run_pinned(cmd, core, timeout, mem_mb, out_path, fsize_limit=None):
     """Run cmd pinned to core with stdout+stderr in out_path.  Returns a dict
     with keys status (ok|timeout|memout), exit (code, or -signal), wall, cpu,
     rss_mb."""
-    prefix = ["taskset", "-c", str(core)]
-    if fsize_limit:
-        prefix = ["prlimit", "--fsize=%d" % fsize_limit] + prefix
+    # No core dumps: dumping a solver that holds gigabytes takes minutes and fills the disk.
+    prefix = ["prlimit", "--core=0"] + (["--fsize=%d" % fsize_limit] if fsize_limit else []) + \
+        ["taskset", "-c", str(core)]
     with open(out_path, "wb") as out:
         t0 = time.monotonic()
         p = subprocess.Popen(prefix + cmd, stdin=subprocess.DEVNULL, stdout=out,
@@ -153,11 +169,29 @@ def printed_verdict(path):
     return verdict
 
 
+def parse_stats(path):
+    """Counters printed at -verb=1: "c stat NAME VALUE" lines of the new solver,
+    else the baseline's "name : value" lines.  Empty when the run was killed."""
+    try:
+        with open(path, errors="replace") as f:
+            text = f.read()
+    except OSError:
+        return {}
+    stats = {m.group(1): int(m.group(2))
+             for m in re.finditer(r"^c stat (\S+) (\d+)$", text, re.M)}
+    if not stats:
+        stats = {m.group(1): int(m.group(2))
+                 for m in re.finditer(r"^(%s)\s*:\s*(\d+)" % "|".join(BASELINE_STATS), text, re.M)}
+    return stats
+
+
 def classify(r, printed):
     if r["status"] == "timeout":
         return "TIMEOUT"
     if r["status"] == "memout":
         return "MEMOUT"
+    if r["exit"] == -signal.SIGXFSZ:
+        return "TOOLARGE"  # the proof file reached --proof-max-gb
     by_exit = {10: "SAT", 20: "UNSAT"}.get(r["exit"])
     if by_exit is None:
         return "ERROR"
@@ -169,13 +203,21 @@ def classify(r, printed):
 class Runner:
     def __init__(self, args):
         self.args = args
-        self.solver_args = shlex.split(args.args)
+        self.proof_in_args = "{proof}" in args.args
+        seed_args = args.seed_args if args.seed > 0 else ""
+        self.solver_args = shlex.split(args.args.replace("{seed}", str(args.seed)) + " " +
+                                       seed_args.replace("{seed}", str(args.seed)))
         self.proof_args = shlex.split(args.proof_args)
+        self.fsize_limit = int(args.proof_max_gb * 2**30)
+        # qlrup-trim must be told the proof format; the solver flag decides it.
+        self.trim_format = "--binary" if re.search(r"-proof-?binary(?!=0)", args.args + " " + args.proof_args) \
+            else "--text"
         self.logdir = os.path.join(args.log_dir, args.tag)
         os.makedirs(self.logdir, exist_ok=True)
         self.outdir = os.path.join(args.results_dir, args.tag)
         os.makedirs(self.outdir, exist_ok=True)
         self.csv_path = os.path.join(self.outdir, "results.csv")
+        self.stats_path = os.path.join(self.outdir, "stats.csv")
         self.rows = {}
         self.lock = threading.Lock()
         self.done = 0
@@ -185,7 +227,7 @@ class Runner:
         if os.path.exists(self.csv_path):
             with open(self.csv_path, newline="") as f:
                 for row in csv.DictReader(f):
-                    self.rows[row["instance"]] = row
+                    self.rows[row["instance"]] = {c: row.get(c) or "" for c in COLUMNS}
 
     def append_row(self, row):
         new = not os.path.exists(self.csv_path) or os.path.getsize(self.csv_path) == 0
@@ -194,6 +236,16 @@ class Runner:
             if new:
                 w.writeheader()
             w.writerow(row)
+
+    def append_stats(self, name, stats):
+        if not stats:
+            return
+        new = not os.path.exists(self.stats_path) or os.path.getsize(self.stats_path) == 0
+        with open(self.stats_path, "a", newline="") as f:
+            w = csv.writer(f)
+            if new:
+                w.writerow(STAT_COLUMNS)
+            w.writerows([name, k, v] for k, v in sorted(stats.items()))
 
     def rewrite(self):
         tmp = self.csv_path + ".tmp"
@@ -209,16 +261,38 @@ class Runner:
         a = self.args
         name = os.path.basename(path)
         out = os.path.join(self.logdir, name + ".out")
-        r = run_pinned([a.solver] + self.solver_args + [path], core, a.timeout,
-                       a.mem_gb * 1024, out)
+        proof = os.path.join(a.proof_dir, "%s-%s.proof" % (a.tag, name))
+        solver_args = [x.replace("{proof}", proof) for x in self.solver_args]
+        if self.proof_in_args:
+            os.makedirs(a.proof_dir, exist_ok=True)
+        r = run_pinned([a.solver, "-verb=1"] + solver_args + [path], core, a.timeout,
+                       a.mem_gb * 1024, out,
+                       fsize_limit=self.fsize_limit if self.proof_in_args else None)
         result = classify(r, printed_verdict(out))
+        self.append_stats(name, parse_stats(out))
         if result in ("SAT", "UNSAT"):
             os.remove(out)  # keep logs only for failures
-        row = {"instance": name, "family": family_of(name), "result": result,
-               "exit": r["exit"], "wall": "%.3f" % r["wall"], "cpu": "%.3f" % r["cpu"],
-               "rss_mb": "%.1f" % r["rss_mb"], "proof_status": "", "proof_check_sec": "",
-               "proof_bytes": ""}
+        row = {c: "" for c in COLUMNS}
+        row.update(instance=name, family=family_of(name), result=result, exit=r["exit"],
+                   wall="%.3f" % r["wall"], cpu="%.3f" % r["cpu"], rss_mb="%.1f" % r["rss_mb"])
+        if self.proof_in_args:
+            row["proof_bytes"] = os.path.getsize(proof) if os.path.exists(proof) else 0
+            if result in ("SAT", "UNSAT") and a.trim_size:
+                row["proof_trim_bytes"] = self.trimmed_size(proof, core)
+            if os.path.exists(proof):
+                os.remove(proof)
         return row
+
+    def trimmed_size(self, proof, core):
+        """Size of the proof after qlrup-trim, or "" if trimming failed."""
+        trimmed = proof + ".trim"
+        try:
+            code = subprocess.call(["taskset", "-c", str(core), self.args.trim, self.trim_format, "--quiet",
+                                    proof, trimmed], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            return os.path.getsize(trimmed) if code == 0 else ""
+        finally:
+            if os.path.exists(trimmed):
+                os.remove(trimmed)
 
     def phase1(self, instances):
         a = self.args
@@ -247,46 +321,65 @@ class Runner:
             list(ex.map(work, todo))
 
     # ---- phase 2: proof logging and checking -------------------------------
+    def check_proof(self, path, proof, core, out):
+        """Run the Lean checker.  Returns (status, seconds); status is one of
+        ok, rejected, wrong_verdict, check_timeout, check_memout, check_error."""
+        a = self.args
+        expect = "VERIFIED TRUE" if self.rows[os.path.basename(path)]["result"] == "SAT" else "VERIFIED FALSE"
+        t0 = time.monotonic()
+        chk = run_pinned([a.checker, path, proof], core, a.proof_timeout, a.proof_mem_gb * 1024, out)
+        seconds = time.monotonic() - t0
+        if chk["status"] == "timeout":
+            return "check_timeout", seconds
+        if chk["status"] == "memout":
+            return "check_memout", seconds
+        m = re.search(r"^s (VERIFIED TRUE|VERIFIED FALSE|NOT VERIFIED.*)$",
+                      open(out, errors="replace").read(), re.M)
+        if m is None:
+            return "check_error", seconds
+        if m.group(1) == expect:
+            return "ok", seconds
+        return ("rejected" if m.group(1).startswith("NOT VERIFIED") else "wrong_verdict"), seconds
+
     def proof_one(self, path, core):
         a = self.args
         name = os.path.basename(path)
         row = self.rows[name]
         proof = os.path.join(a.proof_dir, "%s-%s.proof" % (a.tag, name))
+        trimmed = proof + ".trim"
         out = os.path.join(self.logdir, name + ".proof.out")
         os.makedirs(a.proof_dir, exist_ok=True)
         try:
-            r = run_pinned([a.solver] + self.solver_args + self.proof_args +
-                           ["-proof=" + proof, path], core, a.timeout, a.mem_gb * 1024, out,
-                           fsize_limit=PROOF_FSIZE_LIMIT)
+            r = run_pinned([a.solver, "-verb=1"] + self.solver_args + self.proof_args +
+                           ["-proof=" + proof, path], core, a.proof_solve_timeout,
+                           a.mem_gb * 1024, out, fsize_limit=self.fsize_limit)
             res = classify(r, printed_verdict(out))
             row["proof_bytes"] = os.path.getsize(proof) if os.path.exists(proof) else 0
+            if res == "TOOLARGE":
+                row["proof_status"] = "too_large"
+                return
             if res != row["result"]:
                 row["proof_status"] = "solve_" + res.lower()
                 return
             os.remove(out)
-            t0 = time.monotonic()
-            chk = run_pinned([a.checker, path, proof], core, a.proof_timeout,
-                             a.mem_gb * 1024, out)
-            row["proof_check_sec"] = "%.3f" % (time.monotonic() - t0)
-            text = open(out, errors="replace").read()
-            m = re.search(r"^s (VERIFIED TRUE|VERIFIED FALSE|NOT VERIFIED.*)$", text, re.M)
-            expect = "VERIFIED TRUE" if row["result"] == "SAT" else "VERIFIED FALSE"
-            if chk["status"] == "timeout":
-                row["proof_status"] = "check_timeout"
-            elif chk["status"] == "memout":
-                row["proof_status"] = "check_memout"
-            elif m is None:
-                row["proof_status"] = "check_error"
-            elif m.group(1) == expect:
-                row["proof_status"] = "ok"
+            status, seconds = self.check_proof(path, proof, core, out)
+            if status in ("check_timeout", "check_memout"):
+                # A trimmed proof is much smaller and often checks within the limits.
+                code = subprocess.call(["taskset", "-c", str(core), a.trim, self.trim_format, "--quiet",
+                                        proof, trimmed], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                if code == 0:
+                    row["proof_trim_bytes"] = os.path.getsize(trimmed)
+                    status2, seconds2 = self.check_proof(path, trimmed, core, out)
+                    seconds += seconds2
+                    status = status2
+            row["proof_status"] = status
+            row["proof_check_sec"] = "%.3f" % seconds
+            if status == "ok":
                 os.remove(out)
-            elif m.group(1).startswith("NOT VERIFIED"):
-                row["proof_status"] = "rejected"
-            else:
-                row["proof_status"] = "wrong_verdict"  # verified, but the opposite result
         finally:
-            if os.path.exists(proof):
-                os.remove(proof)
+            for f in (proof, trimmed):
+                if os.path.exists(f):
+                    os.remove(f)
 
     def phase2(self, instances):
         a = self.args
@@ -300,6 +393,8 @@ class Runner:
             else:
                 row["proof_status"] = "n/a"
         todo.sort(key=lambda p: os.path.getsize(p))
+        if a.proof_timeout >= 3600:  # long checks hold gigabytes of memory and proof files: cap the disk
+            a.proof_jobs = min(a.proof_jobs, MAX_LONG_PROOF_JOBS)
         print("run.py: proof phase: %d instances (jobs=%d)" % (len(todo), a.proof_jobs), flush=True)
         pcores = queue.Queue()
         for c in a.proof_cores[:a.proof_jobs]:
@@ -324,7 +419,7 @@ class Runner:
         self.rewrite()
 
     # ---- metadata ------------------------------------------------------------
-    def write_meta(self):
+    def write_meta(self, instances):
         a = self.args
         solver = os.path.realpath(a.solver)
         sdir = os.path.dirname(solver)
@@ -345,9 +440,14 @@ class Runner:
                     continue
         sha = hashlib.sha256(open(solver, "rb").read()).hexdigest()
         meta = {"solver": solver, "solver_sha256": sha, "solver_git": git,
-                "args": a.args, "proof_args": a.proof_args, "timeout": a.timeout,
-                "mem_gb": a.mem_gb, "jobs": min(a.jobs, len(a.cores)), "cores": a.cores_spec,
+                "args": a.args, "seed_args": a.seed_args, "seed": a.seed, "proof_args": a.proof_args,
+                "timeout": a.timeout, "mem_gb": a.mem_gb, "jobs": min(a.jobs, len(a.cores)),
+                "cores": a.cores_spec, "instances": len(instances),
+                "instances_sha256": hashlib.sha256(
+                    "\n".join(sorted(os.path.basename(p) for p in instances)).encode()).hexdigest(),
                 "proof_check": a.proof_check, "proof_max_solve_sec": a.proof_max_solve_sec,
+                "proof_timeout": a.proof_timeout, "proof_mem_gb": a.proof_mem_gb,
+                "proof_max_gb": a.proof_max_gb,
                 "checker": a.checker if a.proof_check else None,
                 "date": datetime.datetime.now().isoformat(timespec="seconds"),
                 "host": platform.node(), "cmdline": " ".join(shlex.quote(x) for x in sys.argv),
@@ -355,8 +455,13 @@ class Runner:
         path = os.path.join(self.outdir, "meta.json")
         if os.path.exists(path):  # resumed run: keep the original, note the resume
             old = json.load(open(path))
+            for k in RESUME_KEYS:
+                if old.get(k) != meta[k]:
+                    sys.exit("run.py: cannot resume %s: %s was %r, is %r (use a new tag)" %
+                             (a.tag, k, old.get(k), meta[k]))
             old.setdefault("resumed", []).append(meta["date"])
-            for k in ("proof_check", "proof_max_solve_sec", "checker"):
+            for k in ("proof_check", "proof_max_solve_sec", "proof_timeout", "proof_mem_gb",
+                      "proof_max_gb", "checker"):
                 old[k] = meta[k]
             meta = old
         with open(path, "w") as f:
@@ -366,12 +471,19 @@ class Runner:
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--solver", required=True, help="solver binary")
-    ap.add_argument("--args", default="", help="solver arguments (one quoted string)")
+    ap.add_argument("--args", default="",
+                    help="solver arguments (one quoted string); {seed} is replaced by --seed, "
+                         "{proof} by a proof file (timed proof-on runs)")
+    ap.add_argument("--seed", type=int, default=0,
+                    help="search seed (0 = deterministic default); recorded in meta.json")
+    ap.add_argument("--seed-args", default="--seed={seed}",
+                    help="appended to the solver arguments when --seed > 0 "
+                         "(baseline: '-rnd-init -rnd-seed={seed}')")
     ap.add_argument("--tag", required=True, help="name of the run; results go to results/TAG")
     ap.add_argument("--timeout", type=float, default=300, help="wall-clock limit in seconds")
     ap.add_argument("--jobs", type=int, default=48, help="parallel jobs (one core each)")
     ap.add_argument("--cores", default="64-127", help="cores for timed runs, e.g. 64-127")
-    ap.add_argument("--mem-gb", type=float, default=8, help="memory limit per job (RSS)")
+    ap.add_argument("--mem-gb", type=float, default=16, help="memory limit per job (RSS)")
     ap.add_argument("--instances", nargs="+", default=["*.qcir"],
                     help="globs (relative to --bench-dir), paths, or .txt lists of names")
     ap.add_argument("--bench-dir", default=DEFAULT_BENCH_DIR)
@@ -380,8 +492,18 @@ def main():
     ap.add_argument("--note", default="", help="free text stored in meta.json")
     ap.add_argument("--proof-check", action="store_true",
                     help="re-run quick instances with proof logging and check with Lean")
-    ap.add_argument("--proof-max-solve-sec", type=float, default=20)
+    ap.add_argument("--proof-max-solve-sec", type=float, default=20,
+                    help="proofs are attempted for instances solved within this time "
+                         "(up to --timeout, i.e. for every solved instance)")
+    ap.add_argument("--proof-solve-timeout", type=float, default=None,
+                    help="time limit of the proof-logging solver run (default 2 x --timeout)")
     ap.add_argument("--proof-timeout", type=float, default=600, help="checker time limit")
+    ap.add_argument("--proof-mem-gb", type=float, default=32, help="checker memory limit")
+    ap.add_argument("--proof-max-gb", type=float, default=8,
+                    help="a proof file above this size is abandoned (status too_large)")
+    ap.add_argument("--trim", default=DEFAULT_TRIM, help="qlrup-trim binary")
+    ap.add_argument("--trim-size", action="store_true",
+                    help="with {proof} in --args: also record the size after qlrup-trim")
     ap.add_argument("--proof-args", default="-proof-binary",
                     help="extra solver flags for proof runs (default: binary format)")
     ap.add_argument("--proof-jobs", type=int, default=16)
@@ -390,6 +512,8 @@ def main():
     ap.add_argument("--proof-dir", default=DEFAULT_PROOF_DIR)
     ap.add_argument("--checker", default=DEFAULT_CHECKER)
     args = ap.parse_args()
+    if args.proof_solve_timeout is None:
+        args.proof_solve_timeout = 2 * args.timeout
 
     if not os.access(args.solver, os.X_OK):
         sys.exit("run.py: solver %s is not executable" % args.solver)
@@ -397,13 +521,17 @@ def main():
     args.cores_spec = args.cores
     args.cores = parse_cores(args.cores)
     args.proof_cores = parse_cores(args.proof_cores)
+    if args.proof_check and "{proof}" in args.args:
+        sys.exit("run.py: {proof} in --args (timed proof run) cannot be combined with --proof-check")
+    if (args.proof_check or args.trim_size) and not os.access(args.trim, os.X_OK):
+        sys.exit("run.py: %s not found (cmake --build --preset release)" % args.trim)
     if args.proof_check and not os.access(args.checker, os.X_OK):
         sys.exit("run.py: checker %s not found (cd /home/ec2-user/qu-check && lake build)" % args.checker)
 
     instances = resolve_instances(args.instances, args.bench_dir)
     runner = Runner(args)
     runner.load()
-    runner.write_meta()
+    runner.write_meta(instances)
     runner.phase1(instances)
     if args.proof_check:
         runner.phase2(instances)
@@ -411,13 +539,16 @@ def main():
     rows = [r for r in runner.rows.values() if r["instance"] in {os.path.basename(p) for p in instances}]
     solved = sum(r["result"] in ("SAT", "UNSAT") for r in rows)
     bad = [r["instance"] for r in rows if r["result"] in ("ERROR", "MISMATCH")]
-    badproof = [r["instance"] for r in rows if r["proof_status"] not in ("", "n/a", "ok")]
-    print("run.py: %s: solved %d/%d; errors: %d; proof problems: %d -> %s" %
-          (args.tag, solved, len(rows), len(bad), len(badproof), runner.csv_path))
+    gaps = [r["instance"] for r in rows if r["proof_status"] not in ("", "n/a", "ok") + REJECTED_STATUSES]
+    badproof = [r["instance"] for r in rows if r["proof_status"] in REJECTED_STATUSES]
+    print("run.py: %s: solved %d/%d; errors: %d; rejected proofs: %d; proof coverage gaps: %d -> %s" %
+          (args.tag, solved, len(rows), len(bad), len(badproof), len(gaps), runner.csv_path))
     for n in bad:
         print("  ERROR/MISMATCH:", n)
     for n in badproof:
-        print("  PROOF PROBLEM:", n, runner.rows[n]["proof_status"])
+        print("  PROOF REJECTED:", n, runner.rows[n]["proof_status"])
+    for n in gaps:
+        print("  coverage gap:", n, runner.rows[n]["proof_status"])
     sys.exit(1 if bad or badproof else 0)
 
 
