@@ -85,8 +85,10 @@ target_include_directories(miniqu-fake-solver PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}
 target_compile_options(miniqu-fake-solver PRIVATE ${MINIQU_WARNINGS})
 target_link_libraries(miniqu-fake-solver PUBLIC miniqu)
 
-# Unit tests of the frontend run against the fake solver.
+# Unit tests of the frontend run against the fake solver, end-to-end tests
+# against the real one.
 set(MINIQU_FRONTEND_TESTS circuit parse_qcir parse_qdimacs encode)
+set(MINIQU_END_TO_END_TESTS regressions)
 
 # One executable per file in test/unit, each a ctest test of the same name.
 add_custom_target(unit-tests)
@@ -95,6 +97,10 @@ foreach(test_source ${MINIQU_UNIT_TESTS})
   add_executable(unit-${test_name} ${test_source})
   if(test_name IN_LIST MINIQU_FRONTEND_TESTS)
     target_link_libraries(unit-${test_name} PRIVATE miniqu-frontend miniqu-fake-solver)
+  elseif(test_name IN_LIST MINIQU_END_TO_END_TESTS)
+    target_link_libraries(unit-${test_name} PRIVATE miniqu-frontend miniqu)
+    target_compile_definitions(unit-${test_name} PRIVATE
+                               MINIQU_REGRESSIONS="${CMAKE_CURRENT_SOURCE_DIR}/tests/regressions")
   else()
     target_link_libraries(unit-${test_name} PRIVATE miniqu)
   endif()
