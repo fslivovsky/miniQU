@@ -35,8 +35,9 @@
 #      nonzero on fewer than 10% of the finished instances fails the run. An
 #      explicit "--" group whose solver prints no such line is exempt (old
 #      interface); a matrix row is not;
-#  (d) timeouts are counted per configuration; more than 2% on the search tier
-#      fails a stress row, otherwise they only warn;
+#  (d) timeouts are counted per configuration; more than the row's limit (sixth
+#      field of tests/matrix.txt, default 2%) on the search tier fails a stress
+#      row, otherwise they only warn;
 #  (e) bench/smoke.txt is run with bench/run.py and compared with
 #      bench/smoke-expected.csv.
 #

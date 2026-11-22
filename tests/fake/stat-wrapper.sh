@@ -26,7 +26,7 @@ echo "$out" | grep -E '^(UN)?SATISFIABLE$'
 real() {  # real NAME: the value of a statistics line "NAME : VALUE" of the baseline
     echo "$out" | sed -n "s/^$1 *: *\([0-9]*\).*/\1/p" | head -1
 }
-for counter in $(sed 's/#.*//' "$MATRIX" | awk -F'|' 'NF == 5 {print $4}' | tr ' ' '\n' | sort -u); do
+for counter in $(sed 's/#.*//' "$MATRIX" | awk -F'|' 'NF >= 5 {print $4}' | tr ' ' '\n' | sort -u); do
     case $counter in
         conflicts|restarts|dependencies) value=$(real "$counter") ;;
         *) value=1 ;;

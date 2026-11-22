@@ -1,13 +1,17 @@
 # Configuration matrix of tests/regress.sh (see doc/rewrite/ROADMAP.md 0.1).
 #
-# name | solver options | proofs yes/no | counters that must be nonzero | kind
+# name | solver options | proofs yes/no | counters that must be nonzero | kind [| limit]
 #
 # proofs: whether the Lean checker verifies the proofs of this configuration.
 # counters: names of "c stat NAME VALUE" lines; each must be nonzero on at
 #   least 10% of the search-tier instances that finished.
 # kind: "normal" or "stress". Stress rows force rare paths (reduction, garbage
-#   collection, restarts) and fail the run when more than 2% of the search-tier
-#   instances time out; for normal rows that only warns.
+#   collection, restarts) and fail the run when more than their limit of the
+#   search-tier instances time out; for normal rows that only warns.
+# limit: optional, stress rows only: the percentage of search-tier timeouts
+#   that fails the run (default 2). A limit above 2 needs a measurement against
+#   the baseline: see doc/rewrite/STATUS.md, "Coordinator decisions after M1
+#   round 1", D1.
 #
 # Normal configurations.
 default      |                                  | yes | conflicts restarts learned.clause learned.cube | normal
@@ -20,12 +24,15 @@ ccmin3       | -ccminmode=3                     | yes | conflicts restarts learn
 dl-ccmin3    | -dl -ccminmode=3                 | yes | conflicts restarts learned.clause learned.cube dependencies minimized | normal
 noearly      | -no-earlytseitin                 | yes | conflicts restarts learned.clause learned.cube | normal
 legacy       | -legacyanalyze                   | yes | conflicts restarts learned.clause learned.cube | normal
-# Stress configurations: reduce every 2 conflicts, no protected tier, garbage
-# collect on any waste; restart every conflict and reset dependencies often.
-gc           | --reduceint=2 --tier1glue=0 --gcfrac=0 | yes | conflicts restarts learned.clause learned.cube reductions reduced.clause reduced.cube collections relocated | stress
-gc-dl        | --reduceint=2 --tier1glue=0 --gcfrac=0 -dl | yes | conflicts restarts learned.clause learned.cube dependencies reductions reduced.clause reduced.cube collections relocated | stress
-gc-mode1     | --reduceint=2 --tier1glue=0 --gcfrac=0 -mode=1 | yes | conflicts restarts learned.clause learned.cube reductions reduced.clause reduced.cube collections relocated | stress
-gc-mode2     | --reduceint=2 --tier1glue=0 --gcfrac=0 -mode=2 | no | conflicts restarts learned.clause learned.cube reductions reduced.clause reduced.cube collections relocated | stress
-restart      | --no-luby --rfirst=1 --rinc=100 --depreset=1 | yes | conflicts restarts learned.clause learned.cube | stress
-restart-dl   | --no-luby --rfirst=1 --rinc=100 --depreset=1 -dl | yes | conflicts restarts learned.clause learned.cube dependencies depresets | stress
-restart-mode1-dl | --no-luby --rfirst=1 --rinc=100 --depreset=1 -mode=1 -dl | yes | conflicts restarts learned.clause learned.cube dependencies depresets | stress
+# Stress configurations: reduce often with no protected tier, garbage collect
+# on any waste; restart every conflict and reset dependencies often. The
+# options and limits are those of STATUS.md, "Coordinator decisions after M1
+# round 1", D1 (the extreme --reduceint=2 of the dl and mode rows is run by
+# tests/fuzz_qdimacs.sh instead).
+gc           | --reduceint=2 --tier1glue=0 --gcfrac=0 | yes | conflicts restarts learned.clause learned.cube reductions reduced.clause reduced.cube collections relocated | stress | 2
+gc-dl        | --reduceint=30 --tier1glue=0 --gcfrac=0 -dl | yes | conflicts restarts learned.clause learned.cube dependencies reductions reduced.clause reduced.cube collections relocated | stress | 2
+gc-mode1     | --reduceint=100 --tier1glue=0 --gcfrac=0 -mode=1 | yes | conflicts restarts learned.clause learned.cube reductions reduced.clause reduced.cube collections relocated | stress | 5
+gc-mode2     | --reduceint=10 --tier1glue=0 --gcfrac=0 -mode=2 | no | conflicts restarts learned.clause learned.cube reductions reduced.clause reduced.cube collections relocated | stress | 2
+restart      | --no-luby --rfirst=1 --rinc=100 --depreset=1 | yes | conflicts restarts learned.clause learned.cube | stress | 2
+restart-dl   | --no-luby --rfirst=1 --rinc=100 --depreset=1 -dl | yes | conflicts restarts learned.clause learned.cube dependencies depresets | stress | 8
+restart-mode1-dl | --rfirst=1 --depreset=1 -mode=1 -dl | yes | conflicts restarts learned.clause learned.cube dependencies depresets | stress | 25

@@ -29,7 +29,7 @@ REPO = os.path.dirname(HERE)
 VERDICTS = {10: 'SAT', 20: 'UNSAT'}
 STAT_LINE = re.compile(r'^c stat (\S+) (-?\d+)$', re.M)
 MIN_COVERAGE = 0.10   # a required counter must be nonzero on this fraction of search instances
-STRESS_TIMEOUTS = 0.02
+DEFAULT_STRESS_LIMIT = 2.0   # percent of search instances; a stress row may set its own
 
 
 LIVE = set()          # process groups of running children, killed on exit
@@ -81,9 +81,10 @@ signal.signal(signal.SIGINT, kill_all_children)
 
 
 class Config:
-    def __init__(self, name, options, proofs, required, stress, from_matrix):
+    def __init__(self, name, options, proofs, required, stress, from_matrix, limit=DEFAULT_STRESS_LIMIT):
         self.name, self.options, self.proofs = name, shlex.split(options), proofs
         self.required, self.stress, self.from_matrix = required, stress, from_matrix
+        self.limit = limit   # percent of search timeouts that fails a stress row
 
 
 def read_matrix(path, rows):
@@ -93,10 +94,20 @@ def read_matrix(path, rows):
         if not line:
             continue
         fields = [f.strip() for f in line.split('|')]
-        if len(fields) != 5 or fields[2] not in ('yes', 'no') or fields[4] not in ('normal', 'stress'):
-            sys.exit('regress.py: %s:%d: expected "name | options | yes/no | counters | normal/stress"' % (path, number))
+        if len(fields) not in (5, 6) or fields[2] not in ('yes', 'no') or fields[4] not in ('normal', 'stress'):
+            sys.exit('regress.py: %s:%d: expected "name | options | yes/no | counters | normal/stress [| limit]"' %
+                     (path, number))
+        limit = DEFAULT_STRESS_LIMIT
+        if len(fields) == 6:
+            try:
+                limit = float(fields[5])
+            except ValueError:
+                limit = -1.0
+            if fields[4] != 'stress' or not 0 <= limit <= 100:
+                sys.exit('regress.py: %s:%d: the limit "%s" must be a percentage and is only allowed on stress rows' %
+                         (path, number, fields[5]))
         configs[fields[0]] = Config(fields[0], fields[1], fields[2] == 'yes', fields[3].split(),
-                                    fields[4] == 'stress', True)
+                                    fields[4] == 'stress', True, limit)
     if rows == ['all']:
         return list(configs.values())
     unknown = [r for r in rows if r not in configs]
@@ -321,9 +332,12 @@ def main():
                   (first, first + half - 1, first + half, last, c['timeouts'], c['proofs'], c['proof_timeouts'],
                    c['proofs_skipped']))
             search_timeouts = sum(r.verdict == 'TIMEOUT' for r in search_runs[config.name])
-            if config.stress and search_timeouts > STRESS_TIMEOUTS * n_search:
-                failures.append('FAIL [%s] stress configuration: %d of %d search instances timed out (limit %.0f%%)' %
-                                (config.name, search_timeouts, n_search, 100 * STRESS_TIMEOUTS))
+            if config.stress:
+                print('  stress row: %d of %d search instances timed out (limit %g%%)' %
+                      (search_timeouts, n_search, config.limit))
+            if config.stress and 100 * search_timeouts > config.limit * n_search:
+                failures.append('FAIL [%s] stress configuration: %d of %d search instances timed out (limit %g%%)' %
+                                (config.name, search_timeouts, n_search, config.limit))
             elif c['timeouts']:
                 warnings.append('WARN [%s] %d solver timeouts' % (config.name, c['timeouts']))
             if n_search:
