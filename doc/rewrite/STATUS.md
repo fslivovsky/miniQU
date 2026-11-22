@@ -728,8 +728,8 @@ What exists now:
 - `reduceint` is accepted by the app (rejection removed); `profile` now prints with `--profile=N` (rows of profiles not
   wired yet, `search`, `analyze`, `propagate`, stay 0.00); `Profiles::enable` sets the level when the search starts.
 - `check_invariants` also checks: no list or reason refers to a moved constraint, clean watch lists hold no garbage or
-  moved constraint; the watch check is one pass over all lists (it was a list scan per constraint, quadratic, and made
-  asan stress runs 30% slower).
+  moved constraint; the watch check is one pass over all lists (it was a list scan per constraint, quadratic in the list
+  length; the asan gc stress row still needed the longer timeout below, so its effect was not measured separately).
 - `assertions_enabled` moved to `contract.hpp` (was duplicated in `model.cpp` and `solver.cpp`).
 - Tests: `unit-reduce` (schedule, both triggers, selection with tier1glue 2 and 0, reasons kept and unprotected,
   deletion steps through a recording tracer, collection after reduce by `gcfrac`), `unit-collect` (due, nothing wasted,
