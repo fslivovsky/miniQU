@@ -233,6 +233,7 @@ The frontend sources are the CMake object library `miniqu-frontend`, kept apart 
 passes to the fake solver; `tests/encoding_diff.sh` compares it with the original constraints in the
 baseline's proofs.
 | `app.cpp` | `main`: options, parsing, limits, signals, result line, exit code, `V` line |
+| `signal.{hpp,cpp}`, `resources.{hpp,cpp}` | termination signals (8.2); CPU/memory limits and peak RSS. With `app.cpp` they form the target `miniQU` and are not part of the library |
 
 The public API (`miniqu.hpp`) is small and single-shot. User variables and
 literals are nonzero `int`s as in DIMACS:
@@ -248,7 +249,7 @@ public:
   void freeze (int var);                                // never eliminate
   void connect_tracer (std::unique_ptr<Tracer>);        // before add_original
   int solve ();                                         // 10 true, 20 false, 0 unknown
-  int val (int var) const;                              // certificate block only; 0 = unassigned
+  int val (int var) const;                              // 1/-1 in the certificate block (unassigned: 1), else 0
   std::vector<int> certificate () const;
   void terminate ();                                    // async-signal-safe: sets a flag
   void flush_proof ();                                  // not async-signal-safe (8.2)
@@ -449,7 +450,10 @@ without conflict, `model.cpp` computes an **initial cube**: for each
 followed by existential reduction; analysis then proceeds as for any satisfied
 cube. The cube is written into a preallocated buffer constraint of capacity
 `vars` (as in the old code), so that it has a `Ref` and can be the starting
-point of analysis without being stored.
+point of analysis without being stored. The buffer is in no constraint
+list and is not watched (`Constraint::set_size` rewrites its size in
+place, possibly to 0 for the empty cube), so the garbage collector must
+relocate `model_cube` explicitly.
 
 Rules that later techniques rely on:
 

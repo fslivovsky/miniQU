@@ -113,8 +113,8 @@ static void test_resolve_right_of_blocked () {
     CHECK (internal.scores[v] == 1.0);
 }
 
-// Reduction leaves a unit: it is stored irredundant, the search backjumps
-// to the root, and the root literal is kept in later learnt clauses.
+// Reduction leaves a unit: it is stored irredundant and the search
+// backjumps to the root.
 static void test_learn_unit () {
   Internal internal;
   declare (internal, "eae");
@@ -132,6 +132,23 @@ static void test_learn_unit () {
 
 // Under the decision -1 the clauses force 2 and -2; resolving them leaves
 // the universal 1, which reduction removes: the empty clause.
+// The root-level literal -1 stays in the learnt clause (porting note 5),
+// which counts level 0 in its glue and backjumps to the root.
+static void test_root_literal_stays () {
+  Internal internal;
+  declare (internal, "eee");
+  add (internal, Clause, {1});
+  add (internal, Clause, {-1, -2, 3});
+  add (internal, Clause, {-1, -2, -3});
+  decide (internal, 2);
+  internal.analyze (conflict_of (internal));
+  const Ref learnt = internal.redundant[0][0];
+  CHECK (stored (internal, learnt) == lits ({-2, -1}));
+  CHECK_EQ (deref (internal.arena, learnt).glue (), 2u);
+  CHECK_EQ (internal.decision_level (), 0);
+  CHECK (internal.val (L (-2)) > 0 && internal.reason (1) == learnt);
+}
+
 static void test_empty () {
   Internal internal;
   declare (internal, "ae");
@@ -232,6 +249,7 @@ int main () {
   test_learn_cube ();
   test_resolve_right_of_blocked ();
   test_learn_unit ();
+  test_root_literal_stays ();
   test_empty ();
   test_decide ();
   test_seed ();

@@ -27,6 +27,7 @@
 
 #include <cstdio>
 #include <cstring>
+#include <new>
 #include <optional>
 #include <string>
 #include <utility>
@@ -190,6 +191,14 @@ int App::main (int argc, char **argv) {
 
 } // namespace miniqu
 
+// A failed allocation under '--memlim' ends the run as in the old binary.
+// (The arena reports its own failure through 'fatal'.)
 int main (int argc, char **argv) {
-  return miniqu::App ().main (argc, argv);
+  try {
+    return miniqu::App ().main (argc, argv);
+  } catch (const std::bad_alloc &) {
+    MSG ("out of memory");
+    printf ("INDETERMINATE\n");
+    return 0;
+  }
 }

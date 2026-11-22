@@ -32,6 +32,12 @@
 
 namespace miniqu {
 
+#ifdef NDEBUG
+static constexpr bool assertions_enabled = false;
+#else
+static constexpr bool assertions_enabled = true;
+#endif
+
 void Internal::init_model_cube () {
   assert (model_cube == Ref::none);
   // A constraint has at least one literal; the contents do not matter.
@@ -80,9 +86,7 @@ Ref Internal::initial_cube () {
       model.push_back (hit);
     }
   }
-#ifdef NDEBUG
-  if (opts.check)
-#endif
+  if (assertions_enabled || opts.check)
     check_model_cube ();
   for (Lit l : model)
     seen[var (l)] = 0;
