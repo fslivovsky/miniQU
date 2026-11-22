@@ -8,6 +8,10 @@
 // comparison of indices, so the rule removes a suffix of the sorted
 // literals.  It is a sound derivation of a constraint of the same kind and
 // is one QLRUP step (derived from the unreduced constraint alone).
+//
+// 'qreduce' (for learnt constraints) keeps the order of the literals, as
+// the old 'finishLearnt': the order decides which literal of the backjump
+// level the constraint is watched by, and with it the search.
 
 #include "prefix.hpp"
 
@@ -37,8 +41,15 @@ size_t Prefix::reduced_size (std::span<const Lit> lits, Kind kind) const {
 }
 
 void Prefix::qreduce (std::vector<Lit> &lits, Kind kind) const {
-  std::sort (lits.begin (), lits.end ());
-  lits.resize (reduced_size (lits, kind));
+  Var rightmost = no_var;
+  for (Lit l : lits)
+    if (is_primary (kind, var (l)) &&
+        (rightmost == no_var || var (l) > rightmost))
+      rightmost = var (l);
+  if (rightmost == no_var)
+    lits.clear ();
+  else
+    std::erase_if (lits, [=] (Lit l) { return var (l) > rightmost; });
 }
 
 } // namespace miniqu

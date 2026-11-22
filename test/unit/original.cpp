@@ -31,10 +31,11 @@ static void test_prefix () {
   CHECK (internal.heaps[3].contains (5) && !internal.heaps[3].contains (4));
 
   // Trailing secondary literals go, in both kinds, also several of them
-  // and from different blocks; all of them without a primary literal.
+  // and from different blocks; all of them without a primary literal.  The
+  // others keep their order.
   std::vector<Lit> ls = lits ({6, -3, 1, 4, -5});
   prefix.qreduce (ls, Clause);
-  CHECK (ls == lits ({1, -3, 4}));
+  CHECK (ls == lits ({-3, 1, 4}));
   ls = lits ({1, 3, 4, 6});
   prefix.qreduce (ls, Cube);
   CHECK (ls == lits ({1, 3, 4, 6}));

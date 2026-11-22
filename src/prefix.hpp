@@ -45,12 +45,12 @@ struct Prefix {
     return vars[v].quant == primary (kind);
   }
 
-  // Sorts 'lits' and removes every secondary literal to the right of all
-  // primary ones (ARCHITECTURE 4.6).
+  // Removes every secondary literal to the right of all primary ones
+  // (ARCHITECTURE 4.6), keeping the order of the others.
   void qreduce (std::vector<Lit> &lits, Kind) const;
 
-  // The number of literals of sorted 'lits' that 'qreduce' keeps; for
-  // callers that need to know which ones it removes.
+  // The number of literals of sorted 'lits' that 'qreduce' keeps (a
+  // prefix); for callers that need to know which ones it removes.
   size_t reduced_size (std::span<const Lit> lits, Kind) const;
 };
 
