@@ -11,6 +11,8 @@
 
 namespace miniqu {
 
+struct Internal;
+
 // The public interface of the solver (ARCHITECTURE 3.5).  It is
 // single-shot: the formula is given once, in this order, then 'solve' is
 // called once.
@@ -32,8 +34,8 @@ public:
   Solver (const Solver &) = delete;
   Solver &operator= (const Solver &) = delete;
 
-  // Sets an option by name; false if the name is unknown or the value out
-  // of range.  Only before the first 'add_var'.
+  // Sets an option by name (one of 'option_table ()'); false if the value
+  // is out of range.  Only before the first 'add_var'.
   bool set (std::string_view option, int value);
 
   // Declares variable 'var'.  Consecutive calls with the same quantifier
@@ -76,6 +78,9 @@ private:
   struct Impl; // user <-> internal variable maps, call-order state,
                // Internal
   std::unique_ptr<Impl> impl;
+
+  // The solver state behind the interface, for white-box tests only.
+  friend Internal &internal_of (Solver &);
 };
 
 } // namespace miniqu
