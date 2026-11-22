@@ -40,46 +40,149 @@ tests/regress.sh follow this by default.
 
 ## run.py
 
-    python3 bench/run.py --solver PATH --args "-opt1 -opt2" --tag TAG --timeout 300 \
-        [--jobs 48] [--cores 64-127] [--mem-gb 8] [--instances GLOB|FILE.txt|NAMES...] \
-        [--proof-check [--proof-max-solve-sec 20] [--proof-timeout 600]]
+    python3 bench/run.py --solver PATH --tag TAG --timeout 300 [--args "-opt1 -opt2"] [--seed S]
+        [--jobs 48] [--cores 64-127] [--mem-gb 16] [--instances GLOB|FILE.txt|NAMES...]
+        [--proof-check [--proof-max-solve-sec 60] [--proof-timeout 3600] [--proof-mem-gb 32] [--proof-max-gb 8]]
+
+Defaults are the fixed parameters of ROADMAP 0.3 (`--jobs 48 --mem-gb 16 --cores 64-127`).
 
 * Each instance runs once, pinned to one core; wall time, CPU time and peak RSS
   are recorded. Timeout (wall) and memory limit (RSS) are enforced by killing
   the process group.
 * Verdict: exit code 10 = SAT, 20 = UNSAT, cross-checked with the printed
   `SATISFIABLE`/`UNSATISFIABLE` line (disagreement gives result `MISMATCH`).
-  Other results: `TIMEOUT`, `MEMOUT`, `ERROR`.
-* Output: `bench/results/TAG/results.csv`
-  (instance,family,result,exit,wall,cpu,rss_mb,proof_status,proof_check_sec,proof_bytes)
-  and `meta.json` (solver path, sha256 and git hash, args, date, host, timeout,
-  command line). Resumable: rerunning with the same tag skips instances already
-  in the CSV (delete the directory for a fresh run).
-* `--proof-check`: after the timed phase, instances solved in at most
-  `--proof-max-solve-sec` are re-run with `-proof=/home/ec2-user/miniqu-work/proofs/...`
-  (extra options `--proof-args`, default `-proof-binary`), the proof is checked with
-  qlrup-check (limit `--proof-timeout`) and deleted. `proof_status` is `ok`,
-  `rejected`, `wrong_verdict`, `check_timeout`, `check_memout`, `check_error`, `solve_*` (proof run did not finish), or `n/a` when not attempted.
-  Proof phase runs on `--proof-cores` (default 0-63, `--proof-jobs` 16).
+  Other results: `TIMEOUT`, `MEMOUT`, `TOOLARGE` (a `{proof}` file reached `--proof-max-gb`), `ERROR`.
+* **Seeds.** `--seed S` is recorded in `meta.json` and replaces `{seed}` in `--args`.
+  `--seed-args` (default `--seed={seed}`) is appended to the solver arguments only when `S > 0`, so
+  seed 0 is the deterministic default and uses no seed argument. For the baseline use
+  `--seed-args "-rnd-init -rnd-seed={seed}"`.
+* **Counters.** Every solver is run with `-verb=1`; the statistics it prints go to `stats.csv`
+  (`instance,counter,value`): the `c stat` lines of the new solver, and `conflicts`, `decisions`,
+  `propagations`, `restarts` parsed from the baseline's statistics block. Runs killed by a limit
+  have none.
+* Output in `bench/results/TAG/`: `results.csv`
+  (instance,family,result,exit,wall,cpu,rss_mb,proof_status,proof_check_sec,proof_bytes,proof_trim_bytes),
+  `stats.csv` and `meta.json` (solver path, sha256 and git hash, args, seed, jobs, mem_gb, cores,
+  timeout, hash of the instance list, proof limits, date, host, command line). Resumable: rerunning
+  with the same tag skips instances already in the CSV; a run with different parameters under an
+  existing tag is refused (delete the directory for a fresh run). Core dumps are disabled.
+* `--proof-check`: after the timed phase, every instance solved in at most `--proof-max-solve-sec`
+  (up to the timeout: every solved instance) is re-run with `-proof=FILE` (extra options
+  `--proof-args`, default `-proof-binary`; time limit `--proof-solve-timeout`, default twice
+  `--timeout`) and the proof is checked with qlrup-check (limits `--proof-timeout` seconds,
+  `--proof-mem-gb`). If the checker runs out of time or memory the proof is trimmed with
+  `qlrup-trim` and checked again; `proof_trim_bytes` is then set and the report counts it as
+  "after trimming". A proof file above `--proof-max-gb` (default 8) is abandoned. Every proof is
+  deleted after its check. `proof_status`: `ok`, `rejected`, `wrong_verdict`, `check_error`
+  (bugs: run.py exits 1), `check_timeout`, `check_memout`, `too_large`, `solve_*` (the proof run did
+  not finish or gave another result; coverage gaps), `n/a` when not attempted. The proof phase
+  runs on `--proof-cores` (default 0-63) with `--proof-jobs` (default 16) jobs, at most 6 when
+  `--proof-timeout` is at least 3600.
+* **Timed proof-on runs** (proof overhead): `--args "-proof-binary -proof={proof}"`; `{proof}` is
+  replaced by a file in the work directory that is deleted after the run; `proof_bytes` is
+  recorded, with `--trim-size` also the size after `qlrup-trim`. Cannot be combined with `--proof-check`.
 * `--instances` takes globs relative to `--bench-dir`, paths, or a `.txt` list of names
   (lines starting with `#` are comments). Options whose value starts with `-` must be written
-  `--args=-opt` (argparse).
-
-Example, full run of a solver with proof checking:
-
-    nohup setsid python3 bench/run.py --solver build/miniQU --tag new-default --timeout 300 \
-        --proof-check > /home/ec2-user/miniqu-work/logs/new-default.log 2>&1 &
+  `--args=-opt` (argparse); an option string with several words works as `--args "-dl -verb=1"`.
 
 ## compare.py
 
     python3 bench/compare.py TAG_A TAG_B [TAG_C ...] [--out FILE] [--cactus FILE.csv] [--top 10]
+    python3 bench/compare.py --paired A_TAGS -- B_TAGS [--force] [--out FILE]
 
-Markdown report: result DISCREPANCIES and errors first (blocking bugs), solved
-SAT/UNSAT/total, PAR2 (penalty 2x timeout), unique solves, per-family table,
-top speedups/regressions relative to the first tag, proof-check statistics,
-and cactus data (sorted solve times per tag) as CSV. Only instances present in every run are compared; a warning is
+Plain mode: markdown report with result DISCREPANCIES and errors first (blocking bugs), solved
+SAT/UNSAT/total, PAR2 (penalty 2x timeout), unique solves, per-family table, top
+speedups/regressions relative to the first tag, proof statistics and coverage, and cactus data
+(sorted solve times per tag) as CSV. Only instances present in every run are compared; a warning is
 printed when the timeouts differ. Family = leading alphabetic prefix of the file name
-(`chess`, `ci`, `klieber`, ...); names starting with a digit form `numeric`.
+(`chess`, `ci`, `klieber`, ...); names starting with a digit form `numeric`. Informational; no
+acceptance statement may rest on it.
+
+**Paired mode** is the evidence of ROADMAP 0.3. A and B are run sets: the same binary and
+configuration over a list of seeds, one tag per seed. `compare.py` refuses (exit status 3) when
+`jobs`, `mem_gb`, `cores`, `timeout` or the instance list differ between any two of the runs, or
+when the seed lists of A and B differ; `--force` compares anyway and puts `# NOT COMPARABLE` at the
+top. The report has: discrepancies, solver errors and rejected proofs first; the parameters; the
+PAR2 difference `B - A` (instance score = mean PAR2 over the seeds) with its 95% bootstrap interval
+(10000 resamples over instances, fixed generator seed, percentile method); the sign test with
+margin `max(1 s, 10% of the smaller score)` and the two-sided binomial p-value; the verdict
+(`better`, `worse` or `no measurable difference`) and the line "B is not worse than A: yes/no", all
+as defined in ROADMAP 0.3; solved (SAT/UNSAT/total) and PAR2 per seed and the noise band; the
+instances gained and lost in a majority of seeds, by name; a per-family table; the largest
+differences; instances solved by both whose peak RSS in B exceeds A's by more than 10%; and the
+proof coverage table (solved, attempted, accepted, rejected, checker timeout, checker memout, too
+large, checker error, proof run unfinished, not attempted; every non-accepted instance by name).
+`bench/test_compare.py` (run by ctest) tests this on synthetic CSVs.
+
+## fidelity.py and overhead.py
+
+    python3 bench/fidelity.py TAG_BASELINE TAG_NEW [--min-time 1] [--out FILE]
+    python3 bench/overhead.py TAG_WITHOUT_PROOF TAG_WITH_PROOF [--out FILE]
+
+`fidelity.py` is the port-fidelity report of ROADMAP M1.9 from `stats.csv`: on the instances solved
+by both, propagations and conflicts per CPU second (new / baseline, geometric mean, min, max; only
+for instances above `--min-time` in both runs, because the new parser is faster and would otherwise
+dominate the rate of short runs), the ratio of conflict counts (geometric mean, median, extremes)
+and a histogram of its log2. `overhead.py` reports, for the instances solved by both, the total and
+geometric-mean time ratio (instances above 1 s) of a `{proof}` run against the same run without a
+proof, the proof bytes in total and per conflict, and the size after trimming.
+
+## M1 gate commands
+
+Tags are `m1-<new|base>-<config>-t<timeout>-s<seed>`. NEW and BASE are the release binary and
+`/home/ec2-user/miniqu-work/baseline/miniQU`; results go to `bench/results/`. Start one run at a
+time on cores 64-127 (`pgrep -f bench/run.py` must be empty) and wait for it with
+`timeout 540 tail --pid=PID -f /dev/null`.
+
+    NEW=/home/ec2-user/miniqu-work/build/release/miniQU
+    BASE=/home/ec2-user/miniqu-work/baseline/miniQU
+    BSEED='-rnd-init -rnd-seed={seed}'
+
+    # run sets: quick tier (60 s, seeds 1-5) and full tier (600 s, seeds 11-13), default and -dl
+    for cfg in default dl; do
+      opt=; [ $cfg = dl ] && opt=-dl
+      for s in 1 2 3 4 5; do
+        python3 bench/run.py --solver $NEW  --tag m1-new-$cfg-t60-s$s  --timeout 60 --seed $s --args="$opt"
+        python3 bench/run.py --solver $BASE --tag m1-base-$cfg-t60-s$s --timeout 60 --seed $s --args="$opt" --seed-args "$BSEED"
+      done
+      for s in 11 12 13; do
+        python3 bench/run.py --solver $NEW  --tag m1-new-$cfg-t600-s$s  --timeout 600 --seed $s --args="$opt"
+        python3 bench/run.py --solver $BASE --tag m1-base-$cfg-t600-s$s --timeout 600 --seed $s --args="$opt" --seed-args "$BSEED"
+      done
+    done
+    # modes 1 and 2, quick tier, seeds 1-3
+    for mode in 1 2; do for s in 1 2 3; do
+      python3 bench/run.py --solver $NEW  --tag m1-new-mode$mode-t60-s$s  --timeout 60 --seed $s --args="-mode=$mode"
+      python3 bench/run.py --solver $BASE --tag m1-base-mode$mode-t60-s$s --timeout 60 --seed $s --args="-mode=$mode" --seed-args "$BSEED"
+    done; done
+
+    # proof coverage, seed 0: a proof for every solved instance, trim-and-retry, at most 6 jobs
+    for cfg in default dl mode1; do
+      case $cfg in default) opt=;; dl) opt=-dl;; mode1) opt=-mode=1;; esac
+      python3 bench/run.py --solver $NEW --tag m1-new-$cfg-t60-s0 --timeout 60 --args="$opt" \
+          --proof-check --proof-max-solve-sec 60 --proof-timeout 3600 --proof-mem-gb 32 --proof-max-gb 8
+    done
+
+    # proof overhead (the proof-free arm is the timed phase of the coverage run above)
+    python3 bench/run.py --solver $NEW --tag m1-new-default-t60-s0-proof --timeout 60 \
+        --args="-proof-binary -proof={proof}" --trim-size
+    python3 bench/run.py --solver $NEW --tag m1-new-dl-t60-s0-proof --timeout 60 \
+        --args="-dl -proof-binary -proof={proof}" --trim-size
+    python3 bench/overhead.py m1-new-default-t60-s0 m1-new-default-t60-s0-proof
+    python3 bench/overhead.py m1-new-dl-t60-s0 m1-new-dl-t60-s0-proof
+
+    # reports
+    python3 bench/compare.py --paired m1-base-default-t600-s{11,12,13} -- m1-new-default-t600-s{11,12,13} \
+        --out bench/results/m1-gate/default-full.md
+    python3 bench/compare.py --paired m1-base-dl-t600-s{11,12,13} -- m1-new-dl-t600-s{11,12,13} \
+        --out bench/results/m1-gate/dl-full.md
+    python3 bench/compare.py --paired m1-base-default-t60-s{1,2,3,4,5} -- m1-new-default-t60-s{1,2,3,4,5} \
+        --out bench/results/m1-gate/default-quick.md       # and the same for dl, mode1 (s1-3), mode2 (s1-3)
+    python3 bench/fidelity.py m1-base-default-t60-s1 m1-new-default-t60-s1 --out bench/results/m1-gate/fidelity-default.md
+
+(The baseline's seed-0 coverage and overhead runs of P0.4 use the same commands with
+`--solver $BASE`.) The fidelity report of the gate is specified for seed 0: run the two
+seed-0 timed phases (`m1-new-default-t60-s0` and the same with `--solver $BASE`) and pass those.
 
 ## smoke.txt
 
@@ -106,3 +209,17 @@ Exit status 1 on any wrong answer, crash, rejected proof or disagreement; reprod
 commands are printed and failing instances saved in `/home/ec2-user/miniqu-work/regress/CONFIG/failed/`.
 Solver timeouts only warn. `tests/fuzz.sh` can also be used alone
 (`PROOF_CHECKER=... REFERENCE=baseline tests/fuzz.sh SOLVER FIRST LAST [opts]`).
+
+## tests/check_cert.py and tests/fuzz_cert.sh
+
+    tests/check_cert.py [--reference SOLVER] SOLVER FILE [solver options...]
+    taskset -c 0-63 tests/fuzz_cert.sh SOLVER FIRST LAST [solver options...]
+
+`check_cert.py` runs the solver with `-cert`, substitutes the `V` line into the formula (the
+outermost block becomes existential and is fixed by a conjunct) and decides the result again with
+`tests/qcir_eval.py` (small) or the baseline: a SAT formula with an outermost existential block must
+stay SAT, an UNSAT formula with an outermost universal block must stay UNSAT; for the other
+combinations only the shape of the line is checked (it must list exactly the variables of the
+outermost block). `fuzz_cert.sh` runs it on the tiny and search tier of the corpus and on tiny and
+large QDIMACS fuzz instances for every seed, and prints counts per status and the three smallest bad
+instances with reproducing commands (see the script header for the statuses).
