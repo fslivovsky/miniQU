@@ -24,7 +24,8 @@
 // back when its watched dependency is assigned (here) or when the
 // backtrack that unassigns it leaves that dependency assigned
 // ('backtrack.cpp').  Every 'depreset'-th restart all dependencies are
-// forgotten (porting note 9).
+// forgotten (porting note 9), provided a constraint was learnt since the
+// last reset (see 'resetting_dependencies').
 //
 // Dependencies are heuristic: the analyses are sound for any decision
 // order, so nothing here needs a proof step.
@@ -109,13 +110,19 @@ bool Internal::waits_for_dependency (Var v) const {
 }
 
 // The old schedule counts restarts from 1 and resets after the 19th, 39th,
-// ... with the old constant 20.
+// ... with the old constant 20.  A reset is skipped while no constraint has
+// been learnt since the last one: a dependency counts as a conflict for the
+// restart schedule, so restarting and resetting after every conflict (the
+// stress configuration) would otherwise repeat the same decisions and the
+// same dependency forever.
 bool Internal::resetting_dependencies () const {
-  return opts.dl && (stats.restarts + 1) % opts.depreset == 0;
+  return opts.dl && (stats.restarts + 1) % opts.depreset == 0 &&
+         stats.learned[0] + stats.learned[1] > depend.learned;
 }
 
 void Internal::reset_dependencies () {
   stats.depresets++;
+  depend.learned = stats.learned[0] + stats.learned[1];
   LOG ("resetting dependencies");
   for (std::vector<Var> &on : depend.on)
     on.clear ();

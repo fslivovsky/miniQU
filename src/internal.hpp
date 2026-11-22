@@ -53,6 +53,7 @@ struct Depend {
   std::vector<std::vector<Var>> on;
   std::vector<std::vector<Var>> watching;
   size_t propagated = 0;
+  int64_t learned = 0; // learnt constraints at the last reset
 };
 
 // The resolvent of 'analyze_qu' as variables per block, so that the

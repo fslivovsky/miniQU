@@ -87,15 +87,22 @@ static void test_watches () {
   internal.check_invariants ();
 }
 
-// Every 'depreset'-th restart, counted as the old 'curr_restarts + 1'.
+// Every 'depreset'-th restart, counted as the old 'curr_restarts + 1', if
+// a constraint was learnt since the last reset.
 static void test_reset_schedule () {
   Internal internal;
   with_dl (internal, "e");
   internal.stats.restarts = 19;
+  CHECK (!internal.resetting_dependencies ());
+  internal.stats.learned[1] = 1;
   CHECK (internal.resetting_dependencies ());
   internal.stats.restarts = 20;
   CHECK (!internal.resetting_dependencies ());
   internal.opts.depreset = 1;
+  CHECK (internal.resetting_dependencies ());
+  internal.reset_dependencies ();
+  CHECK (!internal.resetting_dependencies ());
+  internal.stats.learned[0] = 1;
   CHECK (internal.resetting_dependencies ());
   internal.opts.dl = 0;
   CHECK (!internal.resetting_dependencies ());
