@@ -14,6 +14,19 @@
 // stored reference, in the lists, the reasons and the watch lists that are
 // clean, is to a moved constraint; clean watch lists hold no garbage (the
 // state after a garbage collection, ARCHITECTURE 5.3).
+//
+// Mode 2 (propagate_ldq.cpp, ARCHITECTURE 6.3): watch lists may hold stale
+// entries, also of deleted constraints in clean lists, which are accepted;
+// a live constraint must still be watched by its literals 0 and 1.  Once
+// propagation is complete, a constraint that is not disabled and whose
+// watches are as mode 2 keeps them (a primary literal and another primary
+// one or a secondary one left of it) is not unit under the long-distance
+// rule.  An original keeps its first two literals watched until one of
+// them vanishes, which may miss a unit or a conflict (as in the old
+// solver), so it is exempt until then.  A reason in mode 2 may contain
+// secondary literals that were unassigned and right of the forced one
+// when it propagated and were assigned later either way, so only its
+// primary literals are checked.
 
 #include "internal.hpp"
 
@@ -56,6 +69,38 @@ watched_positions (const Watches &watches, const Arena &arena, Var vars) {
   return result;
 }
 
+// Watched by a primary literal and by another primary one or a secondary
+// one left of it.
+static bool long_distance_watched (const Internal &internal, Kind kind,
+                                   const Constraint &c) {
+  const auto watches = [&] (Lit p, Lit other) {
+    return internal.prefix.is_primary (kind, var (p)) &&
+           (internal.prefix.is_primary (kind, var (other)) ||
+            var (other) < var (p));
+  };
+  return watches (c[0], c[1]) || watches (c[1], c[0]);
+}
+
+// Not disabled, exactly one primary literal not vanished, and every
+// unassigned secondary literal right of it.
+static bool long_distance_unit (const Internal &internal, Kind kind,
+                                const Constraint &c) {
+  Var unit = no_var, blocking = no_var;
+  for (Lit l : c) {
+    if (internal.kval (kind, l) > 0)
+      return false;
+    if (internal.kval (kind, l) < 0)
+      continue;
+    if (!internal.prefix.is_primary (kind, var (l)))
+      blocking = std::min (blocking, var (l));
+    else if (unit != no_var)
+      return false;
+    else
+      unit = var (l);
+  }
+  return unit != no_var && unit < blocking;
+}
+
 void Internal::check_invariants () const {
   const Var vars = prefix.size ();
   std::vector<uint8_t> marked (2 * (size_t) vars, 0);
@@ -95,6 +140,11 @@ void Internal::check_invariants () const {
                              [&] (Lit l) { return kval (kind, l) > 0; }),
             "constraint %lu watched by a vanished literal",
             (unsigned long) c.id ());
+        CHECK_INVARIANT (opts.mode != 2 || propagated < trail.size () ||
+                             !long_distance_watched (*this, kind, c) ||
+                             !long_distance_unit (*this, kind, c),
+                         "constraint %lu unit but not propagated",
+                         (unsigned long) c.id ());
       }
 
   for (Kind kind : {Kind::Clause, Kind::Cube})
@@ -105,6 +155,9 @@ void Internal::check_invariants () const {
           continue;
         for (const Watch &w : watches (kind, p)) {
           const Constraint &c = deref (arena, w.ref);
+          if (opts.mode == 2 && c.garbage () &&
+              watch_key (kind, c[0]) != p && watch_key (kind, c[1]) != p)
+            continue;
           CHECK_INVARIANT (!c.garbage () && !c.moved (),
                            "clean watch list of %u holds a deleted or "
                            "moved constraint",
@@ -155,7 +208,9 @@ void Internal::check_invariants () const {
       CHECK_INVARIANT (std::find (c.begin (), c.end (), forced) != c.end (),
                        "reason of %u does not contain it", v + 1);
       for (Lit other : c)
-        CHECK_INVARIANT (other == forced || kval (c.kind (), other) < 0,
+        CHECK_INVARIANT (other == forced || kval (c.kind (), other) < 0 ||
+                             (opts.mode == 2 &&
+                              !prefix.is_primary (c.kind (), var (other))),
                          "reason of %u is not unit", v + 1);
     }
   }

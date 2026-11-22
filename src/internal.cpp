@@ -67,6 +67,9 @@ void Internal::search () {
 }
 
 Status Internal::solve () {
+  if (opts.ccminmode && opts.mode != 2 && !minimizing ())
+    MSG ("warning: no learnt minimisation while a proof, trace or check "
+         "is written (M1)");
   if (status == Status::Unknown)
     search ();
   // The old solver records the certificate on the trail as the search

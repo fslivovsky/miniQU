@@ -19,6 +19,7 @@
 #include <atomic>
 #include <cstdint>
 #include <span>
+#include <utility>
 #include <vector>
 
 namespace miniqu {
@@ -63,6 +64,26 @@ struct Depend {
 struct LevelAnalysis {
   std::vector<std::vector<Var>> at;
   std::vector<int> position;
+};
+
+// The resolvent of 'analyze_ldq' as literals per block.  A long-distance
+// resolvent may hold both literals of a secondary variable, so positions
+// are per literal: 'position[index (l)]' is the index of 'l' in
+// 'at[depth (var (l))]', or -1.  Empty outside 'analyze_ldq'.
+struct LongDistanceAnalysis {
+  std::vector<std::vector<Lit>> at;
+  std::vector<int> position;
+};
+
+// Scratch state of 'minimize.cpp'.  'touched' lists the variables whose
+// 'seen' flags minimisation set; 'bound' is valid for variables flagged as
+// cached (ccminmode 3); 'stack' is the explicit recursion of ccminmode 2;
+// 'keys' pairs each literal with its bound.
+struct Minimizer {
+  std::vector<Var> touched;
+  std::vector<Var> bound;
+  std::vector<std::pair<uint32_t, Lit>> stack;
+  std::vector<std::pair<Var, Lit>> keys;
 };
 
 // The list in which a constraint of that kind watching 'l' is found: the
@@ -118,6 +139,8 @@ struct Internal {
   std::vector<uint64_t> chain;    // antecedent ids, only with a proof
   std::vector<int> glue_levels;
   LevelAnalysis qu;
+  LongDistanceAnalysis ldq;
+  Minimizer minimizer;
 
   Depend depend;
 
@@ -167,6 +190,7 @@ struct Internal {
   template <Lone R> [[nodiscard]] Ref propagate_trail ();
   [[nodiscard]] Ref propagate ();
   [[nodiscard]] Ref propagate_ldq ();
+  template <Kind K> [[nodiscard]] Ref propagate_ldq_watches (Lit p);
 
   // backtrack.cpp
   void backtrack (int new_level);
@@ -197,10 +221,19 @@ struct Internal {
   // analyze_qu.cpp
   void analyze_qu (Ref conflict);
 
+  // analyze_ldq.cpp
+  void analyze_ldq (Ref conflict);
+
   // learn.cpp
   uint32_t compute_glue (std::span<const Lit>);
+  bool minimizing () const;
   void learn (Kind, Var asserting);
+  void learn_watched (Kind);
+  void learn_empty (Kind);
   void learn_dependency (Var x, Var y);
+
+  // minimize.cpp
+  void minimize (std::vector<Lit> &lits, Kind);
 
   // reduce.cpp
   void init_reduce ();

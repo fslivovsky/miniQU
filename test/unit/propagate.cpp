@@ -2,7 +2,6 @@
 // propagate.cpp), and lazy detaching of deleted constraints.
 
 #include "propagate.hpp"
-#include "child.hpp"
 #include "internal_test.hpp"
 #include "test.hpp"
 
@@ -235,16 +234,6 @@ static void test_garbage () {
   CHECK_EQ (deref (internal.arena, b).size (), 1u);
 }
 
-static void test_mode2 () {
-  CHECK (dies_with (
-      [] {
-        Internal internal;
-        internal.opts.mode = 2;
-        (void) internal.propagate ();
-      },
-      "mode 2 not implemented yet"));
-}
-
 int main () {
   test_clause_chain ();
   test_cube_chain ();
@@ -253,6 +242,5 @@ int main () {
   test_blockers_and_watches ();
   test_conflict_keeps_watches ();
   test_garbage ();
-  test_mode2 ();
   return test_result ();
 }

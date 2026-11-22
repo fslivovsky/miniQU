@@ -46,11 +46,6 @@ namespace miniqu {
 
 namespace {
 
-// Features whose task has not been done yet are rejected (ROADMAP, M1
-// execution plan): option values above the largest one implemented.
-const std::pair<const char *, int> implemented_up_to[] = {{"mode", 1},
-                                                          {"ccminmode", 0}};
-
 void print_usage () {
   printf ("usage: miniQU [options] [input [result]]\n\n"
           "The input is QCIR if its name ends in 'qcir' (or with --qcir), "
@@ -139,10 +134,6 @@ void App::parse_arguments (int argc, char **argv) {
     else
       files.push_back (arg);
   }
-  for (const auto &[name, largest] : implemented_up_to)
-    if (opts.get (name) > largest)
-      fatal ("option '--%s=%d': not implemented yet", name,
-             opts.get (name));
 }
 
 bool App::qcir_input () const {

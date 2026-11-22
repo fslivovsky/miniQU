@@ -12,8 +12,11 @@
 //
 // The collector runs only at safe points (after 'reduce'): no 'Ref' may be
 // held in a local variable, a conflict in flight or an analysis buffer.
-// Blockers are literals and stay valid.  The buffer of 'model.cpp' is
-// allocated afresh; its contents are dead between two initial cubes.
+// Blockers are literals and stay valid.  A stale watch of mode 2
+// (propagate_ldq.cpp) is relocated like any other: it refers to a live
+// constraint, which is copied once and forwarded.  The buffer of
+// 'model.cpp' is allocated afresh; its contents are dead between two
+// initial cubes.
 //
 // Not a QBF technique: no side conditions, no proof steps (every deletion
 // was logged when it was marked).
@@ -65,7 +68,10 @@ void Internal::garbage_collect () {
   PROFILE_SCOPE (collect);
   assert (lone == lit_undef);
   stats.collections++;
-  watches.clean_all (arena);
+  if (opts.mode == 2)
+    watches.clean_every_list (arena);
+  else
+    watches.clean_all (arena);
 
   // Everything the arena holds that is not wasted, plus room to avoid a
   // reallocation of the new arena during the copy.

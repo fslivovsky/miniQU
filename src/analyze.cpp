@@ -46,12 +46,15 @@
 
 namespace miniqu {
 
-// The dispatch on the mode (ARCHITECTURE 4.7): mode 1 and
-// '--legacyanalyze' use the level-by-level analysis ('analyze_qu.cpp').
-// Every conflict counts once, however its analysis ends.
+// The dispatch on the mode (ARCHITECTURE 4.7): mode 2 has its own
+// analysis ('analyze_ldq.cpp'), mode 1 and '--legacyanalyze' use the
+// level-by-level one ('analyze_qu.cpp').  Every conflict counts once,
+// however its analysis ends.
 void Internal::analyze (Ref conflict) {
   stats.conflicts++;
-  if (opts.mode == 1 || opts.legacyanalyze)
+  if (opts.mode == 2)
+    analyze_ldq (conflict);
+  else if (opts.mode == 1 || opts.legacyanalyze)
     analyze_qu (conflict);
   else
     analyze_q (conflict);

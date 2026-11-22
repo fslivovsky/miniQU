@@ -108,6 +108,18 @@ public:
     }
   }
 
+  // Removes garbage from every list, dirty or not.  Mode 2 needs it before
+  // garbage collection: its stale entries (propagate_ldq.cpp) may refer to
+  // a deleted constraint from a list that deleting did not smudge.
+  void clean_every_list (const Arena &arena) {
+    for (PerKind &k : kinds) {
+      for (std::vector<Watch> &list : k.lists)
+        remove_garbage (list, arena);
+      std::fill (k.dirty.begin (), k.dirty.end (), 0);
+      k.dirty_lits.clear ();
+    }
+  }
+
   // Drops all watches, to reconnect after a pass that rewrites many
   // constraints (ARCHITECTURE 10.2).
   void clear_all () {
