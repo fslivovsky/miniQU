@@ -21,11 +21,11 @@ Rebuild from scratch:
     mkdir -p /home/ec2-user/miniqu-work/{logs,proofs,baseline}
     git worktree add /home/ec2-user/miniqu-work/baseline-src c39005a   # detached
     cmake -S /home/ec2-user/miniqu-work/baseline-src -B /home/ec2-user/miniqu-work/baseline-build -DCMAKE_BUILD_TYPE=Release
-    taskset -c 0-63 make -C /home/ec2-user/miniqu-work/baseline-build -j16
+    taskset -c 0-47 make -C /home/ec2-user/miniqu-work/baseline-build -j16
     cp /home/ec2-user/miniqu-work/baseline-build/miniQU /home/ec2-user/miniqu-work/baseline/miniQU
     echo c39005a > /home/ec2-user/miniqu-work/baseline/GIT_HASH
     # Lean checker (nothing of Mathlib is compiled, only downloaded)
-    cd /home/ec2-user/qu-check && git submodule update --init && taskset -c 0-63 lake build
+    cd /home/ec2-user/qu-check && git submodule update --init && taskset -c 0-47 lake build
     # binary: /home/ec2-user/qu-check/.lake/build/bin/qlrup-check [--stats] FORMULA.qcir PROOF
     # (its own test.sh also works)
 
@@ -33,18 +33,28 @@ Benchmarks: `/home/ec2-user/benchmarks/qcir` (376 .qcir files, from ~/benchmarks
 
 ## Core convention
 
-Timed benchmark jobs run on cores 64-127, one core per job (`taskset`). Every
-other heavy command (builds, fuzzing, proof checking) is prefixed with
-`taskset -c 0-63` and uses at most ~16 parallel jobs. run.py's proof phase and
-tests/regress.sh follow this by default.
+Timed benchmark jobs run on the upper half of the cores, one core per job (`taskset`); every
+other heavy command (builds, fuzzing, proof checking) runs on the lower half
+(`taskset -c 0-$((nproc/2-1))`) and uses at most ~16 parallel jobs. On 96 cores: timed jobs on
+cores 48-95, everything else on 0-47. run.py's defaults and tests/regress.sh follow this, computed
+from the number of cores of the machine; run.py exits before starting a job if a core of `--cores`
+or `--proof-cores` does not exist or `--jobs` exceeds the cores given.
+
+Timings are comparable only between runs on the same instance type with the same harness
+settings (ROADMAP 0.3). The old results `baseline-t180`, `baseline-dl-t180` and `baseline-t900`
+(64 jobs on the former 128-core machine) serve verdict checks only. A same-machine baseline run is
+tagged `baseline-c<NPROC>-<config>-t<TIMEOUT>` (frozen baseline binary, identical jobs, cores,
+memory limit, timeout and seeds as the run it is compared with) and is reused only if its
+`meta.json` matches; otherwise it is run first.
 
 ## run.py
 
     python3 bench/run.py --solver PATH --tag TAG --timeout 300 [--args "-opt1 -opt2"] [--seed S]
-        [--jobs 48] [--cores 64-127] [--mem-gb 16] [--instances GLOB|FILE.txt|NAMES...]
+        [--jobs N/2] [--cores N/2-(N-1)] [--mem-gb 8] [--instances GLOB|FILE.txt|NAMES...]
         [--proof-check [--proof-max-solve-sec 60] [--proof-timeout 3600] [--proof-mem-gb 32] [--proof-max-gb 8]]
 
-Defaults are the fixed parameters of ROADMAP 0.3 (`--jobs 48 --mem-gb 16 --cores 64-127`).
+Defaults are the fixed parameters of ROADMAP 0.3 for a machine of N cores: `--jobs N/2 --mem-gb 8
+--cores N/2-(N-1)` (96 cores: `--jobs 48 --cores 48-95`).
 
 * Each instance runs once, pinned to one core; wall time, CPU time and peak RSS
   are recorded. Timeout (wall) and memory limit (RSS) are enforced by killing
@@ -76,7 +86,7 @@ Defaults are the fixed parameters of ROADMAP 0.3 (`--jobs 48 --mem-gb 16 --cores
   deleted after its check. `proof_status`: `ok`, `rejected`, `wrong_verdict`, `check_error`
   (bugs: run.py exits 1), `check_timeout`, `check_memout`, `too_large`, `solve_*` (the proof run did
   not finish or gave another result; coverage gaps), `n/a` when not attempted. The proof phase
-  runs on `--proof-cores` (default 0-63) with `--proof-jobs` (default 16) jobs, at most 6 when
+  runs on `--proof-cores` (default: the lower half, `0-(N/2-1)`) with `--proof-jobs` (default 16) jobs, at most 6 when
   `--proof-timeout` is at least 3600.
 * **Timed proof-on runs** (proof overhead): `--args "-proof-binary -proof={proof}"`; `{proof}` is
   replaced by a file in the work directory that is deleted after the run; `proof_bytes` is
@@ -131,7 +141,7 @@ proof, the proof bytes in total and per conflict, and the size after trimming.
 
 Tags are `m1-<new|base>-<config>-t<timeout>-s<seed>`. NEW and BASE are the release binary and
 `/home/ec2-user/miniqu-work/baseline/miniQU`; results go to `bench/results/`. Start one run at a
-time on cores 64-127 (`pgrep -f bench/run.py` must be empty) and wait for it with
+time on the upper half of the cores (`pgrep -f bench/run.py` must be empty) and wait for it with
 `timeout 540 tail --pid=PID -f /dev/null`.
 
     NEW=/home/ec2-user/miniqu-work/build/release/miniQU
@@ -184,6 +194,13 @@ time on cores 64-127 (`pgrep -f bench/run.py` must be empty) and wait for it wit
 `--solver $BASE`.) The fidelity report of the gate is specified for seed 0: run the two
 seed-0 timed phases (`m1-new-default-t60-s0` and the same with `--solver $BASE`) and pass those.
 
+    # QDIMACS fuzzing with the extreme collection options (release 1 300, asan 1 100), alone and combined with -dl, -mode=1 and -mode=2
+    ASAN=/home/ec2-user/miniqu-work/build/asan/miniQU
+    for OPT in '' -dl -mode=1 -mode=2; do
+      tests/fuzz_qdimacs.sh $NEW 1 300 --reduceint=2 --tier1glue=0 --gcfrac=0 $OPT
+      tests/fuzz_qdimacs.sh $ASAN 1 100 --reduceint=2 --tier1glue=0 --gcfrac=0 $OPT
+    done
+
 ## smoke.txt
 
 35 instances (33 names) that the baseline solves in under 3 s (mixed families, SAT and UNSAT).
@@ -213,7 +230,7 @@ Solver timeouts only warn. `tests/fuzz.sh` can also be used alone
 ## tests/check_cert.py and tests/fuzz_cert.sh
 
     tests/check_cert.py [--reference SOLVER] SOLVER FILE [solver options...]
-    taskset -c 0-63 tests/fuzz_cert.sh SOLVER FIRST LAST [solver options...]
+    taskset -c 0-47 tests/fuzz_cert.sh SOLVER FIRST LAST [solver options...]
 
 `check_cert.py` runs the solver with `-cert`, substitutes the `V` line into the formula (the
 outermost block becomes existential and is fixed by a conjunct) and decides the result again with

@@ -118,7 +118,7 @@ for seed in $(seq "$FIRST" "$LAST"); do
 done
 
 touch "$TMP/failures" "$TMP/compared"
-printf '%s\n' "${files[@]}" | taskset -c 0-63 xargs -P "$JOBS" -I{} bash -c 'check "$1"' _ {}
+printf '%s\n' "${files[@]}" | taskset -c "0-$(($(nproc --all) / 2 - 1))" xargs -P "$JOBS" -I{} bash -c 'check "$1"' _ {}
 cat "$TMP/failures"
 failures=$(grep -c '^FAIL' "$TMP/failures")
 echo "${#files[@]} instances, $(awk '{n += $1} END {print n + 0}' "$TMP/compared") constraints compared, $failures differences"

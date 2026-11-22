@@ -9,7 +9,7 @@ and with -dl (statistics on, "conflicts :" line parsed). Prints, per parameter
 set and configuration, a histogram of conflict counts, the fraction in
 [100, 10000), and the maximal solve time. With --check the default run is
 repeated with a binary proof that the Lean checker must accept within 120 s.
-Run it under taskset -c 0-63; scratch files are deleted after use.
+Run it on the lower half of the cores (taskset -c 0-47 on 96 cores); scratch files are deleted after use.
 """
 import argparse
 import csv

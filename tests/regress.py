@@ -224,7 +224,7 @@ def smoke(args, config):
     shutil.rmtree(run_dir, ignore_errors=True)   # run.py resumes: results of an older binary must not count
     cmd = [sys.executable, os.path.join(REPO, 'bench', 'run.py'), '--solver', args.solver,
            '--args=' + shlex.join(config.options), '--tag', 'regress', '--results-dir', run_dir,
-           '--timeout', '120', '--jobs', str(args.jobs), '--cores', '0-63',
+           '--timeout', '120', '--jobs', str(args.jobs), '--cores', '0-%d' % (os.cpu_count() // 2 - 1),
            '--instances', os.path.join(REPO, 'bench', 'smoke.txt'), '--proof-jobs', str(args.jobs),
            '--proof-args=' + args.proof_opts, '--checker', args.checker]
     if config.proofs and args.proofs:

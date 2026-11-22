@@ -43,7 +43,8 @@
 #
 # Exit status is 1 on any wrong verdict, rejected proof, crash (exit code other
 # than 10/20), failed assertion; reproducing commands are printed.
-# Heavy jobs run on cores 0-63 as per the project convention.
+# Heavy jobs run on the lower half of the cores (0-47 on 96 cores) as per the
+# project convention; the timed benchmarks of bench/run.py use the upper half.
 
 HERE=$(cd "$(dirname "$0")" && pwd)
 SEEDS=1:20; JOBS=16; MATRIX=; ROWS=; TIMEOUT=20
@@ -95,6 +96,6 @@ else
 fi
 
 mkdir -p "$WORK"
-exec taskset -c 0-63 python3 "$HERE/regress.py" --solver "$SOLVER" --baseline "$BASELINE" \
+exec taskset -c "0-$(($(nproc --all) / 2 - 1))" python3 "$HERE/regress.py" --solver "$SOLVER" --baseline "$BASELINE" \
     --checker "$CHECKER" --seeds "$SEEDS" --jobs "$JOBS" --timeout "$TIMEOUT" \
     --proof-opts="$PROOF_OPTS" --work "$WORK" "${engine_flags[@]}"

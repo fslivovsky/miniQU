@@ -83,8 +83,9 @@ Build rules:
   | `asan`    | `-O1 -g -fsanitize=address,undefined -fno-sanitize-recover`, assertions | fuzzing |
   | `log`     | `-O2 -g -DNDEBUG` + `MINIQU_LOGGING`                         | tracing a long run |
 
-  Usage: `taskset -c 0-63 cmake --preset release && taskset -c 0-63 cmake
-  --build --preset release -j16`. Targets: `miniQU` (binary), `miniqu`
+  Usage: `taskset -c 0-47 cmake --preset release && taskset -c 0-47 cmake
+  --build --preset release -j16` (lower half of the cores, here 0-47 of 96;
+  timed benchmarks use the upper half). Targets: `miniQU` (binary), `miniqu`
   (static library), `qlrup-trim`, `unit-tests` (all unit test executables),
   and `ctest --preset <p>` runs them plus a 20-seed fuzz (from M1-T05 on; in
   M1-T02 ctest runs the unit tests and the `format` test). Presets also

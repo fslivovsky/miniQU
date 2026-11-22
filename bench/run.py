@@ -79,6 +79,30 @@ def parse_cores(spec):
     return cores
 
 
+def half_cores():
+    """(lower, upper) half of the machine's cores as core specs, e.g. ("0-47", "48-95") on 96 cores.
+
+    Timed runs use the upper half, everything else (proof phase, builds, fuzzing) the lower half;
+    os.cpu_count() and not the affinity mask, so that the answer does not depend on a surrounding taskset.
+    """
+    n = os.cpu_count()
+    half = max(n // 2, 1)
+    return "0-%d" % (half - 1), "%d-%d" % (half, max(n - 1, half))
+
+
+def check_cores(args):
+    """Exit before any job starts if a core does not exist or the jobs outnumber the cores."""
+    n = os.cpu_count()
+    for option, cores in (("--cores", args.cores), ("--proof-cores", args.proof_cores)):
+        missing = [c for c in cores if c >= n]
+        if missing:
+            sys.exit("run.py: %s names core %d, but this machine has only %d cores (0-%d); "
+                     "the defaults are the halves of the machine" % (option, missing[0], n, n - 1))
+    if args.jobs > len(args.cores):
+        sys.exit("run.py: --jobs %d exceeds the %d cores of --cores %s (one job per core)" %
+                 (args.jobs, len(args.cores), args.cores_spec))
+
+
 def resolve_instances(specs, bench_dir):
     """Each spec is a glob (relative to bench_dir), an instance path, or a text
     file with one instance name per line (lines starting with '#' are comments).  Returns sorted unique
@@ -482,9 +506,11 @@ def main():
                          "(baseline: '-rnd-init -rnd-seed={seed}')")
     ap.add_argument("--tag", required=True, help="name of the run; results go to results/TAG")
     ap.add_argument("--timeout", type=float, default=300, help="wall-clock limit in seconds")
-    ap.add_argument("--jobs", type=int, default=48, help="parallel jobs (one core each)")
-    ap.add_argument("--cores", default="64-127", help="cores for timed runs, e.g. 64-127")
-    ap.add_argument("--mem-gb", type=float, default=16, help="memory limit per job (RSS)")
+    lower, upper = half_cores()
+    ap.add_argument("--jobs", type=int, default=os.cpu_count() // 2,
+                    help="parallel jobs (one core each; default: half the cores of the machine)")
+    ap.add_argument("--cores", default=upper, help="cores for timed runs (default: the upper half of the cores)")
+    ap.add_argument("--mem-gb", type=float, default=8, help="memory limit per job (RSS)")
     ap.add_argument("--instances", nargs="+", default=["*.qcir"],
                     help="globs (relative to --bench-dir), paths, or .txt lists of names")
     ap.add_argument("--bench-dir", default=DEFAULT_BENCH_DIR)
@@ -508,8 +534,8 @@ def main():
     ap.add_argument("--proof-args", default="-proof-binary",
                     help="extra solver flags for proof runs (default: binary format)")
     ap.add_argument("--proof-jobs", type=int, default=16)
-    ap.add_argument("--proof-cores", default="0-63",
-                    help="cores for the proof phase (not the benchmark cores)")
+    ap.add_argument("--proof-cores", default=lower,
+                    help="cores for the proof phase (default: the lower half of the cores)")
     ap.add_argument("--proof-dir", default=DEFAULT_PROOF_DIR)
     ap.add_argument("--checker", default=DEFAULT_CHECKER)
     args = ap.parse_args()
@@ -522,6 +548,7 @@ def main():
     args.cores_spec = args.cores
     args.cores = parse_cores(args.cores)
     args.proof_cores = parse_cores(args.proof_cores)
+    check_cores(args)
     if args.proof_check and "{proof}" in args.args:
         sys.exit("run.py: {proof} in --args (timed proof run) cannot be combined with --proof-check")
     if (args.proof_check or args.trim_size) and not os.access(args.trim, os.X_OK):

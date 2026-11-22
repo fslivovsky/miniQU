@@ -140,6 +140,13 @@ decisions; quantifier blocks only have to be complete with respect to their
 decision variables before the solver moves on to the next block (without
 dependency learning).
 
+## Cores
+
+Benchmark runs (`bench/run.py`) use the upper half of the machine's cores, one job per core
+(on 96 cores: `--cores 48-95 --jobs 48`); builds, fuzzing, proof checking and `tests/regress.sh` use
+the lower half (`taskset -c 0-47`). Both are computed from the number of cores; see
+`bench/README.md`.
+
 ## Testing
 
 `ctest --preset release` (or `asan`, `debug`) runs the unit tests of `test/unit`, the format check

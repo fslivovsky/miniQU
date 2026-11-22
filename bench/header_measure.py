@@ -4,7 +4,7 @@
 Compares the baseline and the new release binary, both with default options,
 on (a) the ten largest instances (by file size) the baseline solves and (b)
 the ten solved instances with the highest baseline propagation counts.  Each
-run is pinned to one core, at most 8 run in parallel on cores 0-63.  This
+run is pinned to one core, at most 8 run in parallel on cores 0-7 (the lower half of the machine).  This
 is a ratio measurement of propagation speed and memory, not a benchmark
 claim: different search paths make the two binaries do different work.
 

@@ -15,7 +15,8 @@
 # Environment: JOBS (parallel checks, default 12), KEEP_DIR (default
 # /home/ec2-user/miniqu-work/cert/BINARY-NAME-OPTIONS), TIMEOUT (per solver
 # run, default 60), BASELINE (reference solver for the large instances).
-# Heavy jobs belong on cores 0-63: run it under taskset -c 0-63.
+# Heavy jobs belong on the lower half of the cores: run it under
+# taskset -c 0-$(($(nproc --all) / 2 - 1)).
 
 SOLVER=$(readlink -f "$1"); FIRST=$2; LAST=$3; shift 3
 DIR=$(cd "$(dirname "$0")" && pwd)
