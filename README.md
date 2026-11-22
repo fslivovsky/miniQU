@@ -1,56 +1,79 @@
 # miniQU
 
-miniQU is a QCDCL solver for quantified Boolean formulas (QBF), built on top of
-[MiniSat](http://minisat.se) 2.2. It reads prenex formulas in QDIMACS (CNF
-matrix) or QCIR (circuit matrix) format, learns clauses and terms (cubes), and
-supports dependency learning as well as propagation and learning with
-QU-resolution and long-distance Q-resolution.
+miniQU is a QCDCL solver for quantified Boolean formulas (QBF), written in C++20 in the style of
+[CaDiCaL](https://github.com/arminbiere/cadical) and descended from the MiniSat-based solver it
+started as. It reads prenex formulas in QDIMACS (CNF matrix) or QCIR (circuit matrix) format,
+learns clauses and terms (cubes), and supports dependency learning as well as propagation and
+learning with QU-resolution and long-distance Q-resolution. Constraints live in an arena and
+watch lists are kept in memory in the order of their accesses, as in MiniSat. The structure of
+the sources is described in `doc/rewrite/ARCHITECTURE.md`; the previous implementation is kept
+in `minisat/` (see below).
 
 ## Building
 
-A C++17 compiler and zlib are required.
+A C++20 compiler (GCC 11 or clang), CMake 3.22 and zlib are required. The presets of
+`CMakePresets.json` put the build trees next to the repository, in `../miniqu-work/build/<preset>`:
+
+| preset | use |
+|---|---|
+| `release` | benchmarks: `-O3`, no assertions, no logging code, LTO |
+| `release-clang` | the same with clang++ |
+| `debug` | development: `-O0`, assertions, logging code (`--log=1`) |
+| `asan` | fuzzing: address and undefined behaviour sanitizers, assertions |
+| `log` | tracing a long run: optimised, logging code, no assertions |
 
 ```bash
-make r
+cmake --preset release
+cmake --build --preset release -j8     # ../miniqu-work/build/release/miniQU
+ctest --preset release                 # unit tests, formatting, encoding, tooling, regressions, fuzzing
 ```
 
-builds `build/release/bin/miniQU` (use `make d` for a debug build with
-assertions and very verbose logging). Alternatively, with CMake:
+`ctest` needs the Lean proof checker (`qlrup-check`, see `bench/README.md`) and the frozen
+baseline binary for the end-to-end tests. Without CMake presets, `cmake -S . -B build` builds the
+same targets: `miniQU`, `qlrup-trim` (proof trimmer) and the unit tests.
 
-```bash
-cmake -S . -B build-cmake
-cmake --build build-cmake
-```
+The previous implementation is not part of the CMake build; `make r` builds it from `minisat/` to
+`build/release/bin/miniQU`.
 
 ## Usage
 
 ```bash
-miniQU [options] <input-file>
+miniQU [options] <input-file> [result-file]
 ```
 
-The input is parsed as QCIR if the file name ends in `qcir` (or if `-qcir` is
-given), and as (optionally gzipped) QDIMACS otherwise. The result is printed as
-`SATISFIABLE` or `UNSATISFIABLE`, and the exit code is 10 for true and 20 for
+The input is parsed as QCIR if the file name ends in `qcir` (or if `--qcir` is given), and as
+(optionally gzipped) QDIMACS otherwise; without a file QDIMACS is read from standard input. The
+result is printed as `SATISFIABLE` or `UNSATISFIABLE`, and the exit code is 10 for true and 20 for
 false formulas.
 
-The most important options (see `--help` for all of them):
+Options are written `--name=value`, `--name` (value 1) and `--no-name` (value 0). A single dash and
+hyphens inside names are accepted as well, so the spellings of the previous solver keep working
+(`-ccmin-mode=3`, `-early-tseitin`, `-no-dl`, `-cpu-lim=60`, `-proof-binary`). `--help` lists every
+option with its default and range. The most important ones:
 
 | Option | Default | Description |
 |---|---|---|
-| `-dl`, `-no-dl` | off | Dependency learning: decisions may be made in any order, and dependencies between variables are learnt from conflicts. |
-| `-mode=<0,1,2>` | 0 | Propagation and learning with Q-resolution (0), QU-resolution (1), or long-distance Q-resolution (2). |
-| `-ccmin-mode=<0..3>` | 0 | Minimization of learnt clauses and terms: none (0), MiniSat's local (1) and recursive (2) minimization, or recursive minimization that takes reduction into account (3). |
-| `-early-tseitin`, `-no-early-tseitin` | on | QCIR only: quantify the variables that represent gates right after the innermost variable the gate depends on (see below). |
-| `-cert` | off | Print the assignment of the outermost quantifier block. |
-| `-proof=<file>` | | Write a proof in the QLRUP format (QCIR input, modes 0 and 1); see `doc/proof-format.md`. Disables minimization. |
-| `-proof-binary` | off | Write the proof in the binary format. |
-| `-trace=<file>` | | Write a trace in the older format. Disables minimization. |
-| `-verb=<0,1,2>` | 1 | Verbosity. |
+| `--dl` | off | Dependency learning: decisions may be made in any order, and dependencies between variables are learnt from conflicts. |
+| `--mode=<0,1,2>` | 0 | Propagation and learning with Q-resolution (0), QU-resolution (1), or long-distance Q-resolution (2). |
+| `--ccminmode=<0..3>` | 0 | Minimization of learnt clauses and terms: none (0), local (1) and recursive (2) minimization, or recursive minimization that takes reduction into account (3). Off while a proof or trace is written. |
+| `--earlytseitin` / `--no-earlytseitin` | on | QCIR only: quantify the variables that represent gates right after the innermost variable the gate depends on (see below). |
+| `--legacyanalyze` | off | Use the analysis of the previous solver (`analyze_qu`) in mode 0. |
+| `--cert` | off | Print the assignment of the decision variables of the outermost block (`V` line). |
+| `--proof=<file>` | | Write a proof in the QLRUP format (QCIR input, modes 0 and 1); see `doc/proof-format.md`. Disables minimization. |
+| `--proofbinary` | off | Write the proof in the binary format. |
+| `--trace=<file>` | | Write a trace in the older format (modes 0 and 1). Disables minimization. |
+| `--cpulim=<s>`, `--memlim=<MB>` | none | Resource limits. |
+| `--seed=<n>` | 0 | Randomise the initial variable scores (0 = deterministic). |
+| `--verb=<0..3>` | 1 | Verbosity; `--verb=1` also prints the `c stat` counters. |
+
+The remaining options (restart, reduction, tier and stress parameters, `--check`, `--log`,
+`--profile`) are described by `--help` and in `doc/rewrite/ARCHITECTURE.md`.
 
 Whether dependency learning pays off depends on the instance: it can be
 essential when following the quantifier prefix forces bad decisions, and it
 can be slower on formulas with many alternations where the prefix order is a
-good guide.
+good guide. Neither setting is recommended here; the benchmark results in
+`bench/results/` compare both.
 
 ### QCIR support
 
@@ -68,7 +91,7 @@ are never used as decision variables.
 
 ### Conflict analysis
 
-In mode 0, clauses and terms are learnt by `Solver::analyzeQ()`. Since
+In mode 0, clauses and terms are learnt by `analyze_q` (`src/analyze.cpp`). Since
 propagation ignores the quantifier prefix, every literal of a conflicting
 constraint and of the reasons on the trail is assigned, and conflict analysis
 is essentially first-UIP learning with one extra condition. Call the
@@ -95,9 +118,9 @@ With `-ccmin-mode=3`, learnt constraints are then minimized: a literal is
 redundant if it can be resolved away, recursively, without introducing new
 literals other than secondary literals that disappear by reduction.
 
-Mode 1 still uses the older analysis (`Solver::analyze()`), which can also be
-selected in mode 0 with `-legacy-analyze` for comparison. Mode 2 uses
-`Solver::analyzeLDQ()`.
+Mode 1 still uses the older analysis (`analyze_qu`, `src/analyze_qu.cpp`), which can also be
+selected in mode 0 with `--legacyanalyze` for comparison. Mode 2 uses
+`analyze_ldq`.
 
 ### Prefix position of gate variables
 
@@ -119,22 +142,29 @@ dependency learning).
 
 ## Testing
 
-The scripts in `tests/` generate random QCIR instances and compare the result
-of the solver with a brute-force evaluator:
+`ctest --preset release` (or `asan`, `debug`) runs the unit tests of `test/unit`, the format check
+(`clang-format`), the comparison of the encoder with the original constraints of the baseline's
+proofs, the tests of the benchmark statistics (`bench/test_compare.py`), the regression instances of
+`tests/regressions/` and a 20-seed run of `tests/regress.sh` over the default and the `--dl`
+configurations. `tests/regress.sh` is the end-to-end driver: it compares verdicts with the
+brute-force evaluator and the baseline, checks every proof with the Lean checker and asserts that the
+fuzz instances reach restarts, reductions and garbage collection (`tests/matrix.txt` lists the
+configurations). Examples:
 
 ```bash
-tests/fuzz.sh build/release/bin/miniQU 1 100 -dl
+tests/regress.sh -s 1:300 -M all ../miniqu-work/build/release/miniQU   # whole configuration matrix
+tests/fuzz.sh ../miniqu-work/build/release/miniQU 1 100 -dl            # QCIR fuzzing
+tests/fuzz_qdimacs.sh ../miniqu-work/build/release/miniQU 1 200 -dl    # QDIMACS fuzzing
+tests/fuzz_cert.sh ../miniqu-work/build/release/miniQU 1 500           # -cert certificates
 ```
-
-runs the solver with option `-dl` on the instances for seeds 1 to 100. If the
-environment variable `REFERENCE` is set to another solver binary, larger
-instances are additionally checked against the result of that solver.
 
 - `tests/qcir_fuzz.py` generates small random circuits (and CNFs) with a
   random prefix; the expected result is included as a comment.
 - `tests/qcir_gen.py` generates instances from several scalable families.
 - `tests/qcir_eval.py` evaluates a small QCIR instance by brute force.
 - `tests/qdimacs2qcir.py` converts QDIMACS to QCIR.
+- `tests/check_cert.py` validates the certificate printed by `--cert`.
+- `bench/` holds the benchmark harness; see `bench/README.md`.
 
 ## License
 

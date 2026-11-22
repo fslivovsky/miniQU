@@ -135,17 +135,24 @@ add_test(NAME encoding-diff
 set_tests_properties(encoding-diff PROPERTIES
                      ENVIRONMENT ENCODING_DUMP=$<TARGET_FILE:encoding-dump>)
 
-# End-to-end: 20 fuzz seeds of the default configuration against the
-# baseline and the brute-force evaluator, and the regression instances, with
-# their proofs checked by the Lean checker.
+# End-to-end: 20 fuzz seeds of the default and the dependency-learning
+# configuration against the baseline and the brute-force evaluator, and the
+# regression instances, with their proofs checked by the Lean checker.
 add_test(NAME fuzz
-         COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/tests/regress.sh -S -s 1:20 -M default -j 8
+         COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/tests/regress.sh -S -s 1:20 -M default,dl -j 8
                  $<TARGET_FILE:miniQU>
          WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
 set_tests_properties(fuzz PROPERTIES ENVIRONMENT REGRESS_WORK=${CMAKE_BINARY_DIR}/regress)
 add_test(NAME run-regressions
          COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/tests/run_regressions.sh $<TARGET_FILE:miniQU>
          WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+
+# The tooling's own tests: paired statistics of bench/compare.py, evaluator.
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
+add_test(NAME bench-compare
+         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/bench/test_compare.py)
+add_test(NAME qcir-eval
+         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_qcir_eval.py)
 
 # Formatting is checked, not applied: .clang-format is the authority.
 find_program(CLANG_FORMAT clang-format)
@@ -157,32 +164,6 @@ if(CLANG_FORMAT)
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
 else()
   message(WARNING "clang-format not found: the format test is not registered")
-endif()
-
-#--------------------------------------------------------------------------------------------------
-# The old solver (minisat/), frozen; it is the reference until the parity gate and is removed from
-# this file by the last M1 task.  Its flags are untouched and -Werror does not apply to it.
-
-add_library(miniqu-old-lib STATIC
-    minisat/utils/Options.cc
-    minisat/utils/System.cc
-    minisat/core/Solver.cc
-    minisat/core/QBFParser.cc
-    minisat/core/QCIRParser.cc
-    minisat/simp/SimpSolver.cc)
-
-target_include_directories(miniqu-old-lib PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-target_compile_definitions(miniqu-old-lib PUBLIC __STDC_FORMAT_MACROS __STDC_LIMIT_MACROS)
-target_compile_options(miniqu-old-lib PRIVATE -Wall -Wno-parentheses -Wno-class-memaccess)
-target_link_libraries(miniqu-old-lib PUBLIC ZLIB::ZLIB)
-set_target_properties(miniqu-old-lib PROPERTIES CXX_STANDARD 17 OUTPUT_NAME "miniQU-old")
-
-add_executable(miniQU-old minisat/simp/Main.cc)
-set_target_properties(miniQU-old PROPERTIES CXX_STANDARD 17)
-target_link_libraries(miniQU-old miniqu-old-lib)
-
-if(STATIC_BINARIES)
-  target_link_libraries(miniQU-old -static)
 endif()
 
 #--------------------------------------------------------------------------------------------------
