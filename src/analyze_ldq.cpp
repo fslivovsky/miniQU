@@ -82,6 +82,9 @@ public:
 private:
   bool is_primary (Var v) const { return s.prefix.is_primary (kind, v); }
   int depth (Var v) const { return (int) s.prefix.depth (v); }
+  bool primary_block (int d) const {
+    return s.prefix.blocks[(size_t) d].quant == primary (kind);
+  }
   bool contains (Lit l) const { return position[index (l)] >= 0; }
   int &count (Var v) { return s.level_count[(size_t) s.level (v)]; }
 
@@ -141,9 +144,10 @@ void LongDistanceAnalyzer::start (Ref conflict) {
 // The old 'getAssertingVarLDQ'.
 Var LongDistanceAnalyzer::first_on_max_level () const {
   for (int d = 0; d <= rightmost; d++)
-    for (Lit l : at[(size_t) d])
-      if (is_primary (var (l)) && s.level (var (l)) == max_level)
-        return var (l);
+    if (primary_block (d))
+      for (Lit l : at[(size_t) d])
+        if (s.level (var (l)) == max_level)
+          return var (l);
   return no_var;
 }
 
@@ -151,10 +155,10 @@ Var LongDistanceAnalyzer::first_on_max_level () const {
 bool LongDistanceAnalyzer::is_asserting () {
   const int alevel = s.level (asserting);
   for (int d = 0; d < depth (asserting); d++)
-    for (Lit l : at[(size_t) d])
-      if (!is_primary (var (l)) &&
-          (!s.val (l) || s.level (var (l)) >= alevel))
-        return false;
+    if (!primary_block (d))
+      for (Lit l : at[(size_t) d])
+        if (!s.val (l) || s.level (var (l)) >= alevel)
+          return false;
   second = no_var;
   size_t size = 0;
   for (int d = 0; d <= rightmost; d++)
@@ -202,8 +206,7 @@ void LongDistanceAnalyzer::resolve (Var pivot) {
   // Reduction: drop the blocks right of the rightmost primary one.  They
   // hold secondary literals only, primary literals are never dropped.
   while (rightmost >= 0 &&
-         (s.prefix.blocks[(size_t) rightmost].quant != primary (kind) ||
-          at[(size_t) rightmost].empty ())) {
+         (!primary_block (rightmost) || at[(size_t) rightmost].empty ())) {
     for (Lit l : at[(size_t) rightmost])
       position[index (l)] = -1;
     at[(size_t) rightmost].clear ();
