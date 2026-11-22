@@ -1028,3 +1028,176 @@ row, the timeout. Options are those of T07/T08 (larger `reduceint` for the gc ro
 
 Open points carried over: the three stress rows of T08 (gc-mode1, restart-dl, restart-mode1-dl) still exceed 2% in R and A,
 unchanged by this task; awaiting the coordinator.
+
+## M1 gate tooling (M1-T10, worker, 2026-11-22)
+
+Commits 2b202aa, be574cc, fd96d51, 468e0b1, 31cb4be, feeebf6, dceacd0 and this STATUS commit. No solver source
+changed (`src/` is as in 7555d53); the gate was run on that code. The full benchmark runs (P0.4, the M1 gate runs)
+were **not started**, as instructed; only 10-instance, 20 s rehearsals of every command form.
+
+### What exists now
+
+- `bench/run.py`: defaults `--jobs 48 --mem-gb 16 --cores 64-127`; `--seed S` (recorded in `meta.json`, `{seed}` in
+  `--args`, `--seed-args` appended only for S > 0); `-verb=1` and per-instance counters in `stats.csv`
+  (`instance,counter,value`: the `c stat` lines, or conflicts/decisions/propagations/restarts parsed from the baseline);
+  `meta.json` with jobs, mem_gb, cores, timeout, seed, hash of the instance list; resume refused when any of these
+  differs; `--proof-max-solve-sec` up to the timeout, `--proof-solve-timeout` (default 2 x timeout), `--proof-mem-gb 32`,
+  `--proof-max-gb 8` (status `too_large`, via `prlimit --fsize`), trim-and-retry with `qlrup-trim` on checker timeout or
+  memout, `{proof}` in `--args` for timed proof-on runs (`--trim-size` records the trimmed size), at most 6 proof jobs
+  when `--proof-timeout >= 3600`; core dumps disabled (a killed 8 GB proof run otherwise sat in the core dump until the
+  timeout). Exit status 1 only for errors and rejected proofs; coverage gaps are printed as such.
+- `bench/compare.py --paired A_TAGS -- B_TAGS [--force]` (with `bench/paired.py`, `bench/benchlib.py`): refusal
+  (exit 3) or `# NOT COMPARABLE`; discrepancies first; Δ with the 10000-resample percentile bootstrap (fixed generator
+  seed), the sign test with margin max(1 s, 10% of the smaller score), verdict words and the "not worse" line per ROADMAP
+  0.3, per-seed table and noise band, gained/lost in a majority of seeds, per-family table, largest differences, peak
+  memory (instances solved by both in every seed where B exceeds A by more than 10%), proof coverage table. The plain
+  mode gained the coverage table too. `bench/fidelity.py`, `bench/overhead.py` (proof overhead report, not in the spec
+  but needed by the gate), `bench/test_compare.py` (9 tests: identical arms, 20% faster arm, slower arm, mismatched
+  limits and seeds refused, discrepancy first, coverage table, binomial, bootstrap), run by ctest.
+- `tests/check_cert.py`, `tests/fuzz_cert.sh` (tiny + search corpus instance, tiny + large QDIMACS per seed), see below.
+- Root `CMakeLists.txt`: `miniQU-old` and every reference to `minisat/` removed (`make r` still builds the old tree
+  from `minisat/`; the baseline binary is untouched); ctest now also runs `bench/test_compare.py`,
+  `tests/test_qcir_eval.py` and the 20-seed `regress.sh -M default,dl`. Root `README.md` rewritten for the new tree.
+- Rehearsals (work dir `/home/ec2-user/miniqu-work/rehearsal*`, not committed): every form of the README block on the 10
+  instances of `/home/ec2-user/miniqu-work/ten.txt` with `--timeout 20`: seeds for new and baseline, `-dl`, modes 1/2,
+  seed-0 coverage with `--proof-timeout 3600`, proof-on runs with `--trim-size`, `overhead.py`, `fidelity.py`, paired
+  compare; trim-and-retry (a 3 s checker limit: 9.1.qcir checked after trimming, 1.57 MB of 27.9 MB) and `too_large`
+  (`--proof-max-gb 0.005`). The rehearsal found one harness bug (the `stats.csv` header written twice when jobs finish
+  at the same time; fixed in 468e0b1).
+
+### Bugs found in test tooling (fixed; no solver bug found)
+
+1. `tests/qcir_eval.py` did not know `xor`, `ite` or `free`: an `xor` gate was evaluated as `or`. Three "invalid
+   certificates" of the first `check_cert` run (tiny seeds 399, 243, 34, all with xor/ite) were this. Fixed, with
+   `tests/test_qcir_eval.py`. (`fuzz.sh`/`regress.py` compared `qcir_fuzz` instances against the generator's own
+   expected verdict, so no earlier result depended on it; `qcir_gen` instances have no xor/ite.)
+2. `tests/regress.py` checked the proof file of a proof run that had been **killed by the timeout**: a truncated file
+   is rejected by the checker ("unexpected end of file"), so a stress run at the 20 s limit gave two false "proof
+   rejected" failures (restart-mode1-dl, search seeds 1137 and 1987: 19.8 s without proof, over 20 s with). Both
+   proofs verify with a longer limit (`VERIFIED FALSE`, 87.5 MB and 86.2 MB). Now a timed-out proof run is "skipped"
+   (counted: "proof runs unfinished").
+3. `tests/regress.py` smoke test: `bench/run.py` resumes, and the smoke directory of an old row was reused, so a smoke
+   "pass" could consist of the results of an older binary. The directory is removed first. (With the new harness, which
+   refuses to resume a run with unknown metadata, the first gate attempt failed all 17 smoke rows with
+   "cannot resume": that is how this was found.)
+
+### Parity fuzz (M1.9), release binary 7555d53 sources, cores 0-63, 16 jobs
+
+`tests/regress.sh -j 16 -s 1:2000 -M all R` (log `/home/ec2-user/miniqu-work/logs/m1-gate-release.log`; 1000 tiny + 1000
+search instances per row, tiers as in `regress.sh`). Every row: **0 wrong verdicts** (tiny against the evaluator,
+search against the baseline, and across all 17 rows), **0 rejected proofs** (apart from the two false alarms of bug 2),
+coverage assertions hold in every row. That log's smoke part failed because of bug 3; the smoke rows were rerun alone
+(`tests/regress.sh -F ... -M all R`, log `m1-gate-release2.log`): **0 failures in all 17 rows**.
+
+| row | instances | proofs accepted | checker timeouts | solver timeouts |
+|---|---|---|---|---|
+| default, dl, ccmin3, dl-ccmin3, legacy, gc, gc-dl, restart | 2000 | 2000 | 0 | 0 |
+| mode1 | 2000 | 1996 | 4 | 0 |
+| mode1-dl | 2000 | 1941 | 49 | 10 |
+| mode2, mode2-dl, gc-mode2 | 2000 | (no proofs in mode 2) | - | 0, 5, 3 |
+| noearly | 2000 | 1759 | 19 | 222 |
+| gc-mode1 (stress) | 2000 | 1620 | 63 | 317 |
+| restart-dl (stress) | 2000 | 1964 | 0 | 36 |
+| restart-mode1-dl (stress) | 2000 | 1641 (+2 false alarms, verified by hand) | 0 | 357 |
+
+Proof coverage in that run = accepted / (accepted + checker timeouts + proofs not attempted because the plain run
+timed out); there are no other categories in `regress.sh`. The three stress rows (gc-mode1, restart-dl,
+restart-mode1-dl) exceed the 2% stress timeout limit as in T08 (**open coordinator decision, not changed**).
+
+`tests/regress.sh -j 16 -s 1:300 -M all -t 90 A` (asan; `-t 90` as in T07-T09, at the default 20 s asan is 5-10 times
+slower than the limit allows): **0 wrong verdicts, 0 rejected proofs, 0 sanitizer reports**, smoke 0 failures in all 17
+rows, coverage holds. Stress timeout failures: gc-mode1 58/150, restart-mode1-dl 68/150, restart-dl 6/150 (the three
+known rows) and, only in asan, gc-dl 8/150 and gc-mode2 4/150 (the T09 note on gc-mode2: the stress options need 10-100
+times the conflicts and asan is slow; gc-dl has 0 timeouts in 2000 release seeds). Normal-row timeouts (warnings):
+mode1 3, mode1-dl 15, mode2-dl 1, noearly 40. Proofs accepted 300/300 in every row that has proofs and no timeout.
+
+`tests/fuzz_qdimacs.sh R 1 1000 OPT` for OPT '', `-dl`, `-mode=1`, `-mode=2`: **0 failures, 0 timeouts, 2000 instances
+agreed in each** (`m1-gate-qdimacs.log`). `tests/run_regressions.sh R`: 7 instances, 0 failures. `ctest --preset X`:
+36/36 pass in release, asan, debug, release-clang; clean rebuilds of all four presets (`--clean-first`) have no compiler
+warning (only the existing linker note "using serial compilation of N LTRANS jobs" in release).
+
+### Corpus conflict histogram, new solver (seeds 1..400, `corpus_stats.py --check`, 20 s, `c stat conflicts`)
+
+| default | 0-9 | 10-99 | 100-999 | 1000-9999 | >=10000 | timeout | in [100,10000) | max s |
+|---|---|---|---|---|---|---|---|---|
+| qcnf-mixed | 0 | 0 | 0 | 70 | 10 | 0 | 88% | 0.3 |
+| qcnf-sat | 0 | 0 | 0 | 78 | 2 | 0 | 98% | 0.1 |
+| qcnf-unsat | 0 | 1 | 13 | 51 | 15 | 0 | 80% | 0.7 |
+| reach-44 | 15 | 3 | 33 | 29 | 0 | 0 | 78% | 0.2 |
+| reach-48 | 12 | 4 | 27 | 37 | 0 | 0 | 80% | 0.2 |
+| all (new) | 27 | 8 | 73 | 265 | 27 | 0 | 84% | 0.7 |
+| all (baseline, T01) | 25 | 6 | 81 | 258 | 30 | 0 | 85% | 0.4 |
+
+| `-dl` | 0-9 | 10-99 | 100-999 | 1000-9999 | >=10000 | timeout | in [100,10000) | max s |
+|---|---|---|---|---|---|---|---|---|
+| qcnf-mixed | 0 | 0 | 5 | 66 | 9 | 0 | 89% | 0.3 |
+| qcnf-sat | 0 | 0 | 31 | 48 | 1 | 0 | 99% | 0.1 |
+| qcnf-unsat | 0 | 0 | 10 | 54 | 16 | 0 | 80% | 0.4 |
+| reach-44 | 14 | 2 | 23 | 41 | 0 | 0 | 80% | 0.3 |
+| reach-48 | 12 | 1 | 20 | 46 | 1 | 0 | 82% | 2.2 |
+| all (new) | 26 | 3 | 89 | 255 | 27 | 0 | 86% | 2.2 |
+| all (baseline, T01) | 13 | 28 | 93 | 233 | 33 | 0 | 82% | 15.5 |
+
+Lean-checked binary proofs of the default run: 400 of 400 accepted, longest check 10.9 s (baseline 5.4 s). The corpus
+keeps its properties with the new solver (84% / 86% in range, no timeout). The `-dl` shape differs (the dependency
+learner of the new solver has fewer 10-99 and more 0-9 instances): heuristic drift from tie-breaking, see the fidelity
+note below.
+
+### Certificates (`tests/check_cert.py`, `tests/fuzz_cert.sh`, seeds 1:500, JOBS 12)
+
+Per seed: tiny and search corpus instance, tiny and large QDIMACS instance (2000 instances per run). Statuses:
+VALID = certificate substituted and the verdict stays (SAT with outermost existential, UNSAT with outermost
+universal block); WELLFORMED = the other combinations, the line lists exactly the block's variables.
+
+| binary | options | VALID | WELLFORMED | INVALID | no V line (MALFORMED) |
+|---|---|---|---|---|---|
+| new (7555d53) | none | 1261 | 739 | 0 | 0 |
+| new | `-dl` | 1261 | 739 | 0 | 0 |
+| baseline | none | 1254 | 730 | 0 | 16 |
+| baseline | `-dl` | 1254 | 730 | 0 | 16 |
+| new, seeds 501:3000 | `-dl` | 6283 | 3717 | 0 | 0 |
+| baseline, seeds 501:3000 | `-dl` | 6234 | 3679 | 0 | 87 |
+
+### Certificates under -dl (for the coordinator)
+
+**No invalid certificate was found**, for either binary, with or without `-dl`, in 12000 (new) and 12000 (baseline)
+instances with `-dl` (seeds 1:3000, the first 500 also without `-dl`); so there are no examples of a partial
+assignment that is invalid, and the decision of ARCH 10.4 / ROADMAP M1.8 (print only assigned variables, or complete the
+block by a search) is not forced by this evidence. Limits of the evidence: 37% of the instances are not checkable
+(SAT with an outermost universal block, UNSAT with an existential one); the corpus instances are small and mostly
+decided within few conflicts, so a block left partially assigned at the end of a `-dl` search is probably rare there.
+The tool makes the check cheap, so a targeted generator for such instances is the next step if the decision matters.
+
+One **behaviour difference** was found instead (benign): when the formula is decided at input (an empty clause, an empty
+`and()`, ...: 16 of 2000 instances at seeds 1:500, 87 of 10000 at 501:3000, all tiny corpus instances) the baseline
+prints no `V` line at all, and the new solver prints the outermost block with unassigned variables as positive
+literals, as ARCH 10.4 specifies; those certificates are valid or well-formed. Three small examples (instance, size):
+`tiny-342.qcir` (211 bytes), `tiny-135.qcir` (388), `tiny-157.qcir` (423); generate with
+`python3 tests/corpus.py --tier tiny --seed N --out f.qcir`, N = 342, 135, 157, and run the baseline with `-cert`:
+`UNSATISFIABLE` and no `V` line; new: `V v1 v2 v3 0`. The instances of all bad rows are kept in
+`/home/ec2-user/miniqu-work/cert/baseline-miniQU*/` (lists in `bad.txt`; the 501:3000 list replaced the first for `-dl`,
+the first is `logs/cert-baseline-dl-bad-1-500.txt`). Whether to match the baseline (print nothing) or keep printing is a
+coordinator decision; nothing was changed.
+
+### Fidelity note: `-no-early-tseitin` (the 11% timeouts of the noearly row)
+
+222 of 2000 (R) and 40 of 300 (A) search instances time out with `-no-earlytseitin`. Checked against the baseline on
+search seeds 1001-1200, 20 s, six parallel: with the deterministic default (seed 0) new 30 timeouts, baseline 22 (8
+only new, 0 only baseline); with `--seed=1` / `-rnd-init -rnd-seed=1` new 26, baseline 24 (3 only new, 1 only baseline),
+no verdict differs. Instance `search-1014` explains the seed-0 gap: baseline 11 conflicts, new more than 12000; but
+with seeds 1, 2, 3, 6 both need exactly the same number of conflicts (104, 104, 104, 17) and with seed 4 3705 against
+23437, seed 5 19298 against more than 10 s: the instance family is heavy-tailed in the tie-breaking of equal initial
+scores, not a lost behaviour. The timeouts of the row are inherent to the option, not to the port.
+
+### Not done, open, for the coordinator
+
+- The three stress rows over the 2% limit (gc-mode1, restart-dl, restart-mode1-dl), unchanged and unresolved; in asan
+  also gc-dl (8/150) and gc-mode2 (4/150) at `-t 90` under load.
+- No full benchmark run was made (the benchmark stage does them); no number of this entry is a performance claim.
+- The 1:2000 release run used `regress.py` before bug 2 and 3 were fixed (fixes change only how a timed-out proof run
+  and the smoke directory are treated); the two proof alarms were re-verified by hand, the smoke part was rerun on its
+  own. The asan run and the smoke rerun used the fixed script. The release run was not repeated as a whole (3 h).
+- The asan run used `-t 90`, not the default 20 s of the spec's command line.
+- The two `jctc` smoke instances (`jctc1-pass`, `jctc9-pass`, solved by the baseline in 0.1 s and 1.3 s) still time out
+  with the new solver at 120 s in every row of the smoke test (known since T05); the benchmark stage will meet it.
+- Certificate semantics under `-dl` could not be shown to be a problem (above), and a targeted test is not written.
