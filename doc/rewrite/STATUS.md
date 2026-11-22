@@ -314,3 +314,38 @@ Notes for later tasks: the fake `stat-wrapper.sh` takes its counter list from `t
 counter name must be added there only. Counter names in the matrix are the interface the new solver's
 `c stat NAME VALUE` output must satisfy (ROADMAP 0.1).
 
+
+## M1-T02 finished (worker, 2026-11-22)
+
+Built: `.clang-format` (copy of CaDiCaL's), root `CMakeLists.txt` (C++20, targets `miniqu` static library from
+`src/*.cpp`, `qlrup-trim`, `unit-tests` plus one `unit-<name>` executable per `test/unit/*.cpp`, each a ctest
+test; ctest test `format` runs `clang-format --dry-run -Werror` over `src/` and `test/unit/`; old solver as
+`miniQU-old`, its library as `miniqu-old-lib`, C++17, no -Werror), `CMakePresets.json` (release, release-clang,
+debug, asan, log, with matching build and test presets; build trees in `/home/ec2-user/miniqu-work/build/<preset>`),
+and the base layer in `src/` (`lit arena constraint watch heap ema random util options stats profile limit
+message logging contract file`, namespace `miniqu`, no reference to `Internal`) with ten unit tests (`arena
+constraint lit watch heap ema random options stats file`; `stats` also covers `profile`).
+
+Commands (all pass, zero warnings, 11/11 tests incl. `format`, for P in release debug asan release-clang log):
+`taskset -c 0-63 cmake --preset P && taskset -c 0-63 cmake --build --preset P -j16 && taskset -c 0-63 ctest --preset P`.
+`tests/regress.sh -s 1:20 .../build/release/miniQU-old`: passed (20 proofs Lean-checked, smoke passed). I also
+confirmed that the `format` test fails on a misformatted file.
+
+Decisions and deviations (ARCH 2 updated for the first two):
+- The asan preset needs a CMake workaround: this machine's GCC 11 has `libasan.so.6.0.0` but no `libasan.so.6`
+  or `libubsan.so.1` link, so the binaries could not start. `CMakeLists.txt` creates the symlinks in
+  `<build>/sanitizer-runtime` and adds an rpath (GCC only).
+- The two old ctest entries (`tests/fuzz.sh` on the old binary) were dropped from the root `CMakeLists.txt`; the
+  new ctest set is the unit tests and `format`, and ARCH 2 says the fuzz tests return with T05. The scripts are unchanged.
+- `Watches::lookup`, `clean` and `clean_all` take a `const Arena &` for the garbage test (spec allowed either).
+  `clean_all` cleans only the lists that were smudged; a list that was not smudged keeps garbage (tested).
+- Verbosity and the `log` switch are process-wide (`set_verbosity`, `set_logging`) because the printing helpers
+  sit below `Internal`; `MSG` prints at verbosity >= 1, `VERBOSE (l, ...)` at >= l, `PHASE` at >= 2.
+- `Stats::print` takes the elapsed seconds for the rate table. `START (name)` / `STOP (name)` expect a
+  `Profiles profiles` member in scope; `PROFILE_SCOPE (name)` is the RAII form. Profile levels (parse 0, search 1,
+  reduce 2, collect 2, analyze 3, propagate 3) are a first guess for the core task to adjust.
+- `Constraint` has `alloc_constraint (Arena &, span, Kind, redundant, id)` as the only way to create one, and
+  `shrink (n)` returns the words to report as wasted. `parse_option` does not check the name against the table;
+  `Options::set` does (unknown or out of range gives false).
+- `Limit`, `Inc`, `Last` contain only the M1 fields: restart, reduce, plus the user limits `conflicts` and
+  `decisions` (-1 = unset) in `Limit`.

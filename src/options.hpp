@@ -1,0 +1,85 @@
+#ifndef MINIQU_OPTIONS_HPP_INCLUDED
+#define MINIQU_OPTIONS_HPP_INCLUDED
+
+#include <cstdio>
+#include <span>
+#include <string>
+#include <string_view>
+
+namespace miniqu {
+
+// All options are integers and are declared here and nowhere else
+// (ARCHITECTURE 9.1).  Fractions are percent or per mille.  The low end of
+// every interval is the smallest value the code can run with, so that
+// stress configurations can make every scheduled event fire on small
+// instances.
+//
+//      name         default  low  high  description
+#define OPTIONS \
+  OPTION (mode, 0, 0, 2, \
+          "0=Q-resolution, 1=QU-resolution, 2=long-distance") \
+  OPTION (dl, 0, 0, 1, "dependency learning") \
+  OPTION (cert, 0, 0, 1, "print the certificate (V line)") \
+  OPTION (qcir, 0, 0, 1, "read QCIR even if the file is not recognised") \
+  OPTION (earlytseitin, 1, 0, 1, "early Tseitin variable introduction") \
+  OPTION (verb, 1, 0, 3, "verbosity level") \
+  OPTION (ccminmode, 0, 0, 3, \
+          "learnt minimisation: 0=none 1=basic 2=deep 3=deep+reduction") \
+  OPTION (legacyanalyze, 0, 0, 1, "analysis as in the old solver") \
+  OPTION (phasesaving, 2, 0, 2, "0=none, 1=limited, 2=full") \
+  OPTION (luby, 1, 0, 1, "Luby restart sequence (else geometric)") \
+  OPTION (rfirst, 100, 1, 1000000000, "first restart interval") \
+  OPTION (rinc, 200, 100, 1000000000, "restart increase in percent") \
+  OPTION (vardecay, 950, 1, 999, "variable score decay in per mille") \
+  OPTION (gcfrac, 20, 0, 100, \
+          "wasted arena percent that triggers collection, 0=always") \
+  OPTION (minlearnts, 0, 0, 1000000000, "minimum learnt limit") \
+  OPTION (proofbinary, 0, 0, 1, "write proofs in binary format") \
+  OPTION (cpulim, 0, 0, 1000000000, "CPU time limit in seconds, 0=none") \
+  OPTION (memlim, 0, 0, 1000000000, "memory limit in MB, 0=none") \
+  OPTION (check, 0, 0, 1, "check every learnt constraint internally") \
+  OPTION (log, 0, 0, 1, "print LOG lines (needs MINIQU_LOGGING)") \
+  OPTION (seed, 0, 0, 1000000000, "random initial scores if nonzero") \
+  OPTION (reduceint, 0, 0, 1000000000, \
+          "if nonzero also reduce every n-th (growing) conflict") \
+  OPTION (tier1glue, 2, 0, 1000000000, \
+          "learnt constraints up to this glue are kept") \
+  OPTION (depreset, 20, 1, 1000000000, \
+          "reset dependencies every n restarts") \
+  OPTION (profile, 0, 0, 3, "profiling level")
+
+struct Options {
+#define OPTION(NAME, DEFAULT, LOW, HIGH, DESCRIPTION) int NAME = DEFAULT;
+  OPTIONS
+#undef OPTION
+
+  // False if the name is unknown or the value is out of range; the options
+  // are left unchanged then.
+  bool set (std::string_view name, int value);
+
+  // The value of a known option; unknown names are fatal.
+  int get (std::string_view name) const;
+
+  static void print_usage (FILE *);
+};
+
+struct OptionInfo {
+  const char *name;
+  int default_value, low, high;
+  const char *description;
+};
+
+std::span<const OptionInfo> option_table ();
+
+// Parses one command line argument of the forms '--name=value', '--name'
+// (value 1) and '--no-name' (value 0).  One leading dash is accepted too
+// and hyphens inside the name are ignored, so '-ccmin-mode=3' sets
+// 'ccminmode'. Returns false for anything else, in particular for
+// non-integer values such as '--proof=FILE': those are application
+// arguments.  The name is not checked against the table; 'Options::set'
+// does that.
+bool parse_option (const char *arg, std::string &name, int &value);
+
+} // namespace miniqu
+
+#endif

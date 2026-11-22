@@ -86,7 +86,13 @@ Build rules:
   Usage: `taskset -c 0-63 cmake --preset release && taskset -c 0-63 cmake
   --build --preset release -j16`. Targets: `miniQU` (binary), `miniqu`
   (static library), `qlrup-trim`, `unit-tests` (all unit test executables),
-  and `ctest --preset <p>` runs them plus a 20-seed fuzz.
+  and `ctest --preset <p>` runs them plus a 20-seed fuzz (from M1-T05 on; in
+  M1-T02 ctest runs the unit tests and the `format` test). Presets also
+  include `release-clang` (release with `clang++`, to keep the code
+  warning-free under both compilers). The asan preset links the sanitizer
+  runtimes through a directory of soname symlinks that `CMakeLists.txt`
+  creates in the build tree (GCC 11 on this machine installs
+  `libasan.so.6.0.0` without the `libasan.so.6` link).
 - Until the M1 parity gate the root `CMakeLists.txt` still builds the old
   solver, under the target name `miniQU-old` (its flags are untouched and
   `-Werror` does not apply to it); the last M1 task removes that target, after
