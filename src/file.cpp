@@ -55,6 +55,23 @@ void OutputFile::put (std::string_view text) {
     put_byte (static_cast<uint8_t> (c));
 }
 
+void OutputFile::put_decimal (uint64_t n) {
+  char digits[20];
+  char *p = digits + sizeof digits;
+  do
+    *--p = static_cast<char> ('0' + n % 10);
+  while (n /= 10);
+  put ({p, static_cast<size_t> (digits + sizeof digits - p)});
+}
+
+void OutputFile::put_decimal (int64_t n) {
+  if (n < 0)
+    put_byte ('-');
+  // Negating in unsigned arithmetic is defined for INT64_MIN too.
+  put_decimal (n < 0 ? 0 - static_cast<uint64_t> (n)
+                     : static_cast<uint64_t> (n));
+}
+
 void OutputFile::flush () {
   if (!file)
     return;

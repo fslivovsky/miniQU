@@ -70,6 +70,8 @@ public:
     bytes_++;
   }
   void put (std::string_view text);
+  void put_decimal (uint64_t);
+  void put_decimal (int64_t);
   void flush ();
 
   // Bytes written so far, including those still in the buffer.

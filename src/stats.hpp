@@ -30,7 +30,8 @@ namespace miniqu {
   COUNTER (collections) \
   COUNTER (relocated) \
   COUNTER (modelcubes) \
-  KIND_COUNTER (originals)
+  KIND_COUNTER (originals) \
+  COUNTER (checked)
 
 struct Stats {
 #define COUNTER(NAME) int64_t NAME = 0;

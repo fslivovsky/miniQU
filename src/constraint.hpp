@@ -112,6 +112,13 @@ public:
   }
 
   uint64_t id () const { return (uint64_t) id_high << 32 | id_low; }
+  // A constraint changes its id when it is replaced in the proof by a
+  // shorter one ('Proof::strengthen'), and so does the reused buffer of
+  // 'model.cpp' for every initial cube.
+  void set_id (uint64_t id) {
+    id_low = static_cast<uint32_t> (id);
+    id_high = static_cast<uint32_t> (id >> 32);
+  }
 
   // Relocation: the copy lives at 'to'; the old constraint keeps its memory
   // but is marked moved and stores the new reference in its first literal.
@@ -143,8 +150,7 @@ inline Ref alloc_constraint (Arena &arena, std::span<const Lit> lits,
   c.size_ = size;
   c.bits = (kind == Kind::Cube ? Constraint::kind_bit : 0u) |
            (redundant ? Constraint::redundant_bit : 0u);
-  c.id_low = static_cast<uint32_t> (id);
-  c.id_high = static_cast<uint32_t> (id >> 32);
+  c.set_id (id);
   std::copy (lits.begin (), lits.end (), c.lits_);
   return ref;
 }
