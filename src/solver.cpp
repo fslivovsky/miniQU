@@ -113,12 +113,19 @@ int Solver::solve () {
 }
 
 int Solver::val (int var) const {
+  REQUIRE (impl->stage == Stage::Solved, "val before solve");
   REQUIRE (impl->declared (var), "val of an undeclared variable");
-  fatal ("certificates not implemented yet");
+  return impl->internal.certificate_value (impl->internal_of[(size_t) var]);
 }
 
 std::vector<int> Solver::certificate () const {
-  fatal ("certificates not implemented yet");
+  REQUIRE (impl->stage == Stage::Solved, "certificate before solve");
+  std::vector<int> result;
+  for (Lit l : impl->internal.certificate) {
+    const int user = impl->user_of[var (l)];
+    result.push_back (sign (l) ? -user : user);
+  }
+  return result;
 }
 
 void Solver::terminate () { impl->internal.terminated = true; }

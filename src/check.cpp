@@ -38,7 +38,7 @@ static bool watched (const Watches &watches, const Constraint &c, Ref ref,
 
 void Internal::check_invariants () const {
   const Var vars = prefix.size ();
-  std::vector<uint8_t> seen (2 * (size_t) vars, 0);
+  std::vector<uint8_t> marked (2 * (size_t) vars, 0);
   for (Kind kind : {Kind::Clause, Kind::Cube})
     for (const auto *lists : {&irredundant, &redundant})
       for (Ref ref : (*lists)[index (kind)]) {
@@ -49,14 +49,14 @@ void Internal::check_invariants () const {
         Var rightmost = 0;
         for (Lit l : c) {
           CHECK_INVARIANT (var (l) < vars, "unknown variable");
-          CHECK_INVARIANT (!seen[index (l)], "duplicate literal");
-          CHECK_INVARIANT (opts.mode == 2 || !seen[index (~l)],
+          CHECK_INVARIANT (!marked[index (l)], "duplicate literal");
+          CHECK_INVARIANT (opts.mode == 2 || !marked[index (~l)],
                            "complementary literals");
-          seen[index (l)] = 1;
+          marked[index (l)] = 1;
           rightmost = std::max (rightmost, var (l));
         }
         for (Lit l : c)
-          seen[index (l)] = 0;
+          marked[index (l)] = 0;
         CHECK_INVARIANT (prefix.is_primary (kind, rightmost),
                          "constraint %lu not reduced",
                          (unsigned long) c.id ());

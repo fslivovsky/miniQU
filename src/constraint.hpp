@@ -90,6 +90,12 @@ public:
     return freed;
   }
 
+  // Only for the buffer of 'model.cpp', which is allocated with the
+  // largest size it can need and never watched or stored in a list: its
+  // literals are rewritten in place, and the size can grow back up to the
+  // allocated one, or be zero (the empty cube).
+  void set_size (uint32_t n) { size_ = n; }
+
   Kind kind () const { return test (kind_bit) ? Kind::Cube : Kind::Clause; }
   bool redundant () const { return test (redundant_bit); }
   bool garbage () const { return test (garbage_bit); }

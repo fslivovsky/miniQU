@@ -28,12 +28,17 @@ Var Prefix::add_var (Quant quant, bool decision, int proof) {
   return v;
 }
 
+size_t Prefix::reduced_size (std::span<const Lit> lits, Kind kind) const {
+  assert (std::is_sorted (lits.begin (), lits.end ()));
+  size_t size = lits.size ();
+  while (size && !is_primary (kind, var (lits[size - 1])))
+    size--;
+  return size;
+}
+
 void Prefix::qreduce (std::vector<Lit> &lits, Kind kind) const {
   std::sort (lits.begin (), lits.end ());
-  auto end = lits.end ();
-  while (end != lits.begin () && !is_primary (kind, var (end[-1])))
-    --end;
-  lits.erase (end, lits.end ());
+  lits.resize (reduced_size (lits, kind));
 }
 
 } // namespace miniqu

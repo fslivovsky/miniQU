@@ -12,15 +12,15 @@ using namespace miniqu;
 
 static void test_translation () {
   Solver solver;
-  CHECK (solver.set ("mode", 1));
-  CHECK (!solver.set ("mode", 3));
+  CHECK (solver.set ("seed", 5));
+  CHECK (!solver.set ("seed", -1));
   // User numbers need not be dense or increasing; internal variables are
   // numbered in the order of the calls.
   solver.add_var (7, Quant::Exists);
   solver.add_var (3, Quant::Forall);
   solver.add_var (12, Quant::Exists, false, 5);
   const Internal &internal = internal_of (solver);
-  CHECK_EQ (internal.opts.mode, 1);
+  CHECK_EQ (internal.opts.seed, 5);
   CHECK_EQ (internal.prefix.size (), 3u);
   CHECK (internal.prefix.quant (1) == Quant::Forall);
   CHECK (!internal.prefix.vars[2].decision);
@@ -31,7 +31,10 @@ static void test_translation () {
   CHECK_EQ (c.size (), 3u);
   CHECK (c[0] == mk_lit (0) && c[1] == mk_lit (1) &&
          c[2] == mk_lit (2, true));
-  CHECK_EQ (solver.solve (), 0);
+  // The gate 12 can always be set false: true, certificate block {7}.
+  CHECK_EQ (solver.solve (), 10);
+  CHECK (solver.certificate () == std::vector<int>{-7});
+  CHECK_EQ (solver.val (3), 0);
 }
 
 static void test_decided () {

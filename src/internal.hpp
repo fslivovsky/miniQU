@@ -10,6 +10,7 @@
 #include "message.hpp"
 #include "options.hpp"
 #include "prefix.hpp"
+#include "random.hpp"
 #include "stats.hpp"
 #include "watch.hpp"
 
@@ -49,6 +50,12 @@ constexpr Lit watch_key (Kind kind, Lit l) {
   return kind == Kind::Clause ? ~l : l;
 }
 
+// The literal that becomes true when a constraint of that kind propagates
+// its literal 'l': 'l' itself for a clause, its negation for a cube.
+constexpr Lit forced (Kind kind, Lit l) {
+  return kind == Kind::Clause ? l : ~l;
+}
+
 struct Internal {
   Options opts;
   Stats stats;
@@ -72,8 +79,26 @@ struct Internal {
   Lit lone = lit_undef;        // to complete a mode-0 conflict
 
   std::vector<double> scores; // per variable
+  double score_inc = 1;       // what a bump adds (EVSIDS)
+  Random random;              // initial scores with '--seed'
   std::vector<Heap> heaps;    // per block, decision variables only
   std::vector<int8_t> phases; // per variable: saved value, 1 or -1
+
+  // Conflict analysis.  'seen' (per variable) is all zero outside
+  // 'analyze' and 'initial_cube'; so are 'level_count' and, at 'no_var',
+  // 'level_blocked' (both per decision level).
+  std::vector<uint8_t> seen;
+  std::vector<Lit> analyzed;      // every literal added to the resolvent
+  std::vector<int> level_count;   // primary literals per level
+  std::vector<Var> level_blocked; // leftmost secondary variable per level
+  std::vector<Lit> derived;       // the learnt constraint
+  std::vector<uint64_t> chain;    // antecedent ids, only with a proof
+  std::vector<int> glue_levels;
+
+  Ref model_cube = Ref::none; // buffer of 'initial_cube'
+  std::vector<Lit> model;     // literals of the next initial cube
+
+  std::vector<Lit> certificate; // values of the certificate block
 
   Proof *proof = nullptr;
   std::atomic<bool> terminated = false;
@@ -91,6 +116,7 @@ struct Internal {
   // internal.cpp
   Var add_var (Quant, bool decision, int proof_number);
   [[nodiscard]] Status solve ();
+  void search ();
 
   // constraint.cpp
   void add_original (Kind, std::vector<Lit> &lits, int gate);
@@ -114,6 +140,40 @@ struct Internal {
 
   // backtrack.cpp
   void backtrack (int new_level);
+
+  // decide.cpp
+  bool eligible (Var) const;
+  [[nodiscard]] bool decide ();
+
+  // bump.cpp
+  double initial_score ();
+  void bump_variable (Var);
+  void decay_scores ();
+
+  // analyze.cpp
+  void analyze (Ref conflict);
+  void clear_analyzed ();
+
+  // learn.cpp
+  uint32_t compute_glue (std::span<const Lit>);
+  void learn (Kind, Var asserting);
+
+  // restart.cpp
+  int64_t restart_interval (int64_t restarts) const;
+  bool restarting () const;
+  void restart ();
+
+  // model.cpp
+  void init_model_cube ();
+  [[nodiscard]] Ref initial_cube ();
+  void check_model_cube () const;
+
+  // certificate.cpp
+  void record_certificate ();
+  int certificate_value (Var) const;
+
+  // report.cpp
+  void report (const char *event) const;
 
   // check.cpp
   void check_invariants () const;

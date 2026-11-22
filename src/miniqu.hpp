@@ -60,8 +60,12 @@ public:
   // 10: true, 20: false, 0: unknown (limit reached or 'terminate' called).
   int solve ();
 
-  // Value (1, -1 or 0 = unassigned) of a variable of the certificate block,
-  // the outermost block (ARCHITECTURE 10.4), after a definite answer.
+  // The certificate block is the outermost block that has decision
+  // variables (ARCHITECTURE 10.4); its values are meaningful after a
+  // definite answer.  'val' is 1 or -1 for a decision variable of that
+  // block (one the search left unassigned is reported true, as by the old
+  // solver) and 0 for any other variable; 'certificate' lists the block's
+  // decision variables as literals, in prefix order.
   int val (int var) const;
   std::vector<int> certificate () const;
 

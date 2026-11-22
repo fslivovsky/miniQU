@@ -12,6 +12,10 @@ namespace miniqu {
 
 using Var = uint32_t; // 0 .. vars-1, in prefix order
 
+// "No variable".  It compares greater than every variable, so a running
+// minimum ("leftmost so far") can start from it.
+inline constexpr Var no_var = UINT32_MAX;
+
 // MiniSat encoding, 2*var + sign with sign 1 = negated, because literals
 // index the watch lists directly and are stored in arena words.
 struct Lit {

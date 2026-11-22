@@ -1,0 +1,60 @@
+// Decisions (ARCHITECTURE 7.3), without dependency learning.
+//
+// Decisions follow the prefix: the current block is the first one that
+// still has an unassigned decision variable, and the variable is the one
+// with the highest score in the heap of that block (ties: smaller index).
+// Every unassigned decision variable is in the heap of its block
+// ('backtrack' re-inserts it), while assigned ones are dropped lazily when
+// they come to the top.  Gate variables are never in a heap and never
+// counted in 'Block::unassigned' (porting note 10), so a block is complete
+// once its input variables are assigned, whatever its gates do.
+//
+// The value is the saved phase, initially false (porting note 6; the old
+// 'polarity' starts true, which is MiniSat's sign of the negative literal).
+//
+// Nothing is derived here, so there are no proof steps.
+
+#include "internal.hpp"
+
+#include <algorithm>
+#include <cassert>
+
+namespace miniqu {
+
+// The old 'isEligibleDecision': every block further out of the other
+// quantifier is assigned.  Taking the first incomplete block guarantees
+// it, so this is only asserted; dependency learning will make it a real
+// test.
+bool Internal::eligible (Var v) const {
+  const Quant quant = prefix.quant (v);
+  for (uint32_t d = 0; d < prefix.depth (v); d++) {
+    const Block &b = prefix.blocks[d];
+    if (b.quant != quant && b.unassigned > 0)
+      return false;
+  }
+  return true;
+}
+
+// Returns false if every decision variable is assigned.
+bool Internal::decide () {
+  const auto block =
+      std::find_if (prefix.blocks.begin (), prefix.blocks.end (),
+                    [] (const Block &b) { return b.unassigned > 0; });
+  if (block == prefix.blocks.end ())
+    return false;
+  Heap &heap = heaps[(size_t) (block - prefix.blocks.begin ())];
+  Var v;
+  do {
+    assert (!heap.empty ());
+    v = heap.pop ();
+  } while (val (mk_lit (v)));
+  assert (eligible (v));
+  stats.decisions++;
+  new_level ();
+  const Lit decision = mk_lit (v, phases[v] < 0);
+  LOG ("decide %s%u", sign (decision) ? "-" : "", v + 1);
+  assign (decision, Ref::none);
+  return true;
+}
+
+} // namespace miniqu

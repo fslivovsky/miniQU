@@ -107,7 +107,6 @@ static void test_units () {
   CHECK (internal.reason (0) == clause);
   // A unit clause and a unit cube do not interact.
   CHECK (internal.status == Status::Unknown);
-  CHECK_EQ (internal.solve (), Status::Unknown);
   internal.check_invariants ();
 }
 

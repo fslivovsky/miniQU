@@ -3,7 +3,9 @@
 
 #include "lit.hpp"
 
+#include <cstddef>
 #include <cstdint>
+#include <span>
 #include <vector>
 
 namespace miniqu {
@@ -46,6 +48,10 @@ struct Prefix {
   // Sorts 'lits' and removes every secondary literal to the right of all
   // primary ones (ARCHITECTURE 4.6).
   void qreduce (std::vector<Lit> &lits, Kind) const;
+
+  // The number of literals of sorted 'lits' that 'qreduce' keeps; for
+  // callers that need to know which ones it removes.
+  size_t reduced_size (std::span<const Lit> lits, Kind) const;
 };
 
 } // namespace miniqu
