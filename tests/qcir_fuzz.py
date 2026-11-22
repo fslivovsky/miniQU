@@ -11,6 +11,9 @@ import argparse
 import random
 
 
+MAX_BRUTE_FORCE_VARS = 22
+
+
 def generate(rng, nvars, ngates, nblocks, cnf):
     nvars = rng.randint(2, nvars)
     nblocks = rng.randint(1, min(nblocks, nvars))
@@ -126,6 +129,10 @@ def main():
     parser.add_argument('--no-expected', action='store_true',
                         help='skip the brute-force evaluation (needed above about 20 variables)')
     args = parser.parse_args()
+    if args.vars > MAX_BRUTE_FORCE_VARS and not args.no_expected:
+        # The truth table has 2^vars bits; without this check the run would
+        # appear to hang instead of failing.
+        parser.error('--vars above %d needs --no-expected (brute force is exponential)' % MAX_BRUTE_FORCE_VARS)
     rng = random.Random(args.seed)
     instance = generate(rng, args.vars, args.gates, args.blocks, args.cnf)
     print(write(*instance, None if args.no_expected else evaluate(*instance)), end='')

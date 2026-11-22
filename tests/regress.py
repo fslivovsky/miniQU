@@ -10,12 +10,15 @@ Lean checker; "c stat NAME VALUE" counters are summed and the coverage
 assertion of doc/rewrite/ROADMAP.md 0.1 is applied; timeouts are counted.
 """
 import argparse
+import atexit
 import csv
 import os
 import re
 import shlex
+import signal
 import subprocess
 import sys
+import threading
 import tempfile
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
@@ -26,6 +29,54 @@ VERDICTS = {10: 'SAT', 20: 'UNSAT'}
 STAT_LINE = re.compile(r'^c stat (\S+) (-?\d+)$', re.M)
 MIN_COVERAGE = 0.10   # a required counter must be nonzero on this fraction of search instances
 STRESS_TIMEOUTS = 0.02
+
+
+LIVE = set()          # process groups of running children, killed on exit
+LIVE_LOCK = threading.Lock()
+
+
+def kill_group(pid):
+    try:
+        os.killpg(pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+
+
+def run_group(cmd, timeout=None, stdout=subprocess.PIPE):
+    """subprocess.run in its own process group, killed as a whole on timeout or exit.
+
+    Wrapper scripts and sanitizer runs start grandchildren that a plain
+    kill of the child would leave running. Raises subprocess.TimeoutExpired.
+    Returns (returncode, output text).
+    """
+    with subprocess.Popen(cmd, stdout=stdout, stderr=subprocess.STDOUT,
+                          text=True, start_new_session=True) as p:
+        with LIVE_LOCK:
+            LIVE.add(p.pid)
+        try:
+            out, _ = p.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            kill_group(p.pid)
+            p.communicate()
+            raise
+        finally:
+            kill_group(p.pid)   # stray grandchildren of a finished child
+            with LIVE_LOCK:
+                LIVE.discard(p.pid)
+        return p.returncode, out
+
+
+def kill_all_children(*_):
+    with LIVE_LOCK:
+        for pid in LIVE:
+            kill_group(pid)
+    if _:
+        sys.exit(130)
+
+
+atexit.register(kill_all_children)
+signal.signal(signal.SIGTERM, kill_all_children)
+signal.signal(signal.SIGINT, kill_all_children)
 
 
 class Config:
@@ -63,11 +114,11 @@ class Run:
 def run_solver(solver, path, options, timeout, verbose=False, extra=()):
     cmd = [solver, '-verb=1' if verbose else '-verb=0'] + list(options) + list(extra) + [path]
     try:
-        p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        code, out = run_group(cmd, timeout)
     except subprocess.TimeoutExpired:
         return Run('TIMEOUT', {})
-    verdict = VERDICTS.get(p.returncode, 'exit code %d' % p.returncode)
-    stats = {name: int(value) for name, value in STAT_LINE.findall(p.stdout + p.stderr)}
+    verdict = VERDICTS.get(code, 'exit code %d' % code)
+    stats = {name: int(value) for name, value in STAT_LINE.findall(out)}
     return Run(verdict, stats)
 
 
@@ -97,8 +148,7 @@ class Context:
         if not os.path.exists(proof) or os.path.getsize(proof) == 0:
             return 'skipped', ''   # the solver timed out or wrote no proof
         try:
-            out = subprocess.run([self.args.checker, path, proof], capture_output=True, text=True,
-                                 timeout=self.args.check_timeout).stdout
+            _, out = run_group([self.args.checker, path, proof], self.args.check_timeout)
         except subprocess.TimeoutExpired:
             return 'timeout', ''
         finally:
@@ -165,7 +215,7 @@ def smoke(args, config):
         cmd += ['--proof-check', '--proof-max-solve-sec', '60']
     log = os.path.join(run_dir + '.log')
     with open(log, 'w') as f:
-        status = subprocess.run(cmd, stdout=f, stderr=subprocess.STDOUT).returncode
+        status, _ = run_group(cmd, stdout=f)
     got = {r['instance']: r for r in csv.DictReader(open(os.path.join(run_dir, 'regress', 'results.csv')))} \
         if status == 0 else {}
     failures, warnings = [], 0
