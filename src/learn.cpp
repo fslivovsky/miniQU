@@ -31,8 +31,8 @@
 // 'analyze_qu' keeps only secondary literals left of a primary one.
 //
 // A learnt dependency (an analysis met a decision x that has to be
-// resolved away to reduce y) backtracks below x, as the old 'search' does,
-// and records it ('depend.cpp').  The scores are not decayed and the
+// resolved away to reduce y) is recorded ('depend.cpp') and backtracks
+// below x, as the old 'search' does.  The scores are not decayed and the
 // learnt limit is not adjusted: no constraint is learnt.
 //
 // Proof: the learnt constraint, or the empty one, is a derived step with
