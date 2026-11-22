@@ -1525,3 +1525,16 @@ function and a 600 s limit (`logs/t11/header-missing.txt`): `10.2` props/s ratio
   search, ratio 1.07/1.08).
 - The noearly row still has 31 of 150 timeouts in the release regress run (warnings only); the baseline has the same
   rate on seeds 1001-1200 (26 of 200 against 27).
+
+## Owner decision: stress-row timeouts on the sanitizer build (2026-11-22)
+
+- A stress row that stays within its timeout limit on the release build and only exceeds it on the
+  sanitizer (asan) build is NOT a failure, provided the asan run shows no wrong verdict, no rejected
+  proof and no sanitizer report. This applies now to `gc-mode1` (9 of 150 at `-t 90`, limit 5%) and to
+  any other row in the same situation.
+- To make the gate green, increase the time limit of the asan gate run (the per-instance timeout, and the
+  proof-check timeout if needed) or allow a higher share of timeouts for the asan run, whichever is
+  simpler; both are acceptable. Prefer a longer time limit where the run time allows it, because it keeps
+  more instances checked. Record the values chosen in `tests/matrix.txt` / `bench/README.md`.
+- Verifier and reviewer: do not report or block on asan-only timeout-limit misses of stress rows; report
+  the numbers. Wrong verdicts, rejected proofs and sanitizer reports remain blocking as before.
