@@ -55,8 +55,13 @@ set(MINIQU_FRONTEND_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/src/parse_qcir.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/parse_qdimacs.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/encode.cpp)
+# The application layer: main, signals, process limits.
+set(MINIQU_APP_SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/app.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/signal.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/resources.cpp)
 set(MINIQU_LIBRARY_SOURCES ${MINIQU_SOURCES})
-list(REMOVE_ITEM MINIQU_LIBRARY_SOURCES ${MINIQU_FRONTEND_SOURCES})
+list(REMOVE_ITEM MINIQU_LIBRARY_SOURCES ${MINIQU_FRONTEND_SOURCES} ${MINIQU_APP_SOURCES})
 
 add_library(miniqu STATIC ${MINIQU_LIBRARY_SOURCES})
 target_include_directories(miniqu PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
@@ -66,6 +71,14 @@ target_link_libraries(miniqu PUBLIC ZLIB::ZLIB)
 add_library(miniqu-frontend OBJECT ${MINIQU_FRONTEND_SOURCES})
 target_compile_options(miniqu-frontend PRIVATE ${MINIQU_WARNINGS})
 target_link_libraries(miniqu-frontend PUBLIC miniqu)
+
+add_executable(miniQU ${MINIQU_APP_SOURCES})
+target_compile_options(miniQU PRIVATE ${MINIQU_WARNINGS})
+target_link_libraries(miniQU PRIVATE miniqu-frontend miniqu)
+
+if(STATIC_BINARIES)
+  target_link_libraries(miniQU -static)
+endif()
 
 # Proof trimmer (see doc/proof-format.md).
 add_executable(qlrup-trim tools/qlrup-trim.cc)
@@ -122,6 +135,18 @@ add_test(NAME encoding-diff
 set_tests_properties(encoding-diff PROPERTIES
                      ENVIRONMENT ENCODING_DUMP=$<TARGET_FILE:encoding-dump>)
 
+# End-to-end: 20 fuzz seeds of the default configuration against the
+# baseline and the brute-force evaluator, and the regression instances.
+# Without proofs until the proof task.
+add_test(NAME fuzz
+         COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/tests/regress.sh -n -S -s 1:20 -M default -j 8
+                 $<TARGET_FILE:miniQU>
+         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+set_tests_properties(fuzz PROPERTIES ENVIRONMENT REGRESS_WORK=${CMAKE_BINARY_DIR}/regress)
+add_test(NAME run-regressions
+         COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/tests/run_regressions.sh -n $<TARGET_FILE:miniQU>
+         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+
 # Formatting is checked, not applied: .clang-format is the authority.
 find_program(CLANG_FORMAT clang-format)
 if(CLANG_FORMAT)
@@ -163,4 +188,4 @@ endif()
 #--------------------------------------------------------------------------------------------------
 # Installation targets:
 
-install(TARGETS qlrup-trim RUNTIME DESTINATION bin)
+install(TARGETS miniQU qlrup-trim RUNTIME DESTINATION bin)
