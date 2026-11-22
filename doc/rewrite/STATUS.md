@@ -512,3 +512,109 @@ Left for later tasks:
   used by this task's code.
 - Heaps are filled in `add_var` (as the old `newVar`); with `--seed` T05 must rebuild them after setting scores.
 - `Profiles` is not yet a member of `Internal` (no profiled phase exists).
+
+## M1-T05 finished: mode-0 search and the `miniQU` binary (worker, 2026-11-22)
+
+Built (namespace `miniqu`, formatted, no compiler warnings with GCC and Clang): `internal.cpp` (`solve`, `search`: the
+loop of ARCH 7.1 with propagate / analyze, terminated, restarting / restart, decide, initial cube), `decide.cpp`
+(first block with `unassigned > 0`, pop its heap until an unassigned variable, saved phase, `eligible` = old
+`isEligibleDecision` as an assertion), `bump.cpp` (EVSIDS as MiniSat: `+score_inc`, rescale at 1e100, decay
+`1000/vardecay` after each learnt constraint; `--seed=s` gives each variable in creation order `drand * 1e-5` from
+`Random (s)`, set in `add_var`, so no heap rebuild is needed), `analyze.cpp` (port of `analyzeQ`, see below),
+`learn.cpp` (`qreduce`, empty -> `found_empty`, asserting literal at 0, highest other level at 1, glue before the
+backjump, backtrack, `new_constraint (redundant)`, assign `forced (kind, lit)`, decay, `learned`/`learnedlits` per
+kind), `restart.cpp` (Luby / geometric, `restart_interval (k) = (int64) (rfirst * luby (rinc/100, k))`, restart when
+`conflicts >= lim.restart`), `model.cpp` (buffer constraint of capacity `vars`, `initial_cube` = old `getInitialTerm`
+incl. bumping the reduced-away variables, `check_model_cube` with assertions or `--check`, `stats.modelcubes`),
+`certificate.cpp` (outermost block with decision variables, recorded before the final `backtrack (0)`, unassigned ->
+positive), `report.cpp` (one `PHASE` line per restart at verbosity >= 2), `Solver::val` / `certificate`, and the
+application `app.cpp`, `signal.{hpp,cpp}`, `resources.{hpp,cpp}` (target `miniQU`, not part of the library). Base
+additions: `no_var` (compares greater than every variable, so "no blocked variable" needs no special case),
+`Constraint::set_size` (only for the model-cube buffer), `Prefix::reduced_size`, `forced (kind, lit)` in
+`internal.hpp`. Unit test `unit-search` (Luby/geometric intervals, glue, learnt clause and cube by hand, continued
+resolution right of a blocked literal, unit learnt stored irredundant, root literal kept, empty clause, decisions and
+phases, seeded scores, initial cube with bumping, `Solver` runs with certificates). ctest now also runs `fuzz`
+(`tests/regress.sh -n -S -s 1:20 -M default`) and `run-regressions` (`-n`); T06 should drop the `-n`.
+
+Analysis (`analyze.cpp`): resolution over primary literals in reverse trail order with `seen`, `level_count`,
+`level_blocked`, the asserting condition of the old code (unique primary on a level > 0 and left of every blocked
+secondary), then continued resolution of the primary literals right of the leftmost blocked literal; all comparisons
+are index comparisons; antecedent hook `if (proof) chain.push_back (c.id ())`. **The "decision in the way" branch is
+unreachable without `--dl`** (argument in the file header: a blocked secondary variable left of a decision pivot lies
+in an earlier block and would have been assigned on a lower level; it needs the blocked variable to be a decision
+variable, which holds for every constraint except a QCIR initial cube, unreachable by INV-COMPLETE). It is a `fatal`
+internal error, not an assertion only, because a release build would otherwise resolve with `Ref::none`; T08 replaces
+it by the dependency outcome (`clear_analyzed ()` exists for that early exit). `stats.modelcubes` stayed 0 on every QCIR
+run of the acceptance (coverage tables below).
+
+Porting notes, how each is covered: 1 original constraints: `unit-original` (T04). 2 conflict completion:
+`unit-propagate` (T04), exercised by every fuzz run. 3 index comparisons: `unit-search` (`test_resolve_right_of_blocked`
+needs `v > blocked` on indices). 4 kind switch: mode 1, T08. 5 root literals stay: `test_root_literal_stays`. 6 initial
+phase false, phase saving: `test_decide`, `unit-backtrack`. 7 learnt-database policy: T07 (no reduce yet). 8 glue
+before backjump: `test_glue`, `test_learn_clause` (glue 2), `test_root_literal_stays`. 9 dependency reset: T08. 10 gate
+variables never decided: `test_decide` (an `E` variable), heaps hold decision variables only (`check_invariants`).
+11 `-cert`: byte-identical `V` lines with the baseline on the six regression instances where it prints one.
+
+Acceptance (all with `taskset -c 0-63`; logs in `/home/ec2-user/miniqu-work/logs/t05/`):
+
+| command | result |
+|---|---|
+| build + `ctest --preset P`, P = release, debug, asan, release-clang | no warnings (release prints only the known `lto-wrapper: using serial compilation` linker note); 24/24 tests pass each |
+| `tests/regress.sh -n -s 1:300 -M default R` | PASSED, 0 failures, 0 timeouts; coverage over 150 search instances: conflicts 100%, restarts 90%, learned.clause 99%, learned.cube 91% (modelcubes 0%) |
+| `tests/regress.sh -n -s 1:100 -M default A` | PASSED, 0 failures, 0 timeouts; conflicts 100%, restarts 90%, learned.clause 96%, learned.cube 94% |
+| `tests/fuzz_qdimacs.sh R 1 300` / `A 1 100` | `0 failures, 0 timeouts, 600 instances agreed` / `0 failures, 0 timeouts, 200 instances agreed` |
+| `tests/run_regressions.sh -n R` | `7 instances, 0 failures` |
+| `tests/regress.sh -n -S -s 1:100 R -- --seed=1 -- ... -- --seed=5` | PASSED: all five seeds agree with the baseline / evaluator on 100 instances, 0 timeouts |
+
+(R = `/home/ec2-user/miniqu-work/build/release/miniQU`, A = `.../build/asan/miniQU`.) No proofs exist yet, so nothing
+was Lean-checked in this task.
+
+Conflict counts against the baseline (default options, search-tier seeds 151-170; new / baseline): 5454/5298,
+5121/7696, 2499/6680, 4/4, 2016/1888, 5761/8580, 6032/6284, 3721/2879, 1714/1904, 809/101, 4125/4300, 2354/10322,
+14137/14367, 5/6, 1/1, 2228/1608, 2691/9710, 13784/32566, 17/105, 418/244: same order, no systematic shift (the new
+solver has no database reduction yet, the baseline has).
+
+Smoke set (`python3 bench/run.py --solver R --tag m1-t05-smoke --timeout 60 --jobs 32 --instances bench/smoke.txt`,
+result in `bench/results/m1-t05-smoke/`): all 31 verdicts equal `bench/smoke-expected.csv`; **31/33 solved** (baseline
+33/33), total wall time on the 31 solved by both 26.5 s (baseline 30.5 s). Not solved within 60 s: `jctc1-pass.qcir`
+(baseline 0.09 s, 623 conflicts) and `jctc9-pass.qcir` (baseline 1.3 s). This is the baseline's luck with its
+unseeded order, not a lost behaviour: with `-rnd-init -rnd-seed=s` the baseline also fails to solve jctc1-pass within
+20 s for s = 1, 2, 3 (54k-56k conflicts) and jctc9-pass for s = 1, 3; the new solver with `--seed=s` behaves the same
+(46k-60k conflicts in 20 s). RSS stays below 400 MB on both at 60 s. Not tuned, as asked.
+
+Behaviour of the binary, and deviations from the old one:
+- Options: `parse_option` with the legacy spellings; unknown names or out-of-range values are errors (exit 1).
+  Rejected with "not implemented yet" (stderr, exit 1): nonzero `--mode --dl --ccminmode --legacyanalyze --check
+  --reduceint`, and `--proof=` / `--trace=`. `--help`, `-help`, `-h` print usage and the option table.
+- Input: QCIR when the name ends in `qcir` or with `--qcir`, else QDIMACS (gzip allowed); stdin without a file. The
+  old binary used QCIR only when there was no second (result) file argument; the new one decides by the input name
+  alone. Its stdin notice was an unprefixed stdout line; it is now `c reading QDIMACS from standard input` at
+  verbosity >= 1.
+- Result file (second file argument): receives `SAT`, `UNSAT` or `INDET`. The old binary truncated it and wrote
+  `UNSAT` only for formulas decided while parsing; writing every result is the MiniSat behaviour it was derived from.
+- Output: at `--verb` >= 1 banner, the parser's `c parsed ...` line, parse time, the `c stat` block and table, peak
+  RSS; then the result line and with `--cert` the `V` line. `-verb=0` prints only those two. The `V` line is printed
+  also when the input decided the formula (the old binary exited early without one).
+- Signals (SIGINT, SIGTERM, SIGXCPU): while parsing a signal ends the run at once (`c interrupted`, exit 1, as the old
+  `*** INTERRUPTED ***` path); during the search the first one sets the termination flag and the run ends normally
+  with statistics and `INDETERMINATE`, exit 0 (checked with `--cpulim=5` and with SIGINT on `5.1-2.qcir`); a second
+  one exits at once. `--memlim`: a failing `std::bad_alloc` ends with `INDETERMINATE`, exit 0 (old behaviour, checked
+  with `--memlim=300`); a failing arena `realloc` still ends through `fatal` (exit 1).
+- `stats.decisions` counts decisions made (the old counter was also incremented when no variable was left).
+
+Known issues / for later tasks:
+- **`tests/regress.sh` smoke step is vacuous after its first run** (T01 tooling, not changed here): `regress.py` calls
+  `bench/run.py` with the fixed tag `regress` in `REGRESS_WORK/smoke-<config>`, and `run.py` resumes, i.e. skips every
+  instance already in that `results.csv`. `/home/ec2-user/miniqu-work/regress/smoke-default/regress/meta.json` still
+  names `tests/fake/stat-wrapper.sh` (the baseline wrapper of T01), so every later `regress.sh` smoke "pass" re-reads
+  the baseline's results. Fix: delete the run directory before calling `run.py` (or pass a fresh tag). The smoke
+  numbers above come from a fresh `bench/run.py` run, not from `regress.sh`.
+- **The machine now exposes 96 cores** (`nproc` = 96, `taskset -c 96` fails with "Invalid argument"). `bench/run.py`
+  with its default `--jobs 48 --cores 64-127` gives instances 33+ an unusable core: the first smoke attempt reported
+  `test_5_5_tippy.pg-7.qcir` as ERROR (`taskset: failed to set pid ...'s affinity`), which is why the run above uses
+  `--jobs 32`. The benchmark protocol (48 jobs on 64-127) needs the coordinator's decision.
+- T07 (garbage collection) must relocate `Internal::model_cube`, which is in no list (ARCH 4.5 amended). The buffer is
+  allocated with proof id 0; T06 decides which id an initial cube gets for `add_model_cube`.
+- No `Profiles` member yet (no `START`/`STOP` in the search); limits `lim.conflicts` / `lim.decisions` exist in
+  `limit.hpp` but no option sets them, so the loop checks only `terminated`.
+- Without reduce, memory grows with the learnt constraints (651 MB after 4 s on `5.1-2.qcir`).

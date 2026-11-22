@@ -1,0 +1,18 @@
+{
+  "solver": "/home/ec2-user/miniqu-work/build/release/miniQU",
+  "solver_sha256": "9b908dbcf435f826285661e309065545515e6debd2f480dae2c8944f70406aaa",
+  "solver_git": "33b4da5",
+  "args": "",
+  "proof_args": "-proof-binary",
+  "timeout": 60.0,
+  "mem_gb": 8,
+  "jobs": 32,
+  "cores": "64-127",
+  "proof_check": false,
+  "proof_max_solve_sec": 20,
+  "checker": null,
+  "date": "2026-11-22T01:46:51",
+  "host": "ip-172-31-34-83.eu-west-2.compute.internal",
+  "cmdline": "bench/run.py --solver /home/ec2-user/miniqu-work/build/release/miniQU --tag m1-t05-smoke --timeout 60 --jobs 32 --instances bench/smoke.txt",
+  "note": ""
+}
