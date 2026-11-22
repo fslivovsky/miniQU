@@ -867,3 +867,80 @@ Notes for later tasks:
   it. Dependencies need no Ref, so the safe-point rule of the collector is unaffected.
 - T09/M2: tiers replace the `tier1glue` test in `reduce`; the loop shape of ARCH 7.1 (reduce, then decide) stays.
 - The model buffer is reallocated by every collection (it is `prefix.size ()` literals).
+
+## M1-T08: dependency learning; mode 1 (QU-resolution) and `--legacyanalyze` (worker, 2026-11-22)
+
+What exists now (commits 59774b0, f6aa784):
+- `src/depend.cpp`, `struct Depend depend` (one member of `Internal`): per variable the dependency list `on[v]` (first
+  entry watched), the reverse lists `watching[u]`, the lazy trail head `depend.propagated` processed by
+  `update_dependency_watches ()` before each decision, `record_dependency`, `reset_dependencies`,
+  `resetting_dependencies`, `stays_eligible`, `waits_for_dependency`. Counters `dependencies`, `depresets`.
+- `decide.cpp`: with `--dl` one heap (`heaps[0]`, `heap_of (v)`) over all decision variables; popped variables that are
+  assigned or ineligible are dropped, as in the old `pickBranchLit`; they come back when their watch is assigned
+  (`update_dependency_watches`) or when a backtrack leaves the watch assigned on a level <= the new level (old
+  `cancelUntil`). `Block::unassigned` stays maintained and terminates the search. Without `--dl` unchanged (eligibility
+  asserted).
+- `analyze.cpp`: `analyze ()` counts the conflict and dispatches (mode 1 or `--legacyanalyze` -> `analyze_qu`, else
+  `analyze_q`); dependency outcome -> `learn_dependency (x, y)` (backtrack to `level (x) - 1`, record). No constraint, no
+  proof step, no decay, no learnt-limit adjustment.
+- `src/analyze_qu.cpp`: port of the old `analyze` (`LevelAnalyzer`, one object per round): resolvent per block
+  (`LevelAnalysis qu`), level-by-level resolution, secondary pivots in mode 1, the kind switch as a loop (porting
+  note 4: the switched variable is treated as reason-less and taken as it occurs in its reason; a new chain per round as
+  the old `premise_ids`), dependency outcome. In mode 1 the asserting literal may be secondary (verified against the old
+  propagate: conflict completion is `mode == 0` only, so mode 1 has none).
+- `app.cpp` accepts `--dl`, `--mode=1`, `--legacyanalyze` (rejects only `mode > 1`, `ccminmode > 0`).
+- Tests: `unit-depend` (watch movement, heap leave/re-enter, backtrack re-insertion, reset schedule, a learnt
+  dependency in mode 0, whole runs prefix order vs `--dl` with the known verdict), `unit-analyze_qu` (universal pivot
+  for a clause, existential pivot for a cube, kind switch, switch ending in a dependency, legacy mode 0).
+
+Edits outside the new files (ARCH 3.6): `backtrack.cpp` (re-insert into `heap_of (v)`, only if `stays_eligible` under
+`--dl`; reset `depend.propagated`), `bump.cpp` (`heap_of`), `heap.hpp` (`remove`, for `record_dependency`),
+`check.cpp` (an unassigned decision variable may wait for its dependency; each watch is listed once), `internal.cpp`
+(`--dl` single heap; the reset after the restart, as in the old `solve_`), `learn.cpp` (only `learn_dependency` and an
+assertion). `propagate.{hpp,cpp}` and `assign.cpp` are unchanged.
+
+Decision (deviation from the old code): **a dependency reset is skipped when no constraint was learnt since the last
+reset** (`resetting_dependencies`). A dependency counts as a conflict for the restart schedule, so the `restart-dl` row
+(restart after every conflict, `depreset=1`) repeated decision, dependency, restart, reset forever: 137 of 150 search
+instances timed out before, 6 after. With the default `depreset=20` a reset without any learnt constraint in 19
+restarts is practically impossible, so the default behaviour is the old one.
+
+### Acceptance (`taskset -c 0-63`; logs `/home/ec2-user/miniqu-work/logs/t08/`; R release, A asan; binary f6aa784)
+
+| command | result |
+|---|---|
+| build + `ctest`, release, debug, asan, release-clang | no warnings; 31/31 tests pass in each |
+| `tests/regress.sh -S -s 1:300 -M default,dl,mode1,mode1-dl,legacy,noearly,gc,gc-dl,gc-mode1,restart,restart-dl,restart-mode1-dl R` | 0 wrong verdicts (incl. cross-configuration), 0 rejected proofs; coverage holds (`dependencies` 92-99% in the dl rows, `depresets` 99-100% in the restart dl rows); proof checks timed out (warning only): mode1 3, mode1-dl 10, noearly 3, gc-mode1 14. **FAILED on stress timeouts**: gc-mode1 44/150, restart-dl 6/150, restart-mode1-dl 63/150 (limit 2%); see below |
+| same rows, `-s 1:100 -t 90` on A | 0 wrong verdicts, 0 rejected proofs, 0 sanitizer reports; stress timeouts gc-mode1 19/50, restart-dl 3/50, restart-mode1-dl 20/50 (same failure) |
+| `tests/fuzz_qdimacs.sh R 1 300 OPT`, OPT `-dl`, `-mode=1`, `-mode=1 -dl`, `-legacyanalyze` | 0 failures, 0 timeouts, 600 agreed each (`-dl`, `-mode=1 -dl` rerun on f6aa784) |
+| same on A, seeds 1 100 | 0 failures; timeouts: `-dl` 1, `-mode=1` 2, `-mode=1 -dl` 17, `-legacyanalyze` 0 |
+| smoke `bench/run.py ... --args=-dl` / `--args=-mode=1`, `--timeout 60 --proof-check` | 31/33 each, verdicts equal `bench/smoke-expected.csv`, 31/31 proofs accepted; the two `jctc` instances time out as in T05-T07; `bench/results/m1-t08-smoke-dl/`, `m1-t08-smoke-mode1/` |
+| port fidelity: conflicts R / baseline, search seeds 151-200 (`bench/results/m1-t08-fidelity/`) | `-dl`: geometric mean 1.14, min 0.21, max 33.1 (the large ratios are on instances where the baseline needs < 300 conflicts); `-mode=1`: geometric mean 0.98, min 0.33, max 3.16; all 100 verdicts agree |
+
+### Stress timeouts: measured, not caused by the port (coordinator decision needed)
+
+Search seeds 151-300, 20 s, release, 16 parallel on cores 0-63 (`/home/ec2-user/miniqu-work/stress-t08/`):
+
+| configuration | new | baseline |
+|---|---|---|
+| restart every conflict, `-dl` (new `--depreset=20`, baseline `-rinc=1.000001`, which keeps the interval 1) | 6 | 6 (the same six seeds: 155 174 184 199 234 280) |
+| same with `--depreset=1` (the matrix row; the baseline cannot) | 6 (60 s: 3) | - |
+| restart every conflict, `-mode=1 -dl`, `depreset=20` | 31 | 28 |
+| same with `--depreset=1` (the matrix row) | 63 (60 s: 49) | - |
+| `-mode=1 -dl` default | 1 | 6 |
+| `-mode=1` default / `-mode=1 --tier1glue=0` | 0 / 0 | - |
+| `-mode=1 --reduceint=2` / gc-mode1 row | 35 / 44 (60 s: 18) | - (no `reduceint` in the baseline) |
+| gc row (mode 0) | 0 | - |
+
+Reading: restart-dl and restart-mode1-dl time out like the baseline under the closest configuration it has; mode 1
+needs roughly 2-1000 times the conflicts of mode 0 on the same instances (baseline too, e.g. seed 279: mode 0 4, mode
+1 2908 baseline / 2978 new), and with a reduction every two conflicts it keeps too little. So the three stress rows
+are too hard for the 2% limit by design, not through a lost behaviour. Not changed (it would weaken a test): the rows
+in `tests/matrix.txt`. Options for the coordinator: a larger `reduceint` for gc-mode1 (e.g. 20), restarts every few
+conflicts (`--rinc` > 100) for the restart dl rows, or a higher timeout limit for these rows.
+
+Notes for later tasks:
+- `ARCH 7.4`: dependencies must also be reset when inprocessing fixes or eliminates a decision variable
+  (`reset_dependencies` puts every unassigned decision variable back into the heap).
+- The kind switch relies on later rounds only seeing variables assigned before the switched one; if analysis ever
+  becomes non-chronological (e.g. chronological backtracking), the old code's clearing of the reason must come back.
