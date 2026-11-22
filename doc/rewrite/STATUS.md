@@ -1538,3 +1538,76 @@ function and a 600 s limit (`logs/t11/header-missing.txt`): `10.2` props/s ratio
   more instances checked. Record the values chosen in `tests/matrix.txt` / `bench/README.md`.
 - Verifier and reviewer: do not report or block on asan-only timeout-limit misses of stress rows; report
   the numbers. Wrong verdicts, rejected proofs and sanitizer reports remain blocking as before.
+
+## M1-T12: tooling after the coordinator decisions; full gate (worker, 2026-11-22)
+
+Commits (one per item): `fcfc915` (1: per-row stress limits, rows of D1, self-test `tests/test_regress_limits.sh`
+with `tests/fake/hang-30.sh`), `29f751d` (2: cores/jobs from `nproc`, run.py checks), item 3 is the block in
+`bench/README.md` (committed in `29f751d`, `tests/fuzz_qdimacs.sh` unchanged: it passes the options), `614353f` (4:
+`PROFILE_SCOPE` in `Internal::search`, `Internal::analyze`, `Internal::propagate`; the stats unit test checks nonzero
+`search`/`analyze`/`propagate` at level 3, zero at level 0), `2975741` (5), `716b199` (6). Logs:
+`/home/ec2-user/miniqu-work/logs/t12/` (not committed; proof files deleted by the scripts).
+
+### Item 4: overhead of the profile scopes
+
+Release, `bench/run.py --tag smoke --instances bench/smoke.txt --cores 48-95 --jobs 33 --mem-gb 8 --timeout 120`
+(`miniqu-work/t12/smoke-ab.sh`), binary before (HEAD without `614353f`) and after, alternating, 3 rounds. Same 33
+verdicts in all six runs, 33/33 solved. Total wall time of the 33 instances (s): before 30.17 / 30.19 / 30.05
+(mean 30.14), after 29.98 / 30.08 / 29.94 (mean 30.00): ratio 0.995, within the 3% bound.
+
+### Item 5: dead members
+
+Removed: `Limit::conflicts`, `Limit::decisions`, `Inc::restart`, `Inc::reduce`. `Solver::Impl::user_of` is read
+(`solver.cpp:157`), kept. `Last` (`last.restart`, `last.reduce`) is read nowhere, but ARCHITECTURE 5 and 9.4 name
+`struct Last` in `limit.hpp` for the later milestones, so it stays (listed here as required by the spec).
+
+### Item 6
+
+`-flto=auto` for GCC (`CMAKE_CXX_COMPILE_OPTIONS_IPO`): the release link prints no `lto-wrapper` warning any more;
+release-clang keeps CMake's flags and builds without warnings.
+
+### Item 7: gate on the final binary (HEAD `716b199`, `taskset -c 0-47`, 16 jobs)
+
+- Clean builds (`--clean-first`) of release, debug, asan, release-clang: 0 lines with warning/error; `ctest`: 37/37
+  in each (`gate-a.sh`).
+- `tests/regress.sh -j 16 -s 1:2000 -M all R` (2 h 15 min): rc 0, **0 wrong verdicts, 0 rejected proofs**, every
+  coverage assertion holds, all stress rows within their limit.
+- `tests/regress.sh -j 16 -s 1:300 -M all -t 90 A`: **0 wrong verdicts, 0 rejected proofs, 0 sanitizer reports**,
+  coverage assertions hold, **one stress row over its limit (blocking for the coordinator's decision, nothing changed):
+  `gc-mode1` 9 of 150 search instances timed out (6.0%, limit 5%)**. The timed-out instances are the search seeds
+  179, 184, 199, 204, 209, 214, 234, 280, 290 (re-run with the asan binary, 90 s,
+  `--reduceint=100 --tier1glue=0 --gcfrac=0 -mode=1`: exactly these nine time out,
+  `python3 tests/corpus.py --tier search --seed S --out F.qcir`). The release row has 0 of 1000.
+- Table per row: instances = tiny + search seeds; "proofs" = proofs accepted; "chk to" = proof checks timed out;
+  "solver to" = solver timeouts on the search tier (1000 in R, 150 in A); proof runs unfinished (timeouts of the
+  proof run): R mode1-dl 1, noearly 2, restart-dl 1; A none. Rows without limit: warnings only.
+
+| row | R inst | R proofs | R chk to | R solver to | A inst | A proofs | A chk to | A solver to | limit |
+|---|---|---|---|---|---|---|---|---|---|
+| default | 2000 | 2000 | 0 | 0 | 300 | 300 | 0 | 0 | - |
+| dl | 2000 | 2000 | 0 | 0 | 300 | 299 | 0 | 1 | - |
+| mode1 | 2000 | 1995 | 5 | 0 | 300 | 299 | 0 | 1 | - |
+| mode1-dl | 2000 | 1895 | 84 | 20 | 300 | 276 | 0 | 24 | - |
+| mode2 | 2000 | 0 (no proofs) | 0 | 0 | 300 | 0 | 0 | 0 | - |
+| mode2-dl | 2000 | 0 (no proofs) | 0 | 13 | 300 | 0 | 0 | 3 | - |
+| ccmin3 | 2000 | 2000 | 0 | 0 | 300 | 300 | 0 | 0 | - |
+| dl-ccmin3 | 2000 | 2000 | 0 | 0 | 300 | 299 | 0 | 1 | - |
+| noearly | 2000 | 1793 | 15 | 190 | 300 | 268 | 0 | 32 | - |
+| legacy | 2000 | 2000 | 0 | 0 | 300 | 300 | 0 | 0 | - |
+| gc | 2000 | 2000 | 0 | 0 | 300 | 299 | 0 | 1 | 2% |
+| gc-dl | 2000 | 2000 | 0 | 0 | 300 | 300 | 0 | 0 | 2% |
+| gc-mode1 | 2000 | 1960 | 40 | 0 | 300 | 291 | 0 | **9** | 5% |
+| gc-mode2 | 2000 | 0 (no proofs) | 0 | 0 | 300 | 0 | 0 | 0 | 2% |
+| restart | 2000 | 2000 | 0 | 0 | 300 | 300 | 0 | 0 | 2% |
+| restart-dl | 2000 | 1967 | 0 | 32 | 300 | 293 | 0 | 7 | 8% |
+| restart-mode1-dl | 2000 | 1900 | 0 | 100 | 300 | 277 | 0 | 23 | 25% |
+
+  Smoke part of both runs: 0 failures (timeouts only in the short-timeout smoke of slow rows, as before).
+- `tests/fuzz_qdimacs.sh R 1 1000 OPT` for OPT '', `-dl`, `-mode=1`, `-mode=2`: 0 failures, 0 timeouts, 2000
+  instances agreed each. gc options `--reduceint=2 --tier1glue=0 --gcfrac=0` + OPT: release 1 300: 0 failures, 0
+  timeouts, 600 instances agreed in each of the four; asan 1 100: 0 failures, 0 sanitizer reports; timeouts (only
+  counted): '' 0, `-dl` 1, `-mode=1` 3, `-mode=2` 0 (200 / 199 / 197 / 200 instances agreed).
+- `tests/run_regressions.sh R`: 7 instances, 0 failures. `tests/fuzz_cert.sh R 1 500` and with `-dl`: 1261 VALID, 739
+  WELLFORMED, 0 INVALID/MALFORMED/ERROR in both.
+- `tests/corpus_stats.py --check --first 1 --last 400` (default and `-dl`): 0 timeouts; 400 proofs, 100% accepted
+  (max check 4.4 s); fraction in [100, 10000) conflicts 87% (default), 82% (`-dl`); max solve time 0.3 s / 13.2 s.
