@@ -56,8 +56,20 @@ public:
     }
   }
 
+  // Adds empty lists for new variables, keeping the existing ones; the
+  // solver creates variables one at a time.
+  void resize (Var vars) {
+    for (PerKind &k : kinds) {
+      k.lists.resize (2 * (size_t) vars);
+      k.dirty.resize (2 * (size_t) vars, 0);
+    }
+  }
+
   // Raw access; may contain garbage entries.
   std::vector<Watch> &operator() (Kind kind, Lit p) {
+    return kinds[index (kind)].lists[index (p)];
+  }
+  const std::vector<Watch> &operator() (Kind kind, Lit p) const {
     return kinds[index (kind)].lists[index (p)];
   }
 

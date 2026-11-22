@@ -15,12 +15,24 @@ namespace miniqu {
 // scores are ordered by the smaller variable first, which makes decisions
 // reproducible and independent of the history of heap operations.
 // The score vector must outlive the heap and cover every variable pushed.
+//
+// A heap only ever holds variables from 'offset' on, and its position table
+// starts there: the solver keeps one heap per quantifier block, which would
+// otherwise cost a table over all variables per block.
 class Heap {
   static constexpr uint32_t absent = UINT32_MAX;
 
   const std::vector<double> *scores;
+  Var offset;
   std::vector<Var> heap;
-  std::vector<uint32_t> position; // per variable, 'absent' if not in heap
+  std::vector<uint32_t> position; // per variable - offset, or 'absent'
+
+  uint32_t &position_of (Var v) {
+    assert (v >= offset);
+    if (v - offset >= position.size ())
+      position.resize ((size_t) (v - offset) + 1, absent);
+    return position[v - offset];
+  }
 
   bool before (Var a, Var b) const {
     const double sa = (*scores)[a], sb = (*scores)[b];
@@ -29,7 +41,7 @@ class Heap {
 
   void place (Var v, uint32_t i) {
     heap[i] = v;
-    position[v] = i;
+    position[v - offset] = i;
   }
 
   void sift_up (uint32_t i) {
@@ -62,13 +74,15 @@ class Heap {
   }
 
 public:
-  explicit Heap (const std::vector<double> &s) : scores (&s) {}
+  explicit Heap (const std::vector<double> &s, Var first = 0)
+      : scores (&s), offset (first) {}
 
   bool empty () const { return heap.empty (); }
   size_t size () const { return heap.size (); }
 
   bool contains (Var v) const {
-    return v < position.size () && position[v] != absent;
+    return v >= offset && v - offset < position.size () &&
+           position[v - offset] != absent;
   }
 
   Var top () const {
@@ -78,11 +92,10 @@ public:
 
   void push (Var v) {
     assert (!contains (v));
-    if (v >= position.size ())
-      position.resize ((size_t) v + 1, absent);
     heap.push_back (v);
-    position[v] = static_cast<uint32_t> (heap.size () - 1);
-    sift_up (position[v]);
+    const uint32_t i = static_cast<uint32_t> (heap.size () - 1);
+    position_of (v) = i;
+    sift_up (i);
   }
 
   Var pop () {
@@ -90,7 +103,7 @@ public:
     const Var result = heap[0];
     const Var last = heap.back ();
     heap.pop_back ();
-    position[result] = absent;
+    position[result - offset] = absent;
     if (!heap.empty ()) {
       place (last, 0);
       sift_down (0);
@@ -105,13 +118,13 @@ public:
       push (v);
       return;
     }
-    sift_up (position[v]);
-    sift_down (position[v]);
+    sift_up (position[v - offset]);
+    sift_down (position[v - offset]);
   }
 
   void clear () {
     for (Var v : heap)
-      position[v] = absent;
+      position[v - offset] = absent;
     heap.clear ();
   }
 
@@ -119,11 +132,10 @@ public:
   void build (std::span<const Var> vars) {
     clear ();
     for (Var v : vars) {
-      if (v >= position.size ())
-        position.resize ((size_t) v + 1, absent);
-      assert (position[v] == absent);
+      uint32_t &p = position_of (v);
+      assert (p == absent);
       heap.push_back (v);
-      position[v] = static_cast<uint32_t> (heap.size () - 1);
+      p = static_cast<uint32_t> (heap.size () - 1);
     }
     for (uint32_t i = static_cast<uint32_t> (heap.size ()) / 2; i-- > 0;)
       sift_down (i);

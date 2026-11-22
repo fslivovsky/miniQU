@@ -90,5 +90,20 @@ int main () {
   CHECK (!heap.contains (3) && heap.contains (7) && heap.contains (9));
   CHECK_EQ (heap.size (), 2u);
 
+  // A heap starting at a later variable (one per quantifier block) works
+  // the same and never claims variables before its start.
+  Heap block (scores, 40);
+  CHECK (!block.contains (3) && !block.contains (45));
+  const Var range[3] = {45, 41, 49};
+  block.build (range);
+  block.push (40);
+  CHECK (block.contains (40) && block.contains (49) && !block.contains (3));
+  scores[41] = 100;
+  block.update (41);
+  CHECK_EQ (block.pop (), 41u);
+  CHECK_EQ (block.size (), 3u);
+  block.clear ();
+  CHECK (!block.contains (45));
+
   return test_result ();
 }
