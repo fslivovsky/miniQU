@@ -32,7 +32,7 @@
 // The old code never minimised long-distance resolvents; neither does this.
 //
 // 'seen' is all zero on entry (the analyses clear it before 'learn') and
-// is cleared again on return.  'stats.minimized' counts removed literals.
+// is cleared again on return.
 
 #include "internal.hpp"
 
@@ -230,7 +230,6 @@ void Internal::minimize (std::vector<Lit> &lits, Kind kind) {
   }
   LOG ("minimisation removed %zu of %zu literals", lits.size () - kept,
        lits.size ());
-  stats.minimized += (int64_t) (lits.size () - kept);
   lits.resize (kept);
   for (Var v : minimizer.touched)
     seen[v] = 0;
