@@ -944,3 +944,87 @@ Notes for later tasks:
   (`reset_dependencies` puts every unassigned decision variable back into the heap).
 - The kind switch relies on later rounds only seeing variables assigned before the switched one; if analysis ever
   becomes non-chronological (e.g. chronological backtracking), the old code's clearing of the reason must come back.
+
+## M1-T09: mode 2 (long-distance Q-resolution) and learnt minimisation (worker, 2026-11-22)
+
+Commits 1762520 (code and unit tests), cb42d73 / 5305566 ('minimized' counter), 4ffbcc2 (no tracer in mode 2; ARCH
+6.3, 7.5, 8.2 amended), 59b1a69 (analyze_ldq scans as the old code), and this STATUS commit. Final binary: 59b1a69.
+
+What exists now:
+- `src/propagate_ldq.cpp`: `propagate_ldq_watches<K>` (port of `propagateLDQ`, both kinds through `kval`) and the trail
+  driver `propagate_ldq`. Prefix-aware unit rule, conflict when no primary literal is left (no completion), watches on a
+  primary literal and a primary or left secondary one, watches of position 0 move, stale entries are dropped when met.
+  `attach` is unchanged: originals are watched by their two leftmost literals and learnt constraints by the positions
+  `analyze_ldq` chooses, as in the old code.
+- `src/analyze_ldq.cpp`: port of `analyzeLDQ` as a class (no goto); resolvent per block as literals with per-literal
+  positions (`LongDistanceAnalysis ldq`), asserting literal and second watch as `getAssertingVarLDQ`/`isAsserting`,
+  dependency outcome as `getBlockedVariable`, empty constraint at the root. `learn.cpp` has `learn_watched` (positions 0/1
+  set by the caller) and `learn_empty`; `learn` (modes 0/1) uses them.
+- `src/minimize.cpp`: `minimize (lits, kind)` for ccminmode 1 (basic), 2 (deep, `litRedundant` with an explicit
+  stack), 3 (bounds with reduction, recursion cut at depth 1000), state in `Minimizer minimizer`. Called from `learn`
+  before `qreduce` for `analyze_q` and `analyze_qu` (the old `finishLearnt` callers); never for long-distance resolvents.
+  Off while any tracer is connected (`Internal::minimizing`); `solve` prints one `c warning` line when `--ccminmode` is
+  set but a tracer (explicit `--check`, `--proof`, `--trace`) disables it. The default Checker of debug/asan builds is not
+  connected when ccminmode > 0 (was already so in `solver.cpp`).
+- Mode 2 and proofs: `--proof` rejected (as before), `--trace` rejected too (see decisions), `Solver` REQUIREs that no
+  tracer is connected in mode 2, the Checker is not connected, `--check` runs `check_invariants` (restarts, after GC).
+  QDIMACS initial cubes are still verified by `check_model_cube` in debug/asan and with `--check`.
+- `collect.cpp`: in mode 2 garbage is removed from every watch list before relocation (`Watches::clean_every_list`):
+  a stale entry of a deleted constraint can sit in a list deleting did not smudge, and the relocator must not copy it.
+- `check.cpp`: in mode 2 clean lists may hold stale entries of deleted constraints; a constraint whose watches are as
+  mode 2 keeps them must not be long-distance unit once propagation is complete (originals before their first watch
+  move are exempt, see below); reasons are checked on their primary literals only.
+- The app rejects no option as "not implemented" any more. The obsolete death test of mode 2 in `unit-propagate` is gone.
+- Tests: `unit-propagate_ldq` (both kinds: an unassigned secondary literal to the left blocks and its assignment then
+  propagates, a secondary literal to the right does not block, conflict with an unassigned secondary literal, a stale
+  entry created and dropped, a stale entry of a deleted constraint accepted by `check_invariants` and dropped by GC),
+  `unit-analyze_ldq` (both kinds: the long-distance resolvent (1 4 3 -3) with its watches, backjump and glue; a
+  dependency; the empty constraint), `unit-minimize` (each ccminmode on a literal removable by basic minimisation, one
+  only by deep, one only with reduction; the decision literal kept; off with a tracer).
+
+Decisions and deviations (ARCH amended in 4ffbcc2):
+- **Duplicate watch entry not ported**: the old code compares `first != c[h]` after overwriting `c[h]`, so the test is
+  always true and a second entry is pushed when the old position 0 comes back as position 1; the port compares with the
+  new position-1 literal. Only affects the number of list entries.
+- **`--trace` rejected in mode 2** ("Traces are only available in modes 0 and 1."): `Proof` requires antecedents and
+  `conclude` an empty-constraint step; the old solver accepted `-trace` in mode 2 but traced no learnt constraint, so
+  its trace was incomplete anyway. The coordinator may prefer premise-free steps instead (needs a change in `Proof`).
+- **Minimisation off for all three modes under a tracer**: the old code disabled only ccmin-mode 3 under a proof/trace
+  and ran modes 1/2 regardless (with proofs whose chains miss the removed literals); the M1 rule of the task is applied.
+- **`stats.minimized`** counts literals minimisation removes beyond those the following `qreduce` removes anyway. The
+  resolvents of `analyze_q` still hold reducible secondary literals (the old analysis reduced them inside), and in
+  ccminmode 3 minimisation removes such literals itself; counting plain removals made ccminmode 3 look 5x stronger than
+  2 on identical searches. The definition matches the old `conflict literals ... (x % deleted)`.
+- `analyze_ldq` scans only primary blocks for the asserting literal and only secondary blocks for blocked literals, as
+  the old helpers do; the first version scanned all literals and spent 90% of a mode-2 `-dl` run there (seed 174: 21.5 s
+  vs 10.3 s after, baseline 10.9 s, same conflicts).
+- Observation (not changed, port of the old behaviour): originals start watched by their two leftmost literals, which may
+  both be secondary or a primary one with a secondary one right of it; until a watch moves, mode 2 can miss a unit or a
+  conflict there (never produce a wrong one). A mode-2-aware initial watch choice is a possible M2 improvement.
+
+### Acceptance (`taskset -c 0-63`; logs `/home/ec2-user/miniqu-work/logs/t09/`; R release, A asan)
+
+| command | result |
+|---|---|
+| build + `ctest`, release, debug, asan, release-clang (59b1a69) | no warnings in `src/`/`test/unit/`; 34/34 tests pass in each |
+| `tests/regress.sh -S -s 1:300 -M all R` (binary 5305566; Lean checking on rows with proofs) | 0 wrong verdicts incl. cross-configuration, 0 rejected proofs; coverage holds in every row (`minimized` 99% in ccmin3 and dl-ccmin3; gc-mode2 reductions/reduced/collections/relocated 88-98%). Proof checks timed out (warning only): mode1 3, mode1-dl 10, noearly 3, gc-mode1 14. Stress failures: only the three known rows of T08 (gc-mode1 44/150, restart-dl 6/150, restart-mode1-dl 64/150). Normal-row timeouts: mode1-dl 1, mode2-dl 8, noearly 37 |
+| same rows mode2, mode2-dl, gc-mode2 rerun on 59b1a69 (R, 1:300) | PASSED: 0 wrong verdicts, gc-mode2 0 timeouts, mode2-dl 1 timeout (was 8 before 59b1a69) |
+| `tests/regress.sh -S -s 1:100 -M all -t 90 A` (binary 4ffbcc2) | 0 wrong verdicts, 0 rejected proofs, 0 sanitizer reports, coverage holds. Stress failures: the three known rows (gc-mode1 19/50, restart-dl 3/50, restart-mode1-dl 20/50) **and gc-mode2 2/50** (see below) |
+| mode2, mode2-dl, gc-mode2 rerun on 59b1a69 (A, 1:100, -t 90) | 0 wrong verdicts, 0 sanitizer reports; gc-mode2 2/50 timeouts (same two seeds), mode2-dl 1 |
+| `tests/fuzz_qdimacs.sh R 1 300 OPT`, OPT '', -dl, -mode=1, -mode=2, -mode=2 -dl, -ccminmode=2, -ccminmode=3, -mode=2 --reduceint=2 --tier1glue=0 --gcfrac=0 | 0 failures, 0 timeouts, 600 agreed each (4ffbcc2; the three mode-2 options rerun on 59b1a69: same) |
+| same on A, seeds 1 100 | 0 failures; timeouts (counted only): -dl 1, -mode=1 2, -mode=2 1, -mode=2 -dl 10, gc mode 2 2, others 0 (59b1a69 for the mode-2 options: same counts) |
+| smoke `bench/run.py --args=-mode=2` / `--args=-ccminmode=3`, `--timeout 60`, cores 64-95 | 31/33 each, verdicts equal `bench/smoke-expected.csv` (the two `jctc` instances time out as in T05-T08); baseline `-mode=2` 33/33, common-instance wall 145.4 s new vs 150.8 s baseline; `bench/results/m1-t09-smoke-mode2/`, `m1-t09-smoke-ccmin3/`, `m1-t09-smoke-baseline-mode2/` |
+| port fidelity, search seeds 151-200, conflicts new / baseline (`bench/results/m1-t09-fidelity/`) | `-mode=2` vs `-mode=2`: geometric mean 1.011 (min 0.09, max 6.56); `-ccminmode=3` vs `-ccmin-mode=3`: 1.045 (0.16, 8.00); default: 1.114; all 150 verdicts agree |
+| `-mode=2 -dl` on search seeds 151-300, 20 s, new vs baseline | 0 disagreements; timeouts new 1 (seed 280), baseline 2 (199, 280); conflict ratio geometric mean 1.118 over 148 (`mode2-dl-timeouts.csv`) |
+| learnt-literal reduction by minimisation (45 of those instances with >= 100 baseline conflicts) | ccminmode 3: share of literals removed by minimisation, new `minimized / (minimized + learnedlits)` mean 11.3% median 10.7%, baseline `% deleted` mean 9.6% median 9.9%; baseline with ccmin-mode 0 deletes 0% (its analysis output is already reduced) |
+
+### gc-mode2 in asan: 2 of 50 stress timeouts (coordinator decision needed, like T07/T08)
+
+Search seeds 99 and 60 (`/home/ec2-user/miniqu-work/t09/gcm2/times.txt`): release 14.7 s / 12.6 s, asan 99 s / 89 s
+(limit 90 s), baseline `-mode=2` 0.3 s. The stress options cause it, not mode 2: conflicts with `-mode=2` 2274 / 1809
+(baseline 1718 / 1731), with `-mode=2 --reduceint=2` 50528 / 25862, with the full gc-mode2 row 134538 / 130184; the mode-0
+gc row on the same seeds needs 62402 / 54886 (seed 60 is the T07 example). In R the row has 0 timeouts. Not changed: the
+row, the timeout. Options are those of T07/T08 (larger `reduceint` for the gc rows, or a longer A timeout).
+
+Open points carried over: the three stress rows of T08 (gc-mode1, restart-dl, restart-mode1-dl) still exceed 2% in R and A,
+unchanged by this task; awaiting the coordinator.
