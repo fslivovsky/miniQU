@@ -25,9 +25,11 @@ namespace miniqu {
 
 namespace {
 
-// The bounds of the old solver.
+// The bounds of the old solver.  Rescaling multiplies by the inverse, as
+// the old code: dividing rounds differently and changes which scores tie.
 constexpr double max_initial_score = 1e-5;
 constexpr double rescale_limit = 1e100;
+constexpr double rescale_factor = 1e-100;
 
 } // namespace
 
@@ -43,8 +45,8 @@ double Internal::initial_score () {
 void Internal::bump_variable (Var v) {
   if ((scores[v] += score_inc) > rescale_limit) {
     for (double &score : scores)
-      score /= rescale_limit;
-    score_inc /= rescale_limit;
+      score *= rescale_factor;
+    score_inc *= rescale_factor;
   }
   // Gate variables share the heap of their block but are never in it.
   Heap &heap = heap_of (v);
