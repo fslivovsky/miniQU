@@ -32,7 +32,11 @@
 // The old code never minimised long-distance resolvents; neither does this.
 //
 // 'seen' is all zero on entry (the analyses clear it before 'learn') and
-// is cleared again on return.
+// is cleared again on return.  'stats.minimized' counts the literals that
+// minimisation removes beyond those the reduction after it removes anyway
+// (the resolvents of 'analyze_q' still hold such literals; the old solver
+// reduced them in the analysis, so its 'conflict literals ... deleted'
+// counts the same literals).
 
 #include "internal.hpp"
 
@@ -71,6 +75,20 @@ public:
   size_t basic (std::vector<Lit> &lits);
   size_t deep (std::vector<Lit> &lits);
   size_t bounded (std::vector<Lit> &lits);
+
+  // The number of literals of 'lits' that reduction keeps.
+  size_t reduced_size (const std::vector<Lit> &lits) const {
+    Var rightmost = no_var;
+    for (Lit l : lits)
+      if (s.prefix.is_primary (kind, var (l)) &&
+          (rightmost == no_var || var (l) > rightmost))
+        rightmost = var (l);
+    return rightmost == no_var
+               ? 0
+               : (size_t) std::count_if (
+                     lits.begin (), lits.end (),
+                     [=] (Lit l) { return var (l) <= rightmost; });
+  }
 
 private:
   // A reason of the analysed kind, or 'nullptr'.
@@ -214,6 +232,7 @@ size_t Minimize::bounded (std::vector<Lit> &lits) {
 void Internal::minimize (std::vector<Lit> &lits, Kind kind) {
   assert (!lits.empty () && minimizer.touched.empty ());
   Minimize pass (*this, kind);
+  const size_t before = pass.reduced_size (lits);
   for (Lit l : lits)
     pass.mark (var (l), in_learnt);
   size_t kept;
@@ -231,6 +250,7 @@ void Internal::minimize (std::vector<Lit> &lits, Kind kind) {
   LOG ("minimisation removed %zu of %zu literals", lits.size () - kept,
        lits.size ());
   lits.resize (kept);
+  stats.minimized += (int64_t) (before - pass.reduced_size (lits));
   for (Var v : minimizer.touched)
     seen[v] = 0;
   minimizer.touched.clear ();

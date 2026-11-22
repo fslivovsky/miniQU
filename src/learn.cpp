@@ -19,11 +19,7 @@
 // 'finishLearnt' ran it, for the resolvents of 'analyze_q' and
 // 'analyze_qu', with the asserting literal at position 0.  In M1 it is off
 // while a tracer is connected (ARCHITECTURE 7.5, 8.1): the chain of the
-// analysis does not cover the reasons it resolves with.  'minimized'
-// counts the literals removed by minimisation and the reduction after it,
-// as the old 'conflict literals ... deleted': in ccminmode 3 minimisation
-// itself removes secondary literals that the reduction would remove after
-// the other modes, so only the sum compares across modes.
+// analysis does not cover the reasons it resolves with.
 //
 // Glue is the number of distinct decision levels of the assigned literals,
 // computed before the backjump unassigns them (porting note 8).  Learnt
@@ -76,14 +72,11 @@ void Internal::learn (Kind kind, Var asserting) {
     assert (it != derived.end ());
     std::iter_swap (derived.begin (), it);
   };
-  const size_t resolvent = derived.size ();
   if (minimizing () && asserting != no_var) {
     move_to_front (asserting);
     minimize (derived, kind);
   }
   prefix.qreduce (derived, kind);
-  if (minimizing ())
-    stats.minimized += (int64_t) (resolvent - derived.size ());
   assert (derived.empty () == (asserting == no_var));
   if (derived.empty ()) {
     learn_empty (kind);
