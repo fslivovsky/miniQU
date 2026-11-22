@@ -34,12 +34,6 @@ constexpr Var undeclared = UINT32_MAX;
 // The calls must come in this order (miniqu.hpp).
 enum class Stage { Options, Variables, Constraints, Solved };
 
-#ifdef NDEBUG
-constexpr bool assertions_enabled = false;
-#else
-constexpr bool assertions_enabled = true;
-#endif
-
 } // namespace
 
 struct Solver::Impl {
@@ -172,6 +166,8 @@ void Solver::flush_proof () {
 
 void Solver::statistics () const {
   impl->internal.stats.print (stdout, process_time ());
+  if (impl->internal.opts.profile)
+    impl->internal.profiles.print (stdout);
 }
 
 } // namespace miniqu

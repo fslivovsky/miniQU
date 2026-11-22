@@ -38,6 +38,9 @@ public:
 
   explicit Profiles (int level) : enabled (level) {}
 
+  // The level is an option, known only after the solver was created.
+  void enable (int level) { enabled = level; }
+
   void start (Profile &);
   void stop (Profile &);
   void print (FILE *) const;

@@ -8,6 +8,18 @@
 // build; a violation is a bug of the caller, so we abort with the message.
 // Internal invariants use 'assert' instead (ARCHITECTURE 9.6).
 
+namespace miniqu {
+
+// Whether 'assert' is active, for code that runs an expensive check only
+// then.
+#ifdef NDEBUG
+inline constexpr bool assertions_enabled = false;
+#else
+inline constexpr bool assertions_enabled = true;
+#endif
+
+} // namespace miniqu
+
 #define REQUIRE(COND, MSG) \
   do { \
     if (!(COND)) { \

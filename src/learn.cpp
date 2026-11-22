@@ -76,6 +76,7 @@ void Internal::learn (Kind kind, Var asserting) {
     proof->add_derived (deref (arena, ref), chain);
   assign (forced (kind, derived[0]), ref);
   decay_scores ();
+  adjust_learnt_limit ();
 }
 
 } // namespace miniqu

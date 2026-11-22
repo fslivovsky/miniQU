@@ -27,6 +27,7 @@
 // a fatal error for the QLRUP writer and a premise-free step for the
 // others.
 
+#include "contract.hpp"
 #include "internal.hpp"
 #include "proof.hpp"
 
@@ -35,18 +36,25 @@
 
 namespace miniqu {
 
-#ifdef NDEBUG
-static constexpr bool assertions_enabled = false;
-#else
-static constexpr bool assertions_enabled = true;
-#endif
+// A constraint has at least one literal; the contents do not matter.
+Ref Internal::alloc_model_cube (Arena &to) const {
+  const std::vector<Lit> filler (std::max<size_t> (prefix.size (), 1),
+                                 mk_lit (0));
+  return alloc_constraint (to, filler, Kind::Cube, false, 0);
+}
 
 void Internal::init_model_cube () {
   assert (model_cube == Ref::none);
-  // A constraint has at least one literal; the contents do not matter.
-  model.assign (std::max<size_t> (prefix.size (), 1), mk_lit (0));
-  model_cube = alloc_constraint (arena, model, Kind::Cube, false, 0);
-  model.clear ();
+  model_cube = alloc_model_cube (arena);
+}
+
+// The buffer is dead between two initial cubes, so garbage collection does
+// not copy it but only keeps its id, which is where the counting of
+// 'initial_cube' stands.
+void Internal::relocate_model_cube (Arena &to) {
+  const uint64_t id = deref (arena, model_cube).id ();
+  model_cube = alloc_model_cube (to);
+  deref (to, model_cube).set_id (id);
 }
 
 // Called while 'seen' marks the variables of the unreduced cube.

@@ -8,7 +8,10 @@
 // its literals 0 and 1, and once propagation is complete a vanished watched
 // literal is only left in a disabled constraint), consistency of trail,
 // values, levels and reasons, the unassigned counts of the blocks, and that
-// every unassigned decision variable is in the heap of its block.
+// every unassigned decision variable is in the heap of its block.  No
+// stored reference, in the lists, the reasons and the watch lists that are
+// clean, is to a moved constraint; clean watch lists hold no garbage (the
+// state after a garbage collection, ARCHITECTURE 5.3).
 
 #include "internal.hpp"
 
@@ -43,6 +46,7 @@ void Internal::check_invariants () const {
     for (const auto *lists : {&irredundant, &redundant})
       for (Ref ref : (*lists)[index (kind)]) {
         const Constraint &c = deref (arena, ref);
+        CHECK_INVARIANT (!c.moved (), "list refers to a moved constraint");
         if (c.garbage ())
           continue;
         CHECK_INVARIANT (c.kind () == kind, "constraint in a wrong list");
@@ -72,6 +76,21 @@ void Internal::check_invariants () const {
                              [&] (Lit l) { return kval (kind, l) > 0; }),
             "constraint %lu watched by a vanished literal",
             (unsigned long) c.id ());
+      }
+
+  for (Kind kind : {Kind::Clause, Kind::Cube})
+    for (Var v = 0; v < vars; v++)
+      for (bool negative : {false, true}) {
+        const Lit p = mk_lit (v, negative);
+        if (watches.dirty (kind, p))
+          continue;
+        for (const Watch &w : watches (kind, p)) {
+          const Constraint &c = deref (arena, w.ref);
+          CHECK_INVARIANT (!c.garbage () && !c.moved (),
+                           "clean watch list of %u holds a deleted or "
+                           "moved constraint",
+                           v + 1);
+        }
       }
 
   CHECK_INVARIANT (propagated <= trail.size (), "propagated beyond trail");
@@ -109,7 +128,8 @@ void Internal::check_invariants () const {
       // The reason forced the true literal 't' to a positive kind value
       // and all its other literals had vanished.
       const Constraint &c = deref (arena, d.reason);
-      CHECK_INVARIANT (!c.garbage (), "reason of %u deleted", v + 1);
+      CHECK_INVARIANT (!c.garbage () && !c.moved (),
+                       "reason of %u deleted or moved", v + 1);
       const Lit t = val (l) > 0 ? l : ~l;
       const Lit forced = watch_key (c.kind (), ~t);
       CHECK_INVARIANT (std::find (c.begin (), c.end (), forced) != c.end (),

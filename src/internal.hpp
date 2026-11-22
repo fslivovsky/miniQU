@@ -10,6 +10,7 @@
 #include "message.hpp"
 #include "options.hpp"
 #include "prefix.hpp"
+#include "profile.hpp"
 #include "random.hpp"
 #include "stats.hpp"
 #include "watch.hpp"
@@ -59,6 +60,7 @@ constexpr Lit forced (Kind kind, Lit l) {
 struct Internal {
   Options opts;
   Stats stats;
+  Profiles profiles{0};
   Limit lim;
   Inc inc;
   Last last;
@@ -158,6 +160,18 @@ struct Internal {
   uint32_t compute_glue (std::span<const Lit>);
   void learn (Kind, Var asserting);
 
+  // reduce.cpp
+  void init_reduce ();
+  void adjust_learnt_limit ();
+  bool reducing () const;
+  void protect_reasons ();
+  void unprotect_reasons ();
+  void reduce ();
+
+  // collect.cpp
+  bool collecting () const;
+  void garbage_collect ();
+
   // restart.cpp
   int64_t restart_interval (int64_t restarts) const;
   bool restarting () const;
@@ -165,6 +179,8 @@ struct Internal {
 
   // model.cpp
   void init_model_cube ();
+  [[nodiscard]] Ref alloc_model_cube (Arena &) const;
+  void relocate_model_cube (Arena &);
   [[nodiscard]] Ref initial_cube ();
   void check_model_cube () const;
 

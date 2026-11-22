@@ -13,6 +13,8 @@ namespace miniqu {
 struct Limit {
   int64_t restart = 0;
   int64_t reduce = 0;
+  double max_learnts = 0; // size trigger of 'reduce' (old policy)
+  int64_t adjust = 0;     // conflicts until 'max_learnts' grows
   int64_t conflicts = -1;
   int64_t decisions = -1;
 };
@@ -21,6 +23,7 @@ struct Limit {
 struct Inc {
   int64_t restart = 0;
   int64_t reduce = 0;
+  double adjust = 0; // current conflicts between two growths
 };
 
 // Conflict count when each pass last ran, to compute the effort since.

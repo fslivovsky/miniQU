@@ -49,7 +49,7 @@ namespace {
 // Features whose task has not been done yet are rejected (ROADMAP, M1
 // execution plan): options that must stay 0 ...
 const char *const unimplemented_options[] = {"mode", "dl", "ccminmode",
-                                             "legacyanalyze", "reduceint"};
+                                             "legacyanalyze"};
 
 void print_usage () {
   printf ("usage: miniQU [options] [input [result]]\n\n"

@@ -6,10 +6,11 @@
 //
 // The loop is the one of the old 'search' / 'solve_' pair, flattened: each
 // iteration propagates, and either analyses the conflict found, or stops
-// when asked to, or restarts, or decides.  When no decision variable is
-// left, the clauses are satisfied (QDIMACS) and the initial cube taken from
-// the assignment is analysed like any satisfied cube (4.5).  Analysis ends
-// the search by deriving an empty constraint, which sets 'status'.
+// when asked to, or restarts, or decides (after a reduction, if one is
+// due).  When no decision variable is left, the clauses are satisfied
+// (QDIMACS) and the initial cube taken from the assignment is analysed like
+// any satisfied cube (4.5).  Analysis ends the search by deriving an empty
+// constraint, which sets 'status'.
 
 #include "internal.hpp"
 
@@ -36,7 +37,9 @@ Var Internal::add_var (Quant quant, bool decision, int proof_number) {
 }
 
 void Internal::search () {
+  profiles.enable (opts.profile);
   lim.restart = restart_interval (0);
+  init_reduce ();
   init_model_cube ();
   while (status == Status::Unknown) {
     if (const Ref conflict = propagate (); conflict != Ref::none)
@@ -45,8 +48,14 @@ void Internal::search () {
       break;
     else if (restarting ())
       restart ();
-    else if (!decide ())
-      analyze (initial_cube ());
+    else {
+      // The size trigger of 'reduce' may stay true, so the loop goes on
+      // to decide: see reduce.cpp.
+      if (reducing ())
+        reduce ();
+      if (!decide ())
+        analyze (initial_cube ());
+    }
   }
 }
 

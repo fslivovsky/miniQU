@@ -73,6 +73,10 @@ public:
     return kinds[index (kind)].lists[index (p)];
   }
 
+  bool dirty (Kind kind, Lit p) const {
+    return kinds[index (kind)].dirty[index (p)];
+  }
+
   void smudge (Kind kind, Lit p) {
     PerKind &k = kinds[index (kind)];
     if (k.dirty[index (p)])
