@@ -4,8 +4,12 @@
 // 'LOG (...)' traces state changes.  It exists only when compiled with
 // MINIQU_LOGGING and prints only when 'set_logging (true)' was called
 // (option 'log'); otherwise it expands to nothing, so release code carries
-// no trace of it.  Printing constraints with ids and levels is added with
-// the constraint database; this is the plain printf form.
+// no trace of it.
+//
+// The call is unqualified on purpose: in the base layer it reaches the
+// plain printf form below, inside member functions of 'Internal' it reaches
+// the members 'Internal::log', which add the decision level and can print a
+// constraint: 'LOG (ref, "propagating")' (ARCHITECTURE 9.5).
 
 #ifdef MINIQU_LOGGING
 
@@ -20,7 +24,7 @@ void log (const char *fmt, ...) __attribute__ ((format (printf, 1, 2)));
 #define LOG(...) \
   do { \
     if (::miniqu::logging ()) \
-      ::miniqu::log (__VA_ARGS__); \
+      log (__VA_ARGS__); \
   } while (0)
 
 #else
