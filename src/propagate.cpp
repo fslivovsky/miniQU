@@ -14,7 +14,9 @@
 
 namespace miniqu {
 
+// Profiled once per call of the driver, never per watch.
 Ref Internal::propagate () {
+  PROFILE_SCOPE (propagate);
   switch (opts.mode) {
   case 0: {
     const Ref conflict = propagate_trail<Lone::Conflict> ();

@@ -51,6 +51,7 @@ namespace miniqu {
 // level-by-level one ('analyze_qu.cpp').  Every conflict counts once,
 // however its analysis ends.
 void Internal::analyze (Ref conflict) {
+  PROFILE_SCOPE (analyze);
   stats.conflicts++;
   if (opts.mode == 2)
     analyze_ldq (conflict);

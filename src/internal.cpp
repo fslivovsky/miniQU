@@ -43,6 +43,7 @@ Var Internal::add_var (Quant quant, bool decision, int proof_number) {
 
 void Internal::search () {
   profiles.enable (opts.profile);
+  PROFILE_SCOPE (search);
   lim.restart = restart_interval (0);
   init_reduce ();
   init_model_cube ();

@@ -1,4 +1,5 @@
 #include "stats.hpp"
+#include "internal_test.hpp"
 #include "lit.hpp"
 #include "profile.hpp"
 #include "test.hpp"
@@ -66,6 +67,21 @@ int main () {
   FILE *g = tmpfile ();
   profiles.print (g);
   fclose (g);
+
+  // A search at level 3 times the phases that were declared but never
+  // started before; level 0 times none of them.
+  for (int level : {0, 3}) {
+    Internal internal;
+    internal.opts.profile = level;
+    declare (internal, "ae");
+    add (internal, Kind::Clause, {1, 2});
+    add (internal, Kind::Clause, {1, -2});
+    CHECK (internal.solve () == Status::False);
+    const Profiles &p = internal.profiles;
+    CHECK_EQ (p.search.total > 0, level == 3);
+    CHECK_EQ (p.analyze.total > 0, level == 3);
+    CHECK_EQ (p.propagate.total > 0, level == 3);
+  }
 
   return test_result ();
 }
