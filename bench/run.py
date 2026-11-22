@@ -240,12 +240,13 @@ class Runner:
     def append_stats(self, name, stats):
         if not stats:
             return
-        new = not os.path.exists(self.stats_path) or os.path.getsize(self.stats_path) == 0
-        with open(self.stats_path, "a", newline="") as f:
-            w = csv.writer(f)
-            if new:
-                w.writerow(STAT_COLUMNS)
-            w.writerows([name, k, v] for k, v in sorted(stats.items()))
+        with self.lock:  # jobs finish concurrently; the header must be written once
+            new = not os.path.exists(self.stats_path) or os.path.getsize(self.stats_path) == 0
+            with open(self.stats_path, "a", newline="") as f:
+                w = csv.writer(f)
+                if new:
+                    w.writerow(STAT_COLUMNS)
+                w.writerows([name, k, v] for k, v in sorted(stats.items()))
 
     def rewrite(self):
         tmp = self.csv_path + ".tmp"
