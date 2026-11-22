@@ -41,7 +41,7 @@ public:
   // Declares variable 'var'.  Consecutive calls with the same quantifier
   // form one quantifier block.  A variable with 'decision' false is never
   // decided (gate variables of a circuit).  'proof_number' is the number
-  // under which tracers see the variable, 0 if the input has none.
+  // under which tracers see the variable; 0 means 'var' itself (QDIMACS).
   void add_var (int var, Quant, bool decision = true, int proof_number = 0);
 
   // Adds a clause or cube over declared variables.  Duplicate literals are

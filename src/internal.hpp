@@ -120,7 +120,7 @@ struct Internal {
 
   // constraint.cpp
   void add_original (Kind, std::vector<Lit> &lits, int gate);
-  Ref new_constraint (Kind, std::span<const Lit>, bool learnt,
+  Ref new_constraint (uint64_t id, Kind, std::span<const Lit>, bool learnt,
                       uint32_t glue);
   void mark_garbage (Ref);
   void shrink_constraint (Ref, uint32_t new_size);

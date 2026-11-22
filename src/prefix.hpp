@@ -25,7 +25,7 @@ struct VarInfo {
   Quant quant;
   bool decision;  // an input variable; gate variables are never decided
   uint32_t depth; // index of its block
-  int proof;      // number under which tracers see it, 0 if none
+  int proof;      // number under which tracers see it (positive)
 };
 
 struct Prefix {

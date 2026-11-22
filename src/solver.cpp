@@ -4,11 +4,20 @@
 //
 // Internal variables are created in the order of the 'add_var' calls,
 // which is prefix order, so the map is a renumbering and nothing else.
+//
+// 'Impl' owns the 'Proof' and through it the tracers.  The internal
+// 'Checker' is connected with the first original constraint, when the
+// prefix is complete: always with '--check', and by default in builds with
+// assertions when no tracer was connected by the caller (ARCHITECTURE 8.1;
+// in M1 also only without minimisation).  Long-distance steps (mode 2) are
+// not replayable, so it is never connected there.
 
+#include "checker.hpp"
 #include "contract.hpp"
 #include "internal.hpp"
 #include "message.hpp"
 #include "miniqu.hpp"
+#include "proof.hpp"
 #include "util.hpp"
 
 #include <algorithm>
@@ -25,10 +34,17 @@ constexpr Var undeclared = UINT32_MAX;
 // The calls must come in this order (miniqu.hpp).
 enum class Stage { Options, Variables, Constraints, Solved };
 
+#ifdef NDEBUG
+constexpr bool assertions_enabled = false;
+#else
+constexpr bool assertions_enabled = true;
+#endif
+
 } // namespace
 
 struct Solver::Impl {
   Internal internal;
+  std::unique_ptr<Proof> proof;
   Stage stage = Stage::Options;
   std::vector<Var> internal_of; // per user variable
   std::vector<int> user_of;     // per internal variable
@@ -44,6 +60,22 @@ struct Solver::Impl {
     REQUIRE (declared (std::abs (lit)),
              "literal of an undeclared variable");
     return mk_lit (internal_of[(size_t) std::abs (lit)], lit < 0);
+  }
+
+  void connect (std::unique_ptr<Tracer> tracer) {
+    if (!proof) {
+      proof = std::make_unique<Proof> (&internal);
+      internal.proof = proof.get ();
+    }
+    proof->connect (std::move (tracer));
+  }
+
+  void connect_checker () {
+    const Options &opts = internal.opts;
+    if (opts.mode == 2)
+      return;
+    if (opts.check || (assertions_enabled && !proof && !opts.ccminmode))
+      connect (std::make_unique<Checker> (internal));
   }
 };
 
@@ -72,8 +104,8 @@ void Solver::add_var (int var, Quant quant, bool decision,
   impl->stage = Stage::Variables;
   if ((size_t) var >= impl->internal_of.size ())
     impl->internal_of.resize ((size_t) var + 1, undeclared);
-  impl->internal_of[(size_t) var] =
-      impl->internal.add_var (quant, decision, proof_number);
+  impl->internal_of[(size_t) var] = impl->internal.add_var (
+      quant, decision, proof_number ? proof_number : var);
   impl->user_of.push_back (var);
 }
 
@@ -81,7 +113,10 @@ void Solver::add_original (Kind kind, std::span<const int> lits,
                            int proof_gate) {
   REQUIRE (impl->stage != Stage::Solved, "add_original after solve");
   REQUIRE (proof_gate >= 0, "negative proof gate");
-  impl->stage = Stage::Constraints;
+  if (impl->stage != Stage::Constraints) {
+    impl->stage = Stage::Constraints;
+    impl->connect_checker ();
+  }
   impl->lits.clear ();
   for (int lit : lits)
     impl->lits.push_back (impl->translate (lit));
@@ -96,7 +131,7 @@ void Solver::connect_tracer (std::unique_ptr<Tracer> tracer) {
   REQUIRE (impl->stage <= Stage::Variables,
            "connect_tracer after add_original");
   REQUIRE (tracer != nullptr, "no tracer");
-  fatal ("proofs not implemented yet");
+  impl->connect (std::move (tracer));
 }
 
 int Solver::solve () {
@@ -130,7 +165,10 @@ std::vector<int> Solver::certificate () const {
 
 void Solver::terminate () { impl->internal.terminated = true; }
 
-void Solver::flush_proof () {}
+void Solver::flush_proof () {
+  if (impl->proof)
+    impl->proof->flush ();
+}
 
 void Solver::statistics () const {
   impl->internal.stats.print (stdout, process_time ());

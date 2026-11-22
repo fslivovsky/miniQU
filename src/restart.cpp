@@ -6,7 +6,8 @@
 // as the old 'search (rest_base * restart_first)' does.
 //
 // A restart keeps everything learnt and only undoes assignments, so it has
-// no proof steps.
+// no proof steps.  Being at the root, it is where '--check' verifies the
+// invariants (ARCHITECTURE 9.6).
 
 #include "internal.hpp"
 
@@ -52,6 +53,8 @@ bool Internal::restarting () const {
 void Internal::restart () {
   stats.restarts++;
   backtrack (0);
+  if (opts.check)
+    check_invariants ();
   lim.restart = stats.conflicts + restart_interval (stats.restarts);
   report ("restart");
 }

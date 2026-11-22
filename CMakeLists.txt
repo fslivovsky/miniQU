@@ -136,15 +136,15 @@ set_tests_properties(encoding-diff PROPERTIES
                      ENVIRONMENT ENCODING_DUMP=$<TARGET_FILE:encoding-dump>)
 
 # End-to-end: 20 fuzz seeds of the default configuration against the
-# baseline and the brute-force evaluator, and the regression instances.
-# Without proofs until the proof task.
+# baseline and the brute-force evaluator, and the regression instances, with
+# their proofs checked by the Lean checker.
 add_test(NAME fuzz
-         COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/tests/regress.sh -n -S -s 1:20 -M default -j 8
+         COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/tests/regress.sh -S -s 1:20 -M default -j 8
                  $<TARGET_FILE:miniQU>
          WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
 set_tests_properties(fuzz PROPERTIES ENVIRONMENT REGRESS_WORK=${CMAKE_BINARY_DIR}/regress)
 add_test(NAME run-regressions
-         COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/tests/run_regressions.sh -n $<TARGET_FILE:miniQU>
+         COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/tests/run_regressions.sh $<TARGET_FILE:miniQU>
          WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
 
 # Formatting is checked, not applied: .clang-format is the authority.

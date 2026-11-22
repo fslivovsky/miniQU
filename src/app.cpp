@@ -14,6 +14,13 @@
 // INDETERMINATE, then with '--cert' the line "V <literals> 0" over QCIR
 // identifiers or QDIMACS numbers.  Exit code 10, 20 or 0 as the old binary;
 // errors go to stderr with exit code 1.
+//
+// Proofs: '--proof=FILE' writes a QLRUP proof (binary with
+// '--proofbinary'), only for QCIR input outside mode 2 (checked before
+// parsing, with the old message); '--trace=FILE' writes the older trace
+// format for any input. Both files are opened here and handed to the solver
+// as tracers before the formula is added.  A signal only stops the search;
+// the proof is flushed after 'solve' returns (ARCHITECTURE 8.2).
 
 #include "encode.hpp"
 #include "logging.hpp"
@@ -21,8 +28,10 @@
 #include "miniqu.hpp"
 #include "options.hpp"
 #include "parse.hpp"
+#include "qlrup_tracer.hpp"
 #include "resources.hpp"
 #include "signal.hpp"
+#include "trace_tracer.hpp"
 #include "util.hpp"
 
 #include <cstdio>
@@ -39,12 +48,8 @@ namespace {
 
 // Features whose task has not been done yet are rejected (ROADMAP, M1
 // execution plan): options that must stay 0 ...
-const char *const unimplemented_options[] = {
-    "mode", "dl", "ccminmode", "legacyanalyze", "check", "reduceint"};
-
-// ... and application arguments, in both spellings.
-const char *const unimplemented_arguments[] = {
-    "-proof=", "--proof=", "-trace=", "--trace="};
+const char *const unimplemented_options[] = {"mode", "dl", "ccminmode",
+                                             "legacyanalyze", "reduceint"};
 
 void print_usage () {
   printf ("usage: miniQU [options] [input [result]]\n\n"
@@ -54,7 +59,9 @@ void print_usage () {
           "standard input.\n"
           "Options are --name=value, --name (=1) and --no-name (=0); "
           "a single dash and\n"
-          "hyphens inside names are accepted (-ccmin-mode=3).\n\n");
+          "hyphens inside names are accepted (-ccmin-mode=3).\n\n"
+          "  --proof=FILE   write a QLRUP proof (QCIR, modes 0 and 1)\n"
+          "  --trace=FILE   write a trace in the older format\n\n");
   Options::print_usage (stdout);
 }
 
@@ -67,13 +74,36 @@ bool ends_with (const std::string &s, const char *suffix) {
   return s.size () >= n && s.compare (s.size () - n, n, suffix) == 0;
 }
 
+// The value of '--NAME=VALUE' or '-NAME=VALUE', if 'arg' is of that form.
+std::optional<std::string> file_argument (const char *arg,
+                                          const char *name) {
+  const std::string prefix = std::string (name) + "=";
+  for (const char *dashes : {"--", "-"}) {
+    const std::string option = dashes + prefix;
+    if (has_prefix (arg, option.c_str ()))
+      return std::string (arg + option.size ());
+  }
+  return std::nullopt;
+}
+
+std::unique_ptr<OutputFile> open_output (const std::string &path,
+                                         const char *what) {
+  auto file = std::make_unique<OutputFile> (path);
+  if (!file->is_open ())
+    fatal ("could not open %s file '%s'", what, path.c_str ());
+  return file;
+}
+
 class App {
   Options opts;
   std::vector<std::pair<std::string, int>> given; // in command line order
   std::vector<std::string> files;
+  std::optional<std::string> proof_path, trace_path;
   std::optional<Circuit> circuit; // QCIR input: names for the 'V' line
 
+  bool qcir_input () const;
   void parse_arguments (int argc, char **argv);
+  void connect_tracers (Solver &) const;
   void read_input (Solver &);
   void print_certificate (const Solver &) const;
   void write_result_file (int result) const;
@@ -98,12 +128,13 @@ void App::parse_arguments (int argc, char **argv) {
                "try '--help')",
                arg);
       given.emplace_back (name, value);
-    } else if (arg[0] == '-' && arg[1]) {
-      for (const char *prefix : unimplemented_arguments)
-        if (has_prefix (arg, prefix))
-          fatal ("'%s': not implemented yet", arg);
+    } else if (auto path = file_argument (arg, "proof"))
+      proof_path = *path;
+    else if (auto trace = file_argument (arg, "trace"))
+      trace_path = *trace;
+    else if (arg[0] == '-' && arg[1])
       fatal ("invalid option '%s' (try '--help')", arg);
-    } else if (files.size () == 2)
+    else if (files.size () == 2)
       fatal ("too many file arguments: '%s'", arg);
     else
       files.push_back (arg);
@@ -114,11 +145,27 @@ void App::parse_arguments (int argc, char **argv) {
              opts.get (name));
 }
 
+bool App::qcir_input () const {
+  return opts.qcir || (!files.empty () && ends_with (files[0], "qcir"));
+}
+
+void App::connect_tracers (Solver &solver) const {
+  if (proof_path) {
+    if (!qcir_input () || opts.mode == 2)
+      fatal ("Proofs are only available for QCIR input in modes 0 and 1.");
+    solver.connect_tracer (std::make_unique<QlrupTracer> (
+        open_output (*proof_path, "proof"), opts.proofbinary));
+  }
+  if (trace_path)
+    solver.connect_tracer (
+        std::make_unique<TraceTracer> (open_output (*trace_path, "trace")));
+}
+
 void App::read_input (Solver &solver) {
   const std::string path = files.empty () ? "-" : files[0];
   if (path == "-")
     MSG ("reading QDIMACS from standard input");
-  if (opts.qcir || ends_with (path, "qcir")) {
+  if (qcir_input ()) {
     circuit = parse_qcir (path);
     encode (*circuit, solver, opts.earlytseitin);
   } else
@@ -165,6 +212,7 @@ int App::main (int argc, char **argv) {
   Solver solver;
   for (const auto &[name, value] : given)
     solver.set (name, value);
+  connect_tracers (solver);
   read_input (solver);
   MSG ("parsed and encoded in %.2f seconds", process_time ());
 

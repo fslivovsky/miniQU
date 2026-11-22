@@ -16,11 +16,12 @@
 // constraints are redundant, except units, which 'new_constraint' stores
 // irredundant (ARCHITECTURE 4.3).
 //
-// Proof (M1-T06): the learnt constraint, or the empty one, is a derived
-// step with the chain collected by the analysis.  Reduction is part of the
-// step, so INV-DERIVED holds.
+// Proof: the learnt constraint, or the empty one, is a derived step with
+// the chain collected by the analysis (conflict id, then the reason ids in
+// resolution order).  Reduction is part of the step, so INV-DERIVED holds.
 
 #include "internal.hpp"
+#include "proof.hpp"
 
 #include <algorithm>
 #include <cassert>
@@ -44,6 +45,9 @@ void Internal::learn (Kind kind, Var asserting) {
   prefix.qreduce (derived, kind);
   assert (derived.empty () == (asserting == no_var));
   if (derived.empty ()) {
+    const uint64_t id = next_id++;
+    if (proof)
+      proof->add_derived (id, kind, {}, chain);
     found_empty (kind);
     return;
   }
@@ -67,7 +71,9 @@ void Internal::learn (Kind kind, Var asserting) {
   stats.learned[index (kind)]++;
   stats.learnedlits[index (kind)] += (int64_t) derived.size ();
   backtrack (jump);
-  const Ref ref = new_constraint (kind, derived, true, glue);
+  const Ref ref = new_constraint (next_id++, kind, derived, true, glue);
+  if (proof)
+    proof->add_derived (deref (arena, ref), chain);
   assign (forced (kind, derived[0]), ref);
   decay_scores ();
 }

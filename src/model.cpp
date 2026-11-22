@@ -21,11 +21,14 @@
 //
 // The cube is written into a buffer constraint allocated once with room for
 // every variable, so that it has a 'Ref' and analysis can start from it
-// without storing it.  It is not derived, so no QLRUP step exists for it:
-// the proof task makes it a fatal error with a QLRUP tracer, and tracers
-// that accept it receive it through 'add_model_cube' (ARCHITECTURE 8.1).
+// without storing it.  Each cube gets a fresh id, under which the analysis
+// chain refers to it.  It is not derived, so no QLRUP step exists for it:
+// tracers receive it through 'add_model_cube' (ARCHITECTURE 8.1), which is
+// a fatal error for the QLRUP writer and a premise-free step for the
+// others.
 
 #include "internal.hpp"
+#include "proof.hpp"
 
 #include <algorithm>
 #include <cassert>
@@ -101,7 +104,10 @@ Ref Internal::initial_cube () {
   Constraint &c = deref (arena, model_cube);
   std::copy (model.begin (), model.end (), c.begin ());
   c.set_size (static_cast<uint32_t> (size));
+  c.set_id (next_id++);
   model.clear ();
+  if (proof)
+    proof->add_model_cube (c);
   LOG (model_cube, "initial");
   return model_cube;
 }

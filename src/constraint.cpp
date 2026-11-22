@@ -20,13 +20,15 @@
 // written: the given original gets one, its reduction (if it lost a
 // literal) the next, and the stored constraint carries the last one.
 //
-// Proof steps: 'o' for the original as given, the reduction derived from
-// it alone followed by the deletion of the original, and the empty
-// constraint derived from two complementary units.  They are emitted by the
-// proof task (M1-T06); 'mark_garbage' will be the single source of deletion
-// steps.
+// Proof steps: 'o' for the original as given; if reduction shortened it,
+// the reduced constraint derived from the original's id alone followed by
+// the deletion of the original; the empty constraint derived from two
+// complementary units (the new one first).  These steps are logged even
+// after the formula was decided, as by the old solver.  'mark_garbage' is
+// the single source of deletion steps for stored constraints.
 
 #include "internal.hpp"
+#include "proof.hpp"
 
 #include <algorithm>
 #include <cassert>
@@ -36,6 +38,8 @@ namespace miniqu {
 void Internal::found_empty (Kind kind) {
   LOG ("empty %s", kind == Kind::Clause ? "clause" : "cube");
   status = kind == Kind::Clause ? Status::False : Status::True;
+  if (proof)
+    proof->conclude (kind);
 }
 
 // Sorts, removes duplicates, and returns false if 'lits' contains a literal
@@ -50,24 +54,32 @@ static bool normalize (std::vector<Lit> &lits) {
   return true;
 }
 
-void Internal::add_original (Kind kind, std::vector<Lit> &lits,
-                             [[maybe_unused]] int gate) {
+void Internal::add_original (Kind kind, std::vector<Lit> &lits, int gate) {
   assert (!decision_level ());
   assert (!propagated);
   if (!normalize (lits))
     return;
   stats.originals[index (kind)]++;
-  const size_t given = lits.size ();
-  prefix.qreduce (lits, kind);
-  const uint64_t ids = lits.size () < given ? 2 : 1;
-  if (status != Status::Unknown || lits.empty ()) {
-    next_id += ids;
-    if (status == Status::Unknown)
-      found_empty (kind);
+  uint64_t id = next_id++;
+  if (proof)
+    proof->add_original (id, kind, gate, lits);
+  const size_t size = prefix.reduced_size (lits, kind);
+  if (size < lits.size ()) {
+    const uint64_t original = id;
+    id = next_id++;
+    if (proof) {
+      proof->add_derived (id, kind, {lits.data (), size}, {&original, 1});
+      proof->delete_constraint (original, kind, lits);
+    }
+    lits.resize (size);
+  }
+  if (status != Status::Unknown)
+    return;
+  if (lits.empty ()) {
+    found_empty (kind);
     return;
   }
-  next_id += ids - 1;
-  const Ref ref = new_constraint (kind, lits, false, 0);
+  const Ref ref = new_constraint (id, kind, lits, false, 0);
   if (lits.size () > 1)
     return;
   const Lit unit = kind == Kind::Clause ? lits[0] : ~lits[0];
@@ -76,20 +88,25 @@ void Internal::add_original (Kind kind, std::vector<Lit> &lits,
   else if (val (unit) < 0) {
     // After reduction a unit clause is existential and a unit cube
     // universal, so the earlier unit has the same kind.
-    assert (deref (arena, reason (var (unit))).kind () == kind);
-    next_id++;
+    const Constraint &earlier = deref (arena, reason (var (unit)));
+    assert (earlier.kind () == kind);
+    const uint64_t premises[] = {id, earlier.id ()};
+    const uint64_t empty = next_id++;
+    if (proof)
+      proof->add_derived (empty, kind, {}, premises);
     found_empty (kind);
   }
 }
 
-Ref Internal::new_constraint (Kind kind, std::span<const Lit> lits,
-                              bool learnt, uint32_t glue) {
+Ref Internal::new_constraint (uint64_t id, Kind kind,
+                              std::span<const Lit> lits, bool learnt,
+                              uint32_t glue) {
   assert (!lits.empty ());
   // Units justify root assignments and later deletions (ARCHITECTURE
   // 11.1), so they are irredundant whatever produced them.
   if (lits.size () == 1)
     learnt = false;
-  const Ref ref = alloc_constraint (arena, lits, kind, learnt, next_id++);
+  const Ref ref = alloc_constraint (arena, lits, kind, learnt, id);
   deref (arena, ref).set_glue (glue);
   (learnt ? redundant : irredundant)[index (kind)].push_back (ref);
   if (lits.size () > 1)
@@ -130,6 +147,8 @@ void Internal::mark_garbage (Ref ref) {
   assert (!c.garbage ());
   assert (c.size () > 1);
   LOG (ref, "delete");
+  if (proof)
+    proof->delete_constraint (c);
   c.set_garbage (true);
   arena.free (c.words ());
   const Kind kind = c.kind ();
