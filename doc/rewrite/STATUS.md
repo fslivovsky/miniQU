@@ -1611,3 +1611,26 @@ release-clang keeps CMake's flags and builds without warnings.
   WELLFORMED, 0 INVALID/MALFORMED/ERROR in both.
 - `tests/corpus_stats.py --check --first 1 --last 400` (default and `-dl`): 0 timeouts; 400 proofs, 100% accepted
   (max check 4.4 s); fraction in [100, 10000) conflicts 87% (default), 82% (`-dl`); max solve time 0.3 s / 13.2 s.
+
+## Owner decision: testing and benchmarking budget per milestone (2026-11-22)
+
+The owner wants less extensive testing: roughly 2 hours of benchmarking per milestone. This overrides the
+tiers, seed counts and seed ranges of ROADMAP 0.1/0.3 and of the milestone acceptance texts wherever they
+cost more; the definitions of "better" / "not worse" and the report contents stay.
+
+- **Benchmark stage of a milestone round: at most about 2 hours of wall time on the benchmark cores**, all
+  runs included. The standard plan that fits: timeout 60 s, seeds 1, 2, 3, configurations default and
+  `-dl`, new default against the previous accepted state (M1: the frozen baseline, run on this machine);
+  results of the previous state are reused when they were measured on this machine with the same
+  settings. With what is left of the 2 hours, in this order: one proof-coverage run (seed 0, default,
+  proofs attempted for instances solved within 20 s, checker limit 600 s), one on/off ablation per new
+  technique (default configuration, same seeds), modes 1 and 2 once each (seed 1). Drop items from the end
+  of this list when the budget is used up, and say in the report what was dropped.
+- **No 600 s "full tier" at milestone gates.** Long runs (900 s) happen once, in the final stage.
+- **Fuzz gates: seeds 1:300 on the release build and 1:100 on the asan build** over the matrix (QCIR with
+  Lean checking) and 1:300 for the QDIMACS fuzz, for task acceptance, the milestone gate and independent
+  verification alike. The 1:2000 / 1:3000 ranges of the acceptance texts are not required. A
+  verification pass should take about an hour, not several.
+- Reviewer: judge the evidence against this budget. Do not block because the full tier, more seeds or
+  larger fuzz ranges are missing; do say what the reduced evidence can and cannot show. Discrepancies,
+  rejected proofs and sanitizer reports remain blocking.
