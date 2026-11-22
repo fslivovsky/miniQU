@@ -46,7 +46,7 @@ void Internal::bump_variable (Var v) {
     score_inc /= rescale_limit;
   }
   // Gate variables share the heap of their block but are never in it.
-  Heap &heap = heaps[prefix.depth (v)];
+  Heap &heap = heap_of (v);
   if (heap.contains (v))
     heap.update (v);
 }

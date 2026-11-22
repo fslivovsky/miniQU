@@ -7,7 +7,10 @@
 // as in MiniSat), with 0 none.  Decision variables go back into the heap
 // of their block; without dependency learning a variable must be in its
 // heap whenever it is unassigned, since decisions pop from the heap of the
-// current block only.
+// current block only.  With '--dl' (one heap) a variable goes back only if
+// it stays eligible, as in the old 'cancelUntil'; the others return when
+// their watched dependency is assigned again, which the trail head of
+// 'depend.cpp', moved back here, will see.
 
 #include "internal.hpp"
 
@@ -32,14 +35,15 @@ void Internal::backtrack (int new_level) {
     vals[index (l)] = vals[index (~l)] = 0;
     if (prefix.vars[v].decision) {
       prefix.block (v).unassigned++;
-      Heap &heap = heaps[prefix.depth (v)];
-      if (!heap.contains (v))
+      Heap &heap = heap_of (v);
+      if (!heap.contains (v) && (!opts.dl || stays_eligible (v, new_level)))
         heap.push (v);
     }
   }
   trail.resize (start);
   control.resize (static_cast<size_t> (new_level));
   propagated = std::min (propagated, start);
+  depend.propagated = std::min (depend.propagated, start);
 }
 
 } // namespace miniqu

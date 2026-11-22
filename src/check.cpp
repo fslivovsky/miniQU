@@ -8,7 +8,9 @@
 // its literals 0 and 1, and once propagation is complete a vanished watched
 // literal is only left in a disabled constraint), consistency of trail,
 // values, levels and reasons, the unassigned counts of the blocks, and that
-// every unassigned decision variable is in the heap of its block.  No
+// every unassigned decision variable is in the heap of its block (with
+// '--dl': or waits for its watched dependency, and every watch is in the
+// list of the variable it watches).  No
 // stored reference, in the lists, the reasons and the watch lists that are
 // clean, is to a moved constraint; clean watch lists hold no garbage (the
 // state after a garbage collection, ARCHITECTURE 5.3).
@@ -122,7 +124,8 @@ void Internal::check_invariants () const {
     if (!val (l)) {
       if (decision) {
         unassigned[prefix.depth (v)]++;
-        CHECK_INVARIANT (heaps[prefix.depth (v)].contains (v),
+        CHECK_INVARIANT (heap_of (v).contains (v) ||
+                             (opts.dl && waits_for_dependency (v)),
                          "variable %u not in its heap", v + 1);
       }
       continue;
@@ -160,6 +163,15 @@ void Internal::check_invariants () const {
   for (size_t b = 0; b < prefix.blocks.size (); b++)
     CHECK_INVARIANT (prefix.blocks[b].unassigned == unassigned[b],
                      "unassigned count of block %zu", b);
+  CHECK_INVARIANT (depend.propagated <= trail.size (),
+                   "dependency head beyond trail");
+  for (Var v = 0; v < depend.on.size (); v++)
+    if (!depend.on[v].empty ()) {
+      const std::vector<Var> &watching = depend.watching[depend.on[v][0]];
+      CHECK_INVARIANT (std::count (watching.begin (), watching.end (), v) ==
+                           1,
+                       "dependency watch of %u", v + 1);
+    }
 }
 
 } // namespace miniqu

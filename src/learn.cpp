@@ -16,9 +16,19 @@
 // constraints are redundant, except units, which 'new_constraint' stores
 // irredundant (ARCHITECTURE 4.3).
 //
+// In mode 1 the asserting literal may be secondary (QU-resolution
+// propagates such literals too).  It is never removed by reduction there:
+// 'analyze_qu' keeps only secondary literals left of a primary one.
+//
+// A learnt dependency (an analysis met a decision x that has to be
+// resolved away to reduce y) backtracks below x, as the old 'search' does,
+// and records it ('depend.cpp').  The scores are not decayed and the
+// learnt limit is not adjusted: no constraint is learnt.
+//
 // Proof: the learnt constraint, or the empty one, is a derived step with
 // the chain collected by the analysis (conflict id, then the reason ids in
 // resolution order).  Reduction is part of the step, so INV-DERIVED holds.
+// A dependency derives nothing.
 
 #include "internal.hpp"
 #include "proof.hpp"
@@ -55,6 +65,7 @@ void Internal::learn (Kind kind, Var asserting) {
   const auto first =
       std::find_if (derived.begin (), derived.end (),
                     [=] (Lit l) { return var (l) == asserting; });
+  assert (first != derived.end ());
   std::iter_swap (derived.begin (), first);
   int jump = 0;
   if (derived.size () > 1) {
@@ -77,6 +88,11 @@ void Internal::learn (Kind kind, Var asserting) {
   assign (forced (kind, derived[0]), ref);
   decay_scores ();
   adjust_learnt_limit ();
+}
+
+void Internal::learn_dependency (Var x, Var y) {
+  backtrack (level (x) - 1);
+  record_dependency (x, y);
 }
 
 } // namespace miniqu

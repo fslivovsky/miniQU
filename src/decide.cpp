@@ -1,13 +1,21 @@
-// Decisions (ARCHITECTURE 7.3), without dependency learning.
+// Decisions (ARCHITECTURE 7.3; the old 'pickBranchLit').
 //
-// Decisions follow the prefix: the current block is the first one that
-// still has an unassigned decision variable, and the variable is the one
-// with the highest score in the heap of that block (ties: smaller index).
-// Every unassigned decision variable is in the heap of its block
-// ('backtrack' re-inserts it), while assigned ones are dropped lazily when
-// they come to the top.  Gate variables are never in a heap and never
-// counted in 'Block::unassigned' (porting note 10), so a block is complete
-// once its input variables are assigned, whatever its gates do.
+// Without dependency learning decisions follow the prefix: the current
+// block is the first one that still has an unassigned decision variable,
+// and the variable is the one with the highest score in the heap of that
+// block (ties: smaller index).  Every unassigned decision variable is in
+// the heap of its block ('backtrack' re-inserts it), while assigned ones
+// are dropped lazily when they come to the top.  Gate variables are never
+// in a heap and never counted in 'Block::unassigned' (porting note 10), so
+// a block is complete once its input variables are assigned, whatever its
+// gates do.
+//
+// With '--dl' there is one heap over all decision variables, and the
+// variable is the best one whose watched dependency is assigned
+// ('depend.cpp').  Popped variables that are assigned or not eligible are
+// dropped; 'depend.cpp' and 'backtrack' put the latter back in time.
+// Since dependencies are acyclic the heap cannot run empty while a
+// decision variable is unassigned.
 //
 // The value is the saved phase, initially false (porting note 6; the old
 // 'polarity' starts true, which is MiniSat's sign of the negative literal).
@@ -21,11 +29,15 @@
 
 namespace miniqu {
 
-// The old 'isEligibleDecision': every block further out of the other
-// quantifier is assigned.  Taking the first incomplete block guarantees
-// it, so this is only asserted; dependency learning will make it a real
-// test.
+// The old 'isEligibleDecision'.  In prefix order: every block further out
+// of the other quantifier is assigned, which taking the first incomplete
+// block guarantees, so this is only asserted.  With dependency learning:
+// the watched dependency is assigned.
 bool Internal::eligible (Var v) const {
+  if (opts.dl) {
+    const std::vector<Var> &on = depend.on[v];
+    return on.empty () || val (mk_lit (on.front ()));
+  }
   const Quant quant = prefix.quant (v);
   for (uint32_t d = 0; d < prefix.depth (v); d++) {
     const Block &b = prefix.blocks[d];
@@ -42,13 +54,23 @@ bool Internal::decide () {
                     [] (const Block &b) { return b.unassigned > 0; });
   if (block == prefix.blocks.end ())
     return false;
-  Heap &heap = heaps[(size_t) (block - prefix.blocks.begin ())];
   Var v;
-  do {
-    assert (!heap.empty ());
-    v = heap.pop ();
-  } while (val (mk_lit (v)));
-  assert (eligible (v));
+  if (opts.dl) {
+    update_dependency_watches ();
+    Heap &heap = heaps[0];
+    do {
+      if (heap.empty ())
+        fatal ("internal error: no eligible decision variable");
+      v = heap.pop ();
+    } while (val (mk_lit (v)) || !eligible (v));
+  } else {
+    Heap &heap = heaps[(size_t) (block - prefix.blocks.begin ())];
+    do {
+      assert (!heap.empty ());
+      v = heap.pop ();
+    } while (val (mk_lit (v)));
+    assert (eligible (v));
+  }
   stats.decisions++;
   new_level ();
   const Lit decision = mk_lit (v, phases[v] < 0);

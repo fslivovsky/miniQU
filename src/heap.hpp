@@ -111,6 +111,19 @@ public:
     return result;
   }
 
+  void remove (Var v) {
+    assert (contains (v));
+    const uint32_t i = position[v - offset];
+    const Var last = heap.back ();
+    heap.pop_back ();
+    position[v - offset] = absent;
+    if (i < heap.size ()) {
+      place (last, i);
+      sift_up (i);
+      sift_down (position[last - offset]);
+    }
+  }
+
   // Restores the order after the score of 'v' changed in either direction;
   // inserts 'v' if it is not in the heap.
   void update (Var v) {

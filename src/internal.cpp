@@ -6,11 +6,12 @@
 //
 // The loop is the one of the old 'search' / 'solve_' pair, flattened: each
 // iteration propagates, and either analyses the conflict found, or stops
-// when asked to, or restarts, or decides (after a reduction, if one is
-// due).  When no decision variable is left, the clauses are satisfied
-// (QDIMACS) and the initial cube taken from the assignment is analysed like
-// any satisfied cube (4.5).  Analysis ends the search by deriving an empty
-// constraint, which sets 'status'.
+// when asked to, or restarts (and forgets the dependencies on their
+// schedule, after the restart as in the old 'solve_'), or decides (after a
+// reduction, if one is due).  When no decision variable is left, the
+// clauses are satisfied (QDIMACS) and the initial cube taken from the
+// assignment is analysed like any satisfied cube (4.5).  Analysis ends the
+// search by deriving an empty constraint, which sets 'status'.
 
 #include "internal.hpp"
 
@@ -26,7 +27,11 @@ Var Internal::add_var (Quant quant, bool decision, int proof_number) {
   phases.push_back (-1);
   seen.push_back (0);
   watches.resize (vars);
-  if (heaps.size () < prefix.blocks.size ())
+  if (opts.dl) {
+    add_dependency_var ();
+    if (heaps.empty ())
+      heaps.emplace_back (scores);
+  } else if (heaps.size () < prefix.blocks.size ())
     heaps.emplace_back (scores, prefix.blocks.back ().begin);
   if (decision)
     heaps.back ().push (v);
@@ -46,9 +51,11 @@ void Internal::search () {
       analyze (conflict);
     else if (terminated)
       break;
-    else if (restarting ())
+    else if (restarting ()) {
       restart ();
-    else {
+      if (resetting_dependencies ())
+        reset_dependencies ();
+    } else {
       // The size trigger of 'reduce' may stay true, so the loop goes on
       // to decide: see reduce.cpp.
       if (reducing ())

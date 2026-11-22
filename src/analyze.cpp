@@ -26,7 +26,10 @@
 // decision variable: secondary variables of a clause (cube) are universal
 // (existential) input variables of the encoding, except in initial cubes
 // for QCIR input, which INV-COMPLETE makes unreachable (ARCHITECTURE 4.5).
-// Dependency learning (M1-T08) turns this case into a learnt dependency.
+// With dependency learning the analysis stops there and reports that p
+// depends on b ('learn_dependency'); nothing is learnt, but the conflict
+// counts, as in the old code.  Since b >= the pivot level, backtracking
+// below p unassigns b too.
 //
 // Root-level literals stay in the learnt constraint (porting note 5).  All
 // comparisons of variables are index comparisons (INV-ORDER); 'no_var' is
@@ -43,9 +46,19 @@
 
 namespace miniqu {
 
+// The dispatch on the mode (ARCHITECTURE 4.7): mode 1 and
+// '--legacyanalyze' use the level-by-level analysis ('analyze_qu.cpp').
+// Every conflict counts once, however its analysis ends.
 void Internal::analyze (Ref conflict) {
-  assert (opts.mode == 0 && !opts.legacyanalyze && !opts.dl);
   stats.conflicts++;
+  if (opts.mode == 1 || opts.legacyanalyze)
+    analyze_qu (conflict);
+  else
+    analyze_q (conflict);
+}
+
+void Internal::analyze_q (Ref conflict) {
+  assert (opts.mode == 0);
   const Kind kind = deref (arena, conflict).kind ();
   LOG (conflict, "analyzing");
 
@@ -120,10 +133,16 @@ void Internal::analyze (Ref conflict) {
     }
 
     const Ref reason = vtab[pivot].reason;
-    if (reason == Ref::none)
-      fatal ("internal error: decision %u in the way of reducing %u "
-             "without dependency learning",
-             pivot + 1, blocked + 1);
+    if (reason == Ref::none) {
+      if (!opts.dl)
+        fatal ("internal error: decision %u in the way of reducing %u "
+               "without dependency learning",
+               pivot + 1, blocked + 1);
+      assert (blocked < pivot && level (blocked) >= level (pivot));
+      clear_analyzed ();
+      learn_dependency (pivot, blocked);
+      return;
+    }
     assert (var (deref (arena, reason)[0]) == pivot);
     seen[pivot] = 0;
     level_count[(size_t) level (pivot)]--;

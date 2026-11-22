@@ -44,6 +44,26 @@ enum class Lone : uint8_t { Conflict, Propagate, Ignore };
 
 enum class Status : uint8_t { Unknown, True, False };
 
+// Dependency learning (ARCHITECTURE 7.4, 'depend.cpp').  'on[v]' lists the
+// variables 'v' was learnt to depend on; its first entry is the watched
+// one, and 'watching[u]' lists the variables whose watched dependency is
+// 'u'.  Trail literals before 'propagated' have had their watch lists
+// processed.  Empty unless '--dl' is given.
+struct Depend {
+  std::vector<std::vector<Var>> on;
+  std::vector<std::vector<Var>> watching;
+  size_t propagated = 0;
+};
+
+// The resolvent of 'analyze_qu' as variables per block, so that the
+// rightmost primary block and the literals right of it are found without
+// scanning ('analyze_qu.cpp').  'position[v]' is the index of 'v' in
+// 'at[depth (v)]', or -1.  Empty outside 'analyze_qu'.
+struct LevelAnalysis {
+  std::vector<std::vector<Var>> at;
+  std::vector<int> position;
+};
+
 // The list in which a constraint of that kind watching 'l' is found: the
 // list of the literal whose assignment makes 'l' vanish.  Applied to a
 // literal that became true it gives the watched literal that vanished.
@@ -83,7 +103,7 @@ struct Internal {
   std::vector<double> scores; // per variable
   double score_inc = 1;       // what a bump adds (EVSIDS)
   Random random;              // initial scores with '--seed'
-  std::vector<Heap> heaps;    // per block, decision variables only
+  std::vector<Heap> heaps;    // per block (one with '--dl'), decisions only
   std::vector<int8_t> phases; // per variable: saved value, 1 or -1
 
   // Conflict analysis.  'seen' (per variable) is all zero outside
@@ -96,6 +116,9 @@ struct Internal {
   std::vector<Lit> derived;       // the learnt constraint
   std::vector<uint64_t> chain;    // antecedent ids, only with a proof
   std::vector<int> glue_levels;
+  LevelAnalysis qu;
+
+  Depend depend;
 
   Ref model_cube = Ref::none; // buffer of 'initial_cube'
   std::vector<Lit> model;     // literals of the next initial cube
@@ -114,6 +137,10 @@ struct Internal {
   int level (Var v) const { return vtab[v].level; }
   Ref reason (Var v) const { return vtab[v].reason; }
   int decision_level () const { return static_cast<int> (control.size ()); }
+  Heap &heap_of (Var v) { return heaps[opts.dl ? 0 : prefix.depth (v)]; }
+  const Heap &heap_of (Var v) const {
+    return heaps[opts.dl ? 0 : prefix.depth (v)];
+  }
 
   // internal.cpp
   Var add_var (Quant, bool decision, int proof_number);
@@ -152,13 +179,27 @@ struct Internal {
   void bump_variable (Var);
   void decay_scores ();
 
+  // depend.cpp
+  void add_dependency_var ();
+  void record_dependency (Var x, Var y);
+  void update_dependency_watches ();
+  bool stays_eligible (Var, int new_level) const;
+  bool waits_for_dependency (Var) const;
+  bool resetting_dependencies () const;
+  void reset_dependencies ();
+
   // analyze.cpp
   void analyze (Ref conflict);
+  void analyze_q (Ref conflict);
   void clear_analyzed ();
+
+  // analyze_qu.cpp
+  void analyze_qu (Ref conflict);
 
   // learn.cpp
   uint32_t compute_glue (std::span<const Lit>);
   void learn (Kind, Var asserting);
+  void learn_dependency (Var x, Var y);
 
   // reduce.cpp
   void init_reduce ();

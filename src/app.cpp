@@ -47,9 +47,9 @@ namespace miniqu {
 namespace {
 
 // Features whose task has not been done yet are rejected (ROADMAP, M1
-// execution plan): options that must stay 0 ...
-const char *const unimplemented_options[] = {"mode", "dl", "ccminmode",
-                                             "legacyanalyze"};
+// execution plan): option values above the largest one implemented.
+const std::pair<const char *, int> implemented_up_to[] = {{"mode", 1},
+                                                          {"ccminmode", 0}};
 
 void print_usage () {
   printf ("usage: miniQU [options] [input [result]]\n\n"
@@ -139,8 +139,8 @@ void App::parse_arguments (int argc, char **argv) {
     else
       files.push_back (arg);
   }
-  for (const char *name : unimplemented_options)
-    if (opts.get (name))
+  for (const auto &[name, largest] : implemented_up_to)
+    if (opts.get (name) > largest)
       fatal ("option '--%s=%d': not implemented yet", name,
              opts.get (name));
 }

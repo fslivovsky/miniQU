@@ -30,7 +30,7 @@ int main () {
 
   for (int step = 0; step < 20000; step++) {
     const Var v = below (n);
-    switch (below (5)) {
+    switch (below (6)) {
     case 0:
       if (!in[v]) {
         heap.push (v);
@@ -57,6 +57,12 @@ int main () {
       if (below (200) == 0) {
         heap.clear ();
         in.assign (n, false);
+      }
+      break;
+    case 5:
+      if (in[v]) {
+        heap.remove (v);
+        in[v] = false;
       }
       break;
     }
