@@ -100,6 +100,52 @@ class GateTest(unittest.TestCase):
         r = self.gate(("pair", "y", "y"))
         self.assertIn("`%s` (A 0/3 runs, B 3/3 runs)" % victim, r.stdout)
 
+    def test_failure_that_does_not_repeat_is_noise(self):
+        self.arms("x", {"fb": 1.12})
+        self.arms("c")
+        r = self.gate(("pair", "n", "x"), ("confirm", "n", "c"))
+        self.assertEqual(r.returncode, 0, r.stdout)
+        self.assertIn("| fb | 3 | 1.120 | NOISE (first 1.120, repeat 1.000) |", r.stdout)
+        self.assertIn("GATE: PASS", r.stdout)
+        self.assertNotIn("Hint:", r.stdout)
+
+    def test_failure_that_repeats_fails(self):
+        self.arms("x", {"fb": 1.12})
+        self.arms("c", {"fb": 1.15})
+        r = self.gate(("pair", "n", "x"), ("confirm", "n", "c"))
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("| fb | 3 | 1.120 | FAIL (repeated) |", r.stdout)
+        self.assertIn("GATE: FAIL (1 lines)", r.stdout)
+
+    def test_confirm_does_not_excuse_the_pooled_line(self):
+        self.arms("x", {f: 1.08 for f in FAMILIES} | {"fa": 1.09})
+        self.arms("c")
+        r = self.gate(("pair", "n", "x"), ("confirm", "n", "c"), extra=["--family-limit", "2"])
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("limit 1.04: FAIL", r.stdout)
+
+    def test_without_confirm_failure_stands_with_hint(self):
+        self.arms("x", {"fb": 1.12})
+        r = self.gate(("pair", "n", "x"))
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("| fb | 3 | 1.120 | FAIL |", r.stdout)
+        self.assertTrue(r.stdout.rstrip().splitlines()[-1].startswith("Hint: rerun the configuration back to back "
+                                                                      "and pass --confirm"), r.stdout)
+
+    def test_confirm_needs_a_pair_of_that_name(self):
+        self.arms("x")
+        r = self.gate(("pair", "n", "x"), ("confirm", "other", "x"))
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("no --pair of that name", r.stderr)
+
+    def test_self_table_is_information(self):
+        self.arms("x")
+        self.arms("s", {"fa": 1.3})
+        r = self.gate(("pair", "x", "x"), ("self", "twice", "s"))
+        self.assertEqual(r.returncode, 0, r.stdout)
+        self.assertIn("twice (same binary twice, information only)", r.stdout)
+        self.assertIn("| fa | 4 | 1.300 |", r.stdout.split("same binary twice")[1])
+
     def test_incomparable_refused(self):
         self.arms("x")
         os.system("rm -r %s" % os.path.join(self.results, "x-b-s3"))
