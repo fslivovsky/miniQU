@@ -1761,7 +1761,7 @@ Reproducing commands (options of compare.py go before the `--`):
         $B-default-t60-s{1,2,3} -- $M-default-s{1,2,3}      # likewise dl (3 seeds), mode1, mode2, ccmin3 (seed 1)
 
 Load measurement `M1-r2-load-before` (round-1 binary sha256 a48a1a946f47... against the baseline, nothing else
-running, 48 processes, 3 rounds per arm, 25 s to 40 s per round; log in the work dir):
+running, 48 processes, 3 rounds per arm, about 33 s per round; log in the work dir):
 
     taskset -c 0-47 python3 bench/load_measure.py --a /home/ec2-user/miniqu-work/baseline/miniQU \
         --a-args "-rnd-init -rnd-seed=1" --a-name baseline --b /home/ec2-user/miniqu-work/build/bench-M1-r1/miniQU \
@@ -1786,7 +1786,7 @@ User CPU seconds, median over all copies and rounds; ratio is B / A.
 | **geometric mean** (n=12 identical searches) |  |  | **1.226** |  |  |  |
 
 Geometric mean 1.226 over 12 identical searches (conflict counts equal in all 288 runs): the reviewer's 1.23
-reproduces with the new tool. The ranges of A and B do not overlap for 8 of 12 instances.
+reproduces with the new tool. The ranges of A and B do not overlap for 5 of 12 instances.
 
 Checks: all four presets (release, debug, asan, release-clang) build without warnings and pass ctest (38 tests);
 `tests/regress.sh -S -j 16 -s 1:40 -M default,dl` on the release build passed (0 warnings). No proofs involved in
