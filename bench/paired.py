@@ -7,8 +7,9 @@ sign test.  The verdict words are defined in ROADMAP 0.3 and nowhere else.
 """
 import math
 import random
+import sys
 
-from benchlib import SOLVED, coverage_table, table
+from benchlib import SOLVED, Run, coverage_table, table
 
 BOOTSTRAP_RESAMPLES = 10000
 BOOTSTRAP_SEED = 20240607  # fixed: the same data gives the same interval
@@ -21,6 +22,19 @@ MIN_CPU = 1.0              # identical searches: A must have used more CPU time 
 FAMILY_MIN_N = 3           # identical searches: families need this many instances to be marked ...
 FAMILY_LIMIT = 1.10        # ... when their geometric mean exceeds this
 LIMIT_KEYS = ("jobs", "mem_gb", "cores", "timeout", "instances_sha256")
+
+
+def load_pair(results_dir, tags_a, tags_b, force, prog):
+    """Load two run sets; exit 3 if they cannot be compared (unless force).
+    Returns (runs_a, runs_b, reasons)."""
+    runs_a = [Run(results_dir, t) for t in tags_a]
+    runs_b = [Run(results_dir, t) for t in tags_b]
+    reasons = incomparable_reasons(runs_a, runs_b)
+    if reasons and not force:
+        sys.stderr.write("%s: the run sets cannot be compared (--force overrides):\n" % prog)
+        sys.stderr.writelines("  %s\n" % r for r in reasons)
+        sys.exit(3)
+    return runs_a, runs_b, reasons
 
 
 def incomparable_reasons(set_a, set_b):
@@ -186,16 +200,24 @@ class IdenticalSearches:
             rows.append([seed, len(ratios)] + (
                 ["%.3f" % geomean(ratios), sum(r > 1 for r in ratios), sum(r < 1 for r in ratios)]
                 if ratios else ["-", 0, 0]))
-        ratios = [r for r, _, _ in self.instances.values()]
+        ratios = self.pooled_ratios()
         rows.append(["all (per instance)", len(ratios)] + (
             ["%.3f" % geomean(ratios), sum(r > 1 for r in ratios), sum(r < 1 for r in ratios)]
             if ratios else ["-", 0, 0]))
         return rows
 
+    def pooled_ratios(self):
+        """The per-instance ratios (pooled over the seeds)."""
+        return [r for r, _, _ in self.instances.values()]
+
+    def family_ratios(self):
+        """Family -> per-instance ratios, for every family with an identical search."""
+        return {fam: [self.instances[i][0] for i in self.instances if self.family[i] == fam]
+                for fam in sorted({self.family[i] for i in self.instances})}
+
     def family_rows(self):
         rows = []
-        for fam in sorted({self.family[i] for i in self.instances}):
-            ratios = [self.instances[i][0] for i in self.instances if self.family[i] == fam]
+        for fam, ratios in self.family_ratios().items():
             g = geomean(ratios)
             mark = "> 1.10" if len(ratios) >= FAMILY_MIN_N and g > FAMILY_LIMIT else ""
             rows.append([fam, len(ratios), "%.3f" % g, mark])

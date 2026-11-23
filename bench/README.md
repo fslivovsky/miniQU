@@ -135,6 +135,44 @@ over the seeds (geometric mean over the seeds of an instance first), a per-famil
 `> 1.10` for families of at least 3 instances above 1.10), and the 15 largest and 5 smallest
 ratios. Without `stats.csv` it says `no instance with equal conflict counts`.
 
+## gate.py
+
+    python3 bench/gate.py --pair default:BASE_TAGS:NEW_TAGS --pair dl:... --report mode1:... [--out FILE]
+        [--results-dir DIR] [--pooled-limit 1.04] [--family-limit 1.10] [--family-min 3] [--force]
+
+Evaluates the identical-search gate (section **Identical searches** of `compare.py --paired`, the same
+`paired.IdenticalSearches`) for every configuration, in the order given. A is the reference, B the
+new binary; tags are comma separated, one per seed, and loaded and checked for comparability
+exactly as `compare.py --paired` does (exit status 3 unless `--force`). Per configuration the output
+has one line `pooled identical searches: n=..., geometric mean new/reference = X, limit L: PASS|FAIL`
+with the per-seed values, the complete per-family table (verdict `PASS`, `FAIL` for n >= 3 and a
+geometric mean above 1.10, or `n < 3` = not gated, value printed), the instances that hit the memory
+limit (result string `MEMOUT`) with the number of runs per arm, and the number of `ERROR` /
+`MISMATCH` rows. A `--report` configuration (mode 1 in M1) is evaluated the same way, but its lines
+read `REPORT (above, to be explained)` and do not change the exit status. The last lines are a table
+of all FAIL and REPORT lines and `GATE: PASS` or `GATE: FAIL (k lines)`; exit status 0 or 1. The
+default pooled limit 1.04 is the ROADMAP's "at most about 1.03" with the 1-2% resolution of three
+seeds (review M1-r2, section 5). A configuration without any identical search is a FAIL. Command
+for a milestone round:
+
+    python3 bench/gate.py \
+      --pair default:baseline-c96-default-t60-s1,baseline-c96-default-t60-s2,baseline-c96-default-t60-s3:M1-r3-default-s1,M1-r3-default-s2,M1-r3-default-s3 \
+      --pair dl:baseline-c96-dl-t60-s1,baseline-c96-dl-t60-s2,baseline-c96-dl-t60-s3:M1-r3-dl-s1,M1-r3-dl-s2,M1-r3-dl-s3 \
+      --report mode1:baseline-c96-mode1-t60-s1:M1-r3-mode1-s1 --out bench/results/M1-r3-reports/gate.md
+
+`bench/test_gate.py` (ctest `bench-gate`) tests it on synthetic result directories.
+
+## Benchmark reports
+
+1. The report contains the output of `gate.py` verbatim for default and `-dl` (`--pair`) and mode 1
+   (`--report`), i.e. the per-family identical-search table of every configuration.
+2. The report evaluates the gate of the round as written in ROADMAP.md line by line, each line with
+   its measured value and `met` / `not met`.
+3. "Blocking items: none" may only be written when `gate.py` exits 0 or every failing line is
+   covered by a decision recorded in STATUS.md, which is then cited.
+4. Instances that hit the memory limit are named (the memory-limit line of `gate.py`).
+5. The order in which the arms ran and which runs were reused are stated.
+
 ## load_measure.py
 
     python3 bench/load_measure.py --a BIN --a-args "-rnd-init -rnd-seed=1" --b BIN --b-args "--seed=1" \

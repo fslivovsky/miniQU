@@ -158,6 +158,8 @@ add_test(NAME run-regressions
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 add_test(NAME bench-compare
          COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/bench/test_compare.py)
+add_test(NAME bench-gate
+         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/bench/test_gate.py)
 add_test(NAME bench-load-measure
          COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/bench/test_load_measure.py)
 add_test(NAME bench-l3-table

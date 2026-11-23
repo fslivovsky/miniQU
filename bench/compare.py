@@ -33,13 +33,7 @@ def write(text, path):
 
 
 def main_paired(args, tags_a, tags_b):
-    runs_a = [Run(args.results_dir, t) for t in tags_a]
-    runs_b = [Run(args.results_dir, t) for t in tags_b]
-    reasons = paired.incomparable_reasons(runs_a, runs_b)
-    if reasons and not args.force:
-        sys.stderr.write("compare.py: the run sets cannot be compared (--force overrides):\n")
-        sys.stderr.writelines("  %s\n" % r for r in reasons)
-        sys.exit(3)
+    runs_a, runs_b, reasons = paired.load_pair(args.results_dir, tags_a, tags_b, args.force, "compare.py")
     text, comparison = paired.report(runs_a, runs_b, reasons, args.top * 3)
     write(text, args.out)
     sys.exit(2 if paired.problems(runs_a + runs_b) else 0)
