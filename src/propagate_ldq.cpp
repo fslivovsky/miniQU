@@ -56,7 +56,7 @@ namespace miniqu {
 
 template <Kind K> Ref Internal::propagate_ldq_watches (Lit p) {
   const Lit lost = watch_key (K, p);
-  std::vector<Watch> &list = watches.lookup (K, p, arena);
+  WatchList &list = watches.lookup (K, p, arena);
   stats.ticks++;
   Ref conflict = Ref::none;
   auto i = list.begin (), j = i;
@@ -106,7 +106,7 @@ template <Kind K> Ref Internal::propagate_ldq_watches (Lit p) {
         // If the old position 0 comes back as position 1, its entry is
         // valid again and is not duplicated.
         if (l != first)
-          push_watch (watches (K, watch_key (K, l)), kept);
+          watches (K, watch_key (K, l)).push (kept);
         return true;
       }
       return false;
@@ -123,7 +123,7 @@ template <Kind K> Ref Internal::propagate_ldq_watches (Lit p) {
       if (k < size) {
         c[0] = c[k];
         c[k] = first;
-        push_watch (watches (K, watch_key (K, c[0])), kept);
+        watches (K, watch_key (K, c[0])).push (kept);
         if (replace_second ())
           continue;
         first = c[0];

@@ -43,7 +43,7 @@ Var Internal::add_var (Quant quant, bool decision, int proof_number) {
 
 // The watch lists of all variables are allocated in one step when the
 // first constraint is added (no variable is added after it) or, without
-// constraints, when the search starts.  Growing the array of 64-byte
+// constraints, when the search starts.  Growing the array of per-literal
 // records one variable at a time would keep the old and the new array
 // alive during each reallocation, which raised the peak memory by 8% on
 // an instance with two million variables (STATUS.md M1-R2-T2).

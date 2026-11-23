@@ -126,8 +126,8 @@ void Internal::attach (Ref ref) {
   const Constraint &c = deref (arena, ref);
   assert (c.size () > 1);
   const Kind kind = c.kind ();
-  push_watch (watches (kind, watch_key (kind, c[0])), Watch{ref, c[1]});
-  push_watch (watches (kind, watch_key (kind, c[1])), Watch{ref, c[0]});
+  watches (kind, watch_key (kind, c[0])).push (Watch{ref, c[1]});
+  watches (kind, watch_key (kind, c[1])).push (Watch{ref, c[0]});
 }
 
 // Strict: searches both lists.  For a live constraint whose watched
@@ -138,7 +138,7 @@ void Internal::detach (Ref ref) {
   assert (c.size () > 1);
   const Kind kind = c.kind ();
   for (const Lit l : {c[0], c[1]}) {
-    std::vector<Watch> &list = watches (kind, watch_key (kind, l));
+    WatchList &list = watches (kind, watch_key (kind, l));
     const auto it =
         std::find_if (list.begin (), list.end (),
                       [ref] (const Watch &w) { return w.ref == ref; });

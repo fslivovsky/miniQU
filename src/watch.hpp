@@ -4,10 +4,14 @@
 #include "arena.hpp"
 #include "constraint.hpp"
 #include "lit.hpp"
+#include "message.hpp"
 
 #include <algorithm>
 #include <array>
+#include <cassert>
 #include <cstdint>
+#include <cstdlib>
+#include <type_traits>
 #include <vector>
 
 namespace miniqu {
@@ -20,16 +24,85 @@ struct Watch {
   Lit blocker;
 };
 static_assert (sizeof (Watch) == 8);
+static_assert (std::is_trivially_copyable_v<Watch>);
 
-// Appends with MiniSat's growth of about 3/2 instead of the library's
-// doubling: the watch lists are a large part of the working set.
-inline void push_watch (std::vector<Watch> &list, Watch w) {
-  if (list.size () == list.capacity ())
-    list.reserve (list.capacity () + list.capacity () / 2 + 2);
-  list.push_back (w);
-}
+// MiniSat's 'vec' for watches: 16 bytes instead of the 24 of a
+// 'std::vector', because the list headers are read once per propagated
+// literal (ARCHITECTURE 6.1).  Grows by about 3/2 with 'realloc', which a
+// trivially copyable element allows.  Only suffixes are erased in bulk:
+// every caller compacts a list in place and then truncates it.
+class WatchList {
+  Watch *data = nullptr;
+  uint32_t size_ = 0, capacity_ = 0;
 
-// One vector of watches per literal and kind.  The list at '(kind, p)' is
+  void grow () {
+    const uint64_t capacity = capacity_ + (uint64_t) capacity_ / 2 + 2;
+    if (capacity > UINT32_MAX)
+      fatal ("out of memory: watch list exceeds 2^32 watches");
+    void *p = std::realloc (data, sizeof (Watch) * (size_t) capacity);
+    if (!p)
+      fatal ("out of memory: watch list of %lu watches",
+             (unsigned long) capacity);
+    data = static_cast<Watch *> (p);
+    capacity_ = static_cast<uint32_t> (capacity);
+  }
+
+public:
+  WatchList () = default;
+  WatchList (const WatchList &) = delete;
+  WatchList &operator= (const WatchList &) = delete;
+  // Moves leave the source empty; 'std::vector' relocates with them.
+  WatchList (WatchList &&other) noexcept
+      : data (other.data), size_ (other.size_),
+        capacity_ (other.capacity_) {
+    other.data = nullptr;
+    other.size_ = other.capacity_ = 0;
+  }
+  WatchList &operator= (WatchList &&other) noexcept {
+    if (this != &other) {
+      std::free (data);
+      data = other.data, size_ = other.size_, capacity_ = other.capacity_;
+      other.data = nullptr;
+      other.size_ = other.capacity_ = 0;
+    }
+    return *this;
+  }
+  ~WatchList () { std::free (data); }
+
+  Watch *begin () { return data; }
+  Watch *end () { return data + size_; }
+  const Watch *begin () const { return data; }
+  const Watch *end () const { return data + size_; }
+  size_t size () const { return size_; }
+  bool empty () const { return !size_; }
+  size_t capacity () const { return capacity_; }
+
+  void push (Watch w) {
+    if (size_ == capacity_)
+      grow ();
+    data[size_++] = w;
+  }
+
+  // Truncates to 'first'; '[first, last)' must be the suffix.
+  void erase (Watch *first, [[maybe_unused]] Watch *last) {
+    assert (begin () <= first && first <= end ());
+    assert (last == end ());
+    size_ = static_cast<uint32_t> (first - data);
+  }
+
+  // Removes one watch, keeping the order of the others.
+  void erase (Watch *it) {
+    assert (begin () <= it && it < end ());
+    std::copy (it + 1, end (), it);
+    size_--;
+  }
+
+  // Keeps the memory.
+  void clear () { size_ = 0; }
+};
+static_assert (sizeof (WatchList) == 16);
+
+// One list of watches per literal and kind.  The list at '(kind, p)' is
 // the one visited when 'p' becomes true.  Clause and cube lists are
 // separate so that each propagation loop is specialised for its kind.
 //
@@ -39,17 +112,22 @@ inline void push_watch (std::vector<Watch> &list, Watch w) {
 // ('clean_all').  Garbage keeps its memory until collection, so a stale
 // watch can still be dereferenced.
 class Watches {
-  // Both lists of a literal and their dirty flags share one cache line, so
-  // that propagating a literal touches one line of list headers.
-  struct alignas (64) PerLit {
-    std::array<std::vector<Watch>, 2> lists; // by kind
-    std::array<uint8_t, 2> dirty;
+  // Both lists of a literal take 16+16 bytes, so the four list headers of
+  // a variable share one cache line, half the 64 bytes per literal of the
+  // round-2 record (ARCHITECTURE 6.1).
+  struct alignas (32) PerLit {
+    std::array<WatchList, 2> lists; // by kind
   };
+  static_assert (sizeof (PerLit) == 32);
   std::vector<PerLit> lits;
+
+  // The dirty flags by literal and kind, apart from the lists: 'lookup'
+  // reads one per propagated literal and kind, and two bytes per literal
+  // put 32 literals on a cache line instead of widening the record.
+  std::vector<std::array<uint8_t, 2>> dirty_flags;
   std::array<std::vector<Lit>, 2> dirty_lits; // flag set, once each
 
-  static void remove_garbage (std::vector<Watch> &list,
-                              const Arena &arena) {
+  static void remove_garbage (WatchList &list, const Arena &arena) {
     list.erase (std::remove_if (list.begin (), list.end (),
                                 [&arena] (const Watch &w) {
                                   return deref (arena, w.ref).garbage ();
@@ -57,31 +135,35 @@ class Watches {
                 list.end ());
   }
 
-public:
-  void init (Var vars) {
-    lits.assign (2 * (size_t) vars, {});
+  void clear_dirty_flags () {
+    std::fill (dirty_flags.begin (), dirty_flags.end (),
+               std::array<uint8_t, 2>{});
     for (auto &d : dirty_lits)
       d.clear ();
   }
 
-  // Adds empty lists for new variables, keeping the existing ones.
-  void resize (Var vars) { lits.resize (2 * (size_t) vars); }
+public:
+  // Adds empty, clean lists for new variables, keeping the existing ones.
+  void resize (Var vars) {
+    lits.resize (2 * (size_t) vars);
+    dirty_flags.resize (2 * (size_t) vars, std::array<uint8_t, 2>{});
+  }
   Var size () const { return static_cast<Var> (lits.size () / 2); }
 
   // Raw access; may contain garbage entries.
-  std::vector<Watch> &operator() (Kind kind, Lit p) {
+  WatchList &operator() (Kind kind, Lit p) {
     return lits[index (p)].lists[index (kind)];
   }
-  const std::vector<Watch> &operator() (Kind kind, Lit p) const {
+  const WatchList &operator() (Kind kind, Lit p) const {
     return lits[index (p)].lists[index (kind)];
   }
 
   bool dirty (Kind kind, Lit p) const {
-    return lits[index (p)].dirty[index (kind)];
+    return dirty_flags[index (p)][index (kind)];
   }
 
   void smudge (Kind kind, Lit p) {
-    uint8_t &d = lits[index (p)].dirty[index (kind)];
+    uint8_t &d = dirty_flags[index (p)][index (kind)];
     if (d)
       return;
     d = 1;
@@ -89,15 +171,15 @@ public:
   }
 
   void clean (Kind kind, Lit p, const Arena &arena) {
-    PerLit &l = lits[index (p)];
-    if (!l.dirty[index (kind)])
+    uint8_t &d = dirty_flags[index (p)][index (kind)];
+    if (!d)
       return;
-    remove_garbage (l.lists[index (kind)], arena);
-    l.dirty[index (kind)] = 0;
+    remove_garbage (lits[index (p)].lists[index (kind)], arena);
+    d = 0;
   }
 
   // The list propagation reads: clean of garbage.
-  std::vector<Watch> &lookup (Kind kind, Lit p, const Arena &arena) {
+  WatchList &lookup (Kind kind, Lit p, const Arena &arena) {
     clean (kind, p, arena);
     return lits[index (p)].lists[index (kind)];
   }
@@ -114,25 +196,19 @@ public:
   // garbage collection: its stale entries (propagate_ldq.cpp) may refer to
   // a deleted constraint from a list that deleting did not smudge.
   void clean_every_list (const Arena &arena) {
-    for (PerLit &l : lits) {
-      for (std::vector<Watch> &list : l.lists)
+    for (PerLit &l : lits)
+      for (WatchList &list : l.lists)
         remove_garbage (list, arena);
-      l.dirty = {};
-    }
-    for (auto &d : dirty_lits)
-      d.clear ();
+    clear_dirty_flags ();
   }
 
   // Drops all watches, to reconnect after a pass that rewrites many
   // constraints (ARCHITECTURE 10.2).
   void clear_all () {
-    for (PerLit &l : lits) {
-      for (std::vector<Watch> &list : l.lists)
+    for (PerLit &l : lits)
+      for (WatchList &list : l.lists)
         list.clear ();
-      l.dirty = {};
-    }
-    for (auto &d : dirty_lits)
-      d.clear ();
+    clear_dirty_flags ();
   }
 };
 

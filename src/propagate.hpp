@@ -31,7 +31,7 @@ namespace miniqu {
 // throughout.  Returns the conflict or 'Ref::none'.
 template <Kind K, Lone R> Ref Internal::propagate_watches (Lit p) {
   const Lit lost = watch_key (K, p);
-  std::vector<Watch> &list = watches.lookup (K, p, arena);
+  WatchList &list = watches.lookup (K, p, arena);
   stats.ticks++;
   Ref conflict = Ref::none;
   auto i = list.begin (), j = i;
@@ -60,7 +60,7 @@ template <Kind K, Lone R> Ref Internal::propagate_watches (Lit p) {
     if (k < size) {
       c[1] = c[k];
       c[k] = lost;
-      push_watch (watches (K, watch_key (K, c[1])), kept);
+      watches (K, watch_key (K, c[1])).push (kept);
       continue;
     }
     *j++ = kept;
