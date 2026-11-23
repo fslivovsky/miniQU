@@ -2314,3 +2314,108 @@ Built (no solver source touched):
 gate.py on round 2 (`M1-r2-reports/gate.md`, exit 1, `GATE: FAIL (3 lines)`): default pooled 1.037 (n=51) PASS at 1.04 but above "about 1.03"; default DW 1.144 (n=6) FAIL, hadw 1.133 (n=3) FAIL; dl pooled 1.001, DW 1.107 (n=4) FAIL; mode1 pooled 1.063 (n=35), DW 1.260 (n=5) and chess 1.119 (n=11) REPORT; 2.1 and 5.2-3 listed as MEMOUT in every run of both arms. All numbers equal the committed paired reports. `M1-r2-report.md` got the correction sentence at its top.
 
 Deviations: a configuration with no identical search counts as FAIL (nothing to judge). The summary table also lists the mode 1 pooled line as REPORT.
+
+## M1-R3-T3 (worker, 2026-11-23): WatchList (16 bytes), 32-byte record per literal
+
+Changed (commit b2018c1; results 518096d):
+- `src/watch.hpp`: `class WatchList` (MiniSat's `vec` for watches: `Watch *`, 32-bit size and capacity,
+  16 bytes; `realloc`/`free`, growth `capacity + capacity / 2 + 2`; non-copyable, noexcept moves that
+  leave the source empty; `push`, suffix-only `erase (first, last)`, order-keeping `erase (it)`, `clear`
+  keeps memory). Capacity overflow and a failed `realloc` go through `fatal ("out of memory: ...")` as in
+  arena.cpp. `Watches::PerLit` is `alignas (32)` with the two lists (static_assert 32 bytes); the dirty
+  flags are a separate `std::vector<std::array<uint8_t, 2>>` (value-initialised in `resize`).
+  `push_watch` and `Watches::init` removed (D4); callers in propagate.hpp, propagate_ldq.cpp,
+  constraint.cpp changed mechanically; the "64-byte records" comment in internal.cpp updated. ARCH 6.1
+  matches the code, not changed.
+- `test/unit/watch.cpp`: growth sequence (formula and 2, 5, 9, 15, 24, 38), order, suffix and single
+  erase, clear keeps capacity, move construction/assignment (incl. self-assignment; asan tree runs it),
+  `resize` keeps lists and flags, dirty state after smudge/lookup/clean_all/clean_every_list/clear_all.
+- Builds release, asan, debug: 0 warnings; ctest 40/40 in each. Optimised copy:
+  `build/bench-M1-r3-pre` (`-DCMAKE_BUILD_TYPE=Release` as bench-M1-r2).
+
+Same search (M1): `r2t2/f1.py r2 new` (load instances seeds 1/0, smoke, corpus 151-300, six
+configurations): compared 1513, identical 1513, different 0, skipped (60 s timeout) 161. Ticks equal and
+proofs byte-identical (`cmp`) on 3.2, 5-5-6-10-3-7-EdAd, 9.1, DW-sat-08-22-1, bt-2x4_13.ig in default
+and `-mode=1` (10 of 10; table in `bench/results/M1-r3-l3-after/README.md`); proof files deleted.
+
+`bench/l3.sh` (M2; 2 rounds, 40 s; user seconds, mean of the rounds; `bench/results/M1-r3-l3-after/`):
+
+| instance | base | r2 / base | new | new / base |
+|---|---:|---:|---:|---:|
+| DW-sat-08-22-1 | 2.01 | 1.471 | 1.90 | 0.940 |
+| DW-sat-08-23-1 | 1.60 | 1.576 | 1.45 | 0.903 |
+| DW-sat-09-26-1 | 3.31 | 1.039 | 2.80 | 0.846 |
+| DW-unsat-09-22-1 | 8.80 | 1.334 | 9.61 | 1.091 |
+| DW-unsat-09-23-1 | 18.44 | 1.068 | 17.43 | 0.945 |
+| DW-unsat-10-25-1 | 24.14 | 1.206 | 22.64 | 0.938 |
+| geometric mean (default) | | 1.267 | | **0.941** |
+
+Mode 1 (`-a -mode=1`): new / base 0.976, 1.085, 0.840, 1.109, 1.181 (DW-unsat-09-23-1; rounds 11.66
+and 9.66 s against base 8.96 and 9.10), geometric mean **1.031** (r2: 1.422); below 1.2, so no `-r 4`
+rerun. `-dl`: geometric mean **0.803** (r2 0.893), n=7; the -dl searches of baseline and the rewrite
+differ, so this row is not an identical-search ratio. The new arm has the largest round-to-round spread
+(DW-unsat-09-22-1 default 8.63 / 10.59 s; base 8.87 / 8.74).
+
+cross.sh / nb.sh (M3, `cross-nb.txt`), target DW-sat-08-23-1, user s (round 1, round 2):
+
+| target | neighbours base | neighbours new | neighbours r2 (separate run) |
+|---|---:|---:|---:|
+| base | 1.64, 1.47 / 1.52, 2.15 | 2.04, 1.50 | 2.31, 2.32 |
+| new  | 1.42, 1.39 | 1.45, 1.39 | |
+| r2   | 1.74, 1.59 | | 2.53, 2.54 |
+
+(the base/base cell has one value per cross.sh run and round: 1.64, 1.47 in the run with new, 1.52,
+2.15 in the run with r2; single runs are noisy.) `nb.sh DW-unsat-11-26-1 12 DW-sat-08-23-1`: baseline
+target with neighbours base 1.40, 1.40; r2 2.16, 2.16; new 1.43, 1.43 s. The new binary is about as
+harmless a neighbour as the baseline (reviewer: 1.41-1.46 base, 2.16-2.22 r2).
+
+load_measure.py (M4, L3 groups, 2 rounds, baseline vs new; geometric mean B / A per group, n in
+brackets; `before` = R3-T1's r2 results, `before-dl` measured here with r2 since R3-T1 had none):
+
+| group | before | after | before-dl | after-dl | before-mode1 | after-mode1 |
+|---|---:|---:|---:|---:|---:|---:|
+| 0 DW | 1.243 (6) | 0.998 (6) | 1.109 (1) | 0.931 (1) | 1.326 (5) | 1.075 (5) |
+| 1 numeric 10.1.. | 0.909 (6) | 0.909 (6) | 0.915 (5) | 0.927 (5) | 0.932 (6) | 0.934 (6) |
+| 2 numeric 5.2-1.. | 0.928 (4) | 0.965 (4) | 0.952 (5) | 0.958 (5) | 0.997 (5) | 1.014 (5) |
+| 3 chess mate_in_2 | 1.017 (8) | 0.915 (8) | 1.006 (6) | 0.973 (6) | 1.055 (8) | 0.949 (8) |
+| 4 chess mate_in_3 | 1.069 (6) | 0.965 (6) | - (0) | - (0) | 1.103 (6) | 1.064 (6) |
+| 5 hadw window | 1.024 (3) | 0.922 (3) | 0.966 (2) | 0.891 (2) | 1.042 (2) | 0.977 (2) |
+| overall | 1.032 (33) | 0.944 (33) | 0.968 (19) | 0.946 (19) | 1.067 (32) | 0.998 (32) |
+
+Target met: no group above 1.10 in default and -dl. Mode 1: DW 1.075, chess mate_in_3 1.064, others
+at or below 1.014.
+
+Peak RSS (M5, KB, one process): 1.3 r2 1390432 / new 1133920; 5.2-1 383756 / 317784; DW-sat-08-22-1
+33140 / 28524; amba2f9n.sat 21904, 21904, 21912 / 22388, 22460, 22396 (three runs each, identical
+search, 65 s). **amba2f9n.sat is 2.2% (about 0.5 MB) above r2: gate line not met as worded.** It is
+the allocator, not the layout: the same code with `malloc` + `memcpy` + `free` in `WatchList::grow`
+instead of `realloc` (experiment, not committed) peaks at 21732 KB there and at 1134356, 317712,
+28516 KB on the other three. I kept `realloc` as specified (D1: MiniSat's `vec`); coordinator: accept
+the 0.5 MB on a 22 MB process, or switch `grow` to malloc/copy/free (two lines, would need l3.sh again).
+
+Fuzz gates (logs `/home/ec2-user/miniqu-work/logs/r3-t3/`):
+- `tests/regress.sh -S -j 16 -s 1:300 -M all` release: REGRESSION TESTS PASSED (6 warnings): 65 solver
+  timeouts (mode1-dl 5, mode2-dl 3, dl-ccmin3 1, noearly 31, restart-dl 6, restart-mode1-dl 19 of 150
+  search instances, stress limit 25%), 4414 proofs checked, 24 checker timeouts, 0 unfinished.
+- asan, `-s 1:100 -t 240`: REGRESSION TESTS PASSED (4 warnings): 20 solver timeouts (mode1-dl 5,
+  noearly 10, restart-dl 1, restart-mode1-dl 4), 1478 proofs checked, 2 checker timeouts, no sanitizer
+  report.
+- QDIMACS (`--reduceint=2 --tier1glue=0 --gcfrac=0`, alone and with -dl, -mode=1, -mode=2): release
+  1:300 0 failures, 600 of 600 agreed in each; asan 1:100 0 failures, default 200/200, -dl 199 + 1
+  timeout, -mode=1 197 + 3 timeouts, -mode=2 200/200.
+- `tests/run_regressions.sh` release: 7 instances, 0 failures.
+- `tests/regress.sh -j 16 -s 1:20` (with smoke and proofs) release: PASSED (0 warnings); smoke 33 of 33
+  proofs accepted by qlrup-check, 20 corpus proofs checked.
+
+Round-3 gates measured here:
+
+| gate | state |
+|---|---|
+| l3.sh DW default, new / base at most about 1.05 | PASS: 0.941 (mode 1 1.031, -dl 0.803) |
+| same search as round 2 (conflicts, propagations, ticks) | PASS: 1513/1513 identical, ticks and proofs identical on 10/10 |
+| fuzz: release 1:300 matrix, asan 1:100 -t 240, QDIMACS 1:300, ctest, smoke with proofs | PASS (timeouts as warnings, counts above) |
+| peak memory not above round 2 on 1.3, 5.2-1, DW-sat-08-22-1, amba2f9n.sat | 3 of 4 (-18%, -17%, -14%); amba2f9n.sat +2.2%, allocator (see above): coordinator decision |
+
+Open points: the amba2f9n.sat memory line above; mode 1 DW group under load still 1.075 (l3.sh 1.031),
+chess mate_in_3 1.064, for D6 in the benchmark stage. No candidate layout changes were tried (M2 and
+M4 met their targets).
