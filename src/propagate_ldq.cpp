@@ -106,7 +106,7 @@ template <Kind K> Ref Internal::propagate_ldq_watches (Lit p) {
         // If the old position 0 comes back as position 1, its entry is
         // valid again and is not duplicated.
         if (l != first)
-          watches (K, watch_key (K, l)).push_back (kept);
+          push_watch (watches (K, watch_key (K, l)), kept);
         return true;
       }
       return false;
@@ -123,7 +123,7 @@ template <Kind K> Ref Internal::propagate_ldq_watches (Lit p) {
       if (k < size) {
         c[0] = c[k];
         c[k] = first;
-        watches (K, watch_key (K, c[0])).push_back (kept);
+        push_watch (watches (K, watch_key (K, c[0])), kept);
         if (replace_second ())
           continue;
         first = c[0];

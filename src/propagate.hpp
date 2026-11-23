@@ -60,7 +60,7 @@ template <Kind K, Lone R> Ref Internal::propagate_watches (Lit p) {
     if (k < size) {
       c[1] = c[k];
       c[k] = lost;
-      watches (K, watch_key (K, c[1])).push_back (kept);
+      push_watch (watches (K, watch_key (K, c[1])), kept);
       continue;
     }
     *j++ = kept;

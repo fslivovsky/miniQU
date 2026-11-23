@@ -125,8 +125,8 @@ void Internal::attach (Ref ref) {
   const Constraint &c = deref (arena, ref);
   assert (c.size () > 1);
   const Kind kind = c.kind ();
-  watches (kind, watch_key (kind, c[0])).push_back (Watch{ref, c[1]});
-  watches (kind, watch_key (kind, c[1])).push_back (Watch{ref, c[0]});
+  push_watch (watches (kind, watch_key (kind, c[0])), Watch{ref, c[1]});
+  push_watch (watches (kind, watch_key (kind, c[1])), Watch{ref, c[0]});
 }
 
 // Strict: searches both lists.  For a live constraint whose watched

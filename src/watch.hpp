@@ -21,6 +21,14 @@ struct Watch {
 };
 static_assert (sizeof (Watch) == 8);
 
+// Appends with MiniSat's growth of about 3/2 instead of the library's
+// doubling: the watch lists are a large part of the working set.
+inline void push_watch (std::vector<Watch> &list, Watch w) {
+  if (list.size () == list.capacity ())
+    list.reserve (list.capacity () + list.capacity () / 2 + 2);
+  list.push_back (w);
+}
+
 // One vector of watches per literal and kind.  The list at '(kind, p)' is
 // the one visited when 'p' becomes true.  Clause and cube lists are
 // separate so that each propagation loop is specialised for its kind.
