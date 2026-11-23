@@ -641,9 +641,13 @@ CaDiCaL's `arenatype=3` and an M2 experiment. The option is not called
 struct Watch { Ref ref; Lit blocker; };          // 8 bytes
 ```
 
-`Watches` holds, for each kind, a vector of watch lists indexed by literal
-(`std::vector<Watch>` per literal), a dirty flag per list, and the list of
-dirty literals. `watches (kind, p)` is the list of constraints of that kind
+`Watches` holds one 64-byte-aligned record per literal with the two watch
+lists of that literal (`std::vector<Watch>` per kind) and their two dirty
+flags, so that propagating a literal touches one cache line of list
+headers, and per kind the list of dirty literals. (Until M1-R2-T2 the
+lists and flags were four separate arrays per kind; the record made
+identical searches 10-30% faster on the DW instances under benchmark load,
+STATUS.md M1-R2-T2.) `watches (kind, p)` is the list of constraints of that kind
 to visit **when `p` becomes true**: clauses watching `~p`, cubes watching `p`
 (in terms of 4.1: constraints in which a watched literal just vanished). A
 constraint of size >= 2 watches its literals at positions 0 and 1, and each of

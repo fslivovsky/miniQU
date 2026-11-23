@@ -31,12 +31,14 @@ static_assert (sizeof (Watch) == 8);
 // ('clean_all').  Garbage keeps its memory until collection, so a stale
 // watch can still be dereferenced.
 class Watches {
-  struct PerKind {
-    std::vector<std::vector<Watch>> lists;
-    std::vector<uint8_t> dirty;  // per literal
-    std::vector<Lit> dirty_lits; // literals whose flag is set, once each
+  // Both lists of a literal and their dirty flags share one cache line, so
+  // that propagating a literal touches one line of list headers.
+  struct alignas (64) PerLit {
+    std::array<std::vector<Watch>, 2> lists; // by kind
+    std::array<uint8_t, 2> dirty;
   };
-  std::array<PerKind, 2> kinds;
+  std::vector<PerLit> lits;
+  std::array<std::vector<Lit>, 2> dirty_lits; // flag set, once each
 
   static void remove_garbage (std::vector<Watch> &list,
                               const Arena &arena) {
@@ -49,62 +51,54 @@ class Watches {
 
 public:
   void init (Var vars) {
-    for (PerKind &k : kinds) {
-      k.lists.assign (2 * (size_t) vars, {});
-      k.dirty.assign (2 * (size_t) vars, 0);
-      k.dirty_lits.clear ();
-    }
+    lits.assign (2 * (size_t) vars, {});
+    for (auto &d : dirty_lits)
+      d.clear ();
   }
 
   // Adds empty lists for new variables, keeping the existing ones; the
   // solver creates variables one at a time.
-  void resize (Var vars) {
-    for (PerKind &k : kinds) {
-      k.lists.resize (2 * (size_t) vars);
-      k.dirty.resize (2 * (size_t) vars, 0);
-    }
-  }
+  void resize (Var vars) { lits.resize (2 * (size_t) vars); }
 
   // Raw access; may contain garbage entries.
   std::vector<Watch> &operator() (Kind kind, Lit p) {
-    return kinds[index (kind)].lists[index (p)];
+    return lits[index (p)].lists[index (kind)];
   }
   const std::vector<Watch> &operator() (Kind kind, Lit p) const {
-    return kinds[index (kind)].lists[index (p)];
+    return lits[index (p)].lists[index (kind)];
   }
 
   bool dirty (Kind kind, Lit p) const {
-    return kinds[index (kind)].dirty[index (p)];
+    return lits[index (p)].dirty[index (kind)];
   }
 
   void smudge (Kind kind, Lit p) {
-    PerKind &k = kinds[index (kind)];
-    if (k.dirty[index (p)])
+    uint8_t &d = lits[index (p)].dirty[index (kind)];
+    if (d)
       return;
-    k.dirty[index (p)] = 1;
-    k.dirty_lits.push_back (p);
+    d = 1;
+    dirty_lits[index (kind)].push_back (p);
   }
 
   void clean (Kind kind, Lit p, const Arena &arena) {
-    PerKind &k = kinds[index (kind)];
-    if (!k.dirty[index (p)])
+    PerLit &l = lits[index (p)];
+    if (!l.dirty[index (kind)])
       return;
-    remove_garbage (k.lists[index (p)], arena);
-    k.dirty[index (p)] = 0;
+    remove_garbage (l.lists[index (kind)], arena);
+    l.dirty[index (kind)] = 0;
   }
 
   // The list propagation reads: clean of garbage.
   std::vector<Watch> &lookup (Kind kind, Lit p, const Arena &arena) {
     clean (kind, p, arena);
-    return kinds[index (kind)].lists[index (p)];
+    return lits[index (p)].lists[index (kind)];
   }
 
   void clean_all (const Arena &arena) {
     for (Kind kind : {Kind::Clause, Kind::Cube}) {
-      PerKind &k = kinds[index (kind)];
-      for (Lit p : k.dirty_lits)
+      for (Lit p : dirty_lits[index (kind)])
         clean (kind, p, arena);
-      k.dirty_lits.clear ();
+      dirty_lits[index (kind)].clear ();
     }
   }
 
@@ -112,23 +106,25 @@ public:
   // garbage collection: its stale entries (propagate_ldq.cpp) may refer to
   // a deleted constraint from a list that deleting did not smudge.
   void clean_every_list (const Arena &arena) {
-    for (PerKind &k : kinds) {
-      for (std::vector<Watch> &list : k.lists)
+    for (PerLit &l : lits) {
+      for (std::vector<Watch> &list : l.lists)
         remove_garbage (list, arena);
-      std::fill (k.dirty.begin (), k.dirty.end (), 0);
-      k.dirty_lits.clear ();
+      l.dirty = {};
     }
+    for (auto &d : dirty_lits)
+      d.clear ();
   }
 
   // Drops all watches, to reconnect after a pass that rewrites many
   // constraints (ARCHITECTURE 10.2).
   void clear_all () {
-    for (PerKind &k : kinds) {
-      for (std::vector<Watch> &list : k.lists)
+    for (PerLit &l : lits) {
+      for (std::vector<Watch> &list : l.lists)
         list.clear ();
-      std::fill (k.dirty.begin (), k.dirty.end (), 0);
-      k.dirty_lits.clear ();
+      l.dirty = {};
     }
+    for (auto &d : dirty_lits)
+      d.clear ();
   }
 };
 
