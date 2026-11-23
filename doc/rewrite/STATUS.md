@@ -2419,3 +2419,100 @@ Round-3 gates measured here:
 Open points: the amba2f9n.sat memory line above; mode 1 DW group under load still 1.075 (l3.sh 1.031),
 chess mate_in_3 1.064, for D6 in the benchmark stage. No candidate layout changes were tried (M2 and
 M4 met their targets).
+
+## Coordinator decisions after M1 round 3 (coordinator, 2026-11-23)
+
+Every open point of R3-T1, R3-T2 and R3-T3 is settled here. No worker task follows; the next step is independent
+verification and the benchmark stage on `build/bench-M1-r3-pre` (source `b2018c1`). Coordinator measurement of this
+section: `/home/ec2-user/miniqu-work/coord/r3triage/time{1,2,3}.txt`.
+
+### G1. Peak memory on amba2f9n.sat, +2.2% against round 2 (R3-T3): accepted, `realloc` stays, no task
+
+- Re-measured (`/usr/bin/time -v`, one run each, seed 0, cores 1-3): baseline 18912 KB, round-2 binary 21852 KB,
+  round-3 binary 22424 KB. The worker's numbers reproduce (+0.57 MB against round 2).
+- The line "peak memory not above round 2 on the four instances" was written to check that the smaller record
+  shows up as less memory. It does where the record matters: 1.3 -18%, 5.2-1 -17%, DW-sat-08-22-1 -14%. On a
+  22-MB process the difference is the allocator's behaviour on `realloc` (the worker's malloc/copy/free experiment
+  peaks at 21732 KB with the same layout), not the layout. **The line is judged as met in what it protects; the
+  amba2f9n.sat cell is an accepted deviation of 0.5 MB.**
+- The milestone memory gate is the ROADMAP M1 one (decision E1): at most 10% above the baseline, 16 MB absolute
+  below 64 MB. amba2f9n.sat is 3.5 MB above the baseline: green, as are the other three (all below the baseline).
+- Why not malloc/copy/free: `realloc` is what MiniSat's `vec` does (D1 of round 3, the owner's constraint on watch
+  lists), it is what every timing and fuzz gate of this round was measured with, and large lists can grow in place
+  (`mremap`) without a copy. Trading that for 0.5 MB on the smallest of the four instances would mean rerunning
+  l3.sh, the load runs and the fuzz gates for no measured benefit in time. Not an M2 candidate either.
+
+### G2. Load groups of `load_measure.py` (R3-T1): accepted as built
+
+- The spec asked for the DW window plus "two others from different families". Only numeric, CM/DW, chess and the
+  hadw window have a window of eight consecutive names with at least three qualifying instances, so the worker took
+  six groups: DW, two numeric windows, chess mate_in_2, chess mate_in_3, hadw. That is more coverage than asked
+  for (33 instances in the default run), and it contains the two families the review named (DW, chess). Accepted.
+- "n=8 in the chess mate_in_2 group, 3 qualifying in the comment" is no contradiction: qualifying (identical
+  search and baseline CPU between 1 and 60 s in the benchmark run) selects the *window*; the table counts every
+  instance of the window whose search was identical and that finished in the load run, including those below 1 s.
+- Instances that do not finish in 60 s are discarded and listed in each `load.md` (the rule of the spec). The DW
+  group has n=5 in mode 1 because DW-unsat-10-25-1 is not solved in 60 s by either binary in that mode. Group sizes
+  between configurations therefore differ; a group with n < 3 (after-dl DW n=1, hadw n=2, chess mate_in_3 n=0) is
+  shown and carries no weight. `-dl` is judged by the benchmark stage (`gate.py` on three seeds of the whole set),
+  not by the load run: baseline and rewrite search differently under `-dl` on most of these instances.
+- Two rounds: group geometric means are the evidence, single-instance ratios are not (as the worker wrote). No
+  line of a gate rests on a single instance.
+- "Other checks not run" by R3-T1 (debug/sanitizer builds, `regress.sh`, Lean): R3-T1 touched no solver source;
+  R3-T3 ran all of them on the final source afterwards (three builds, ctest 40/40, fuzz gates, 33/33 smoke proofs).
+
+### G3. `bench/gate.py` (R3-T2): both deviations accepted
+
+- A configuration with no identical-search instance is FAIL: correct, a gate with nothing to judge must not pass
+  silently. This does not hit `-dl` in practice (round 2: n=4 in the DW family alone, pooled line present).
+- The mode 1 pooled line appears in the summary as REPORT: wanted, it is the input of D6.
+- Pooled limit 1.04 in the tool against "about 1.03" in the gate text: the tool's value is the gate (1.03 plus the
+  1-2% resolution of three seeds); a pooled value between 1.03 and 1.04 is PASS and the report says so in words.
+
+### G4. Mode 1 under load: DW 1.075, chess mate_in_3 1.064 (R3-T3): deferred to the benchmark stage of this round (D6)
+
+- Not a gate line: the round-3 gate for mode 1 is "reported, explained if above". State now: `l3.sh` DW mode 1
+  1.031 (round 2: 1.422), load run overall 0.998 (n=32), DW 1.075 (n=5), chess mate_in_3 1.064 (n=6), the other
+  four groups at or below 1.014. One instance carries the DW value in both instruments (DW-unsat-09-23-1: 1.181 in
+  l3.sh with rounds of 11.66 and 9.66 s against 8.96 and 9.10 s; 1.27 with the prototype).
+- The benchmark stage runs mode 1 on the whole set and `gate.py --report` on it. If the pooled ratio is at most
+  about 1.03 and no family with n >= 3 is above 1.10, the point is closed. Otherwise D6 applies: recorded as a known
+  deficit with its per-family table, and the first task of M2 that touches propagation (M2 tiers / binary handling)
+  starts with a profile of DW-unsat-09-23-1 in mode 1 under `bench/l3.sh -r 4`. No layout experiment is added to
+  M1: both layout instruments met their targets and mode 1 was never faster than this in the rewrite.
+
+### G5. The `-dl` row of `bench/l3.sh` (R3-T3): accepted as informational
+
+- Baseline and rewrite search differently under `-dl` (known since round 1, decision D2 there: order of equal
+  scores in the dependency-learning paths), so 0.803 is a time ratio of different searches and not a layout
+  measurement. It is not a gate line (the l3.sh gate is the default row) and may not be cited as an
+  identical-search result; the round-2 against round-3 comparison of the same row (0.893 to 0.803, same search
+  between the two rewrite binaries) is the valid part. The `-dl` gate is `gate.py` in the benchmark stage, which
+  only pools instances with identical searches.
+- `M1-r3-load-before-dl` (run by R3-T3 with the round-2 binary because R3-T1 had none): accepted as the "before"
+  column of the `-dl` load table.
+- ARCH 6.1 unchanged: confirmed, it was rewritten in `4e9cb50` to the layout that was built.
+
+### G6. Stress-row and checker timeouts in the fuzz gates of R3-T3: within the recorded limits
+
+- Release 1:300: noearly 31 of 150 (20.7%), restart-mode1-dl 19 (12.7%), restart-dl 6 (4%), mode1-dl 5, mode2-dl 3,
+  dl-ccmin3 1; asan 1:100 at `-t 240` (E3, owner decision): noearly 10, mode1-dl 5, restart-mode1-dl 4,
+  restart-dl 1. Every row is inside its limit of `tests/matrix.txt` (D1 of round 1), which is why the script prints
+  PASSED with warnings. Checker timeouts (24 release, 2 asan) are proofs the Lean checker did not finish in its time
+  limit, not rejections; 0 proofs rejected, 0 wrong verdicts, 0 sanitizer reports. No change to `tests/matrix.txt`.
+
+### Gates of M1 round 3 after these decisions
+
+| gate | state |
+|---|---|
+| `bench/l3.sh` DW group, default, new / baseline at most about 1.05 | green: 0.941 (round 2: 1.267) |
+| same search as round 2 | green: 1513 of 1513, ticks and proofs identical on 10 of 10 |
+| fuzz release 1:300, asan 1:100 `-t 240`, QDIMACS 1:300, ctest, smoke with proofs | green (G6) |
+| peak memory not above round 2 on the four instances | green by G1 (3 of 4 lower by 14-18%; amba2f9n.sat +0.5 MB accepted); ROADMAP memory gate against the baseline green |
+| load run: no group above 1.10 in default and `-dl` | green: largest 0.998 (default), 0.973 (`-dl`, n >= 3) |
+| mode 1 | reported: l3.sh 1.031, load DW 1.075, chess mate_in_3 1.064; closed or recorded by the benchmark stage (G4, D6) |
+| benchmark stage, `bench/gate.py` (pooled, families, default and `-dl`; mode 1 as report) | open: measured in the benchmark stage |
+
+### Worker tasks
+
+None.
