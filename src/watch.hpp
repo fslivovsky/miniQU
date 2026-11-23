@@ -64,9 +64,9 @@ public:
       d.clear ();
   }
 
-  // Adds empty lists for new variables, keeping the existing ones; the
-  // solver creates variables one at a time.
+  // Adds empty lists for new variables, keeping the existing ones.
   void resize (Var vars) { lits.resize (2 * (size_t) vars); }
+  Var size () const { return static_cast<Var> (lits.size () / 2); }
 
   // Raw access; may contain garbage entries.
   std::vector<Watch> &operator() (Kind kind, Lit p) {

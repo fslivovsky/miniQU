@@ -58,6 +58,7 @@ static bool normalize (std::vector<Lit> &lits) {
 void Internal::add_original (Kind kind, std::vector<Lit> &lits, int gate) {
   assert (!decision_level ());
   assert (!propagated);
+  size_watches ();
   if (!normalize (lits))
     return;
   stats.originals[index (kind)]++;

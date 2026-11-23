@@ -50,10 +50,10 @@ namespace miniqu {
 // stays.  One pass over all lists, so that checking after every garbage
 // collection of a stress run stays affordable.
 static std::unordered_map<Ref, uint8_t>
-watched_positions (const Watches &watches, const Arena &arena, Var vars) {
+watched_positions (const Watches &watches, const Arena &arena) {
   std::unordered_map<Ref, uint8_t> result;
   for (Kind kind : {Kind::Clause, Kind::Cube})
-    for (Var v = 0; v < vars; v++)
+    for (Var v = 0; v < watches.size (); v++)
       for (bool negative : {false, true}) {
         const Lit p = mk_lit (v, negative);
         for (const Watch &w : watches (kind, p)) {
@@ -105,7 +105,11 @@ void Internal::check_invariants () const {
   const Var vars = prefix.size ();
   std::vector<uint8_t> marked (2 * (size_t) vars, 0);
   const std::unordered_map<Ref, uint8_t> watched =
-      watched_positions (watches, arena, vars);
+      watched_positions (watches, arena);
+  // The watch lists are allocated with the first constraint
+  // ('size_watches'), so before it there are none.
+  CHECK_INVARIANT (watches.size () <= vars,
+                   "watch lists of unknown variables");
   for (Kind kind : {Kind::Clause, Kind::Cube})
     for (const auto *lists : {&irredundant, &redundant})
       for (Ref ref : (*lists)[index (kind)]) {
@@ -151,7 +155,7 @@ void Internal::check_invariants () const {
       }
 
   for (Kind kind : {Kind::Clause, Kind::Cube})
-    for (Var v = 0; v < vars; v++)
+    for (Var v = 0; v < watches.size (); v++)
       for (bool negative : {false, true}) {
         const Lit p = mk_lit (v, negative);
         if (watches.dirty (kind, p))

@@ -168,6 +168,7 @@ struct Internal {
 
   // internal.cpp
   Var add_var (Quant, bool decision, int proof_number);
+  void size_watches ();
   [[nodiscard]] Status solve ();
   void search ();
 

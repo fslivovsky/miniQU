@@ -2,7 +2,8 @@
 // loop (ARCHITECTURE 7.1).
 //
 // Variables are created only while the formula is added, in prefix order
-// (INV-ORDER, ARCHITECTURE 4.2); every per-variable array grows here.
+// (INV-ORDER, ARCHITECTURE 4.2); every per-variable array grows here
+// except the watch lists ('size_watches').
 //
 // The loop is the one of the old 'search' / 'solve_' pair, flattened: each
 // iteration propagates, and either analyses the conflict found, or stops
@@ -26,7 +27,6 @@ Var Internal::add_var (Quant quant, bool decision, int proof_number) {
   // The initial phase is false (porting note 6).
   phases.push_back (-1);
   seen.push_back (0);
-  watches.resize (vars);
   if (opts.dl) {
     add_dependency_var ();
     if (heaps.empty ())
@@ -41,10 +41,22 @@ Var Internal::add_var (Quant quant, bool decision, int proof_number) {
   return v;
 }
 
+// The watch lists of all variables are allocated in one step when the
+// first constraint is added (no variable is added after it) or, without
+// constraints, when the search starts.  Growing the array of 64-byte
+// records one variable at a time would keep the old and the new array
+// alive during each reallocation, which raised the peak memory by 8% on
+// an instance with two million variables (STATUS.md M1-R2-T2).
+void Internal::size_watches () {
+  if (watches.size () < prefix.size ())
+    watches.resize (prefix.size ());
+}
+
 void Internal::search () {
   profiles.enable (opts.profile);
   PROFILE_SCOPE (search);
   lim.restart = restart_interval (0);
+  size_watches ();
   init_reduce ();
   init_model_cube ();
   while (status == Status::Unknown) {
