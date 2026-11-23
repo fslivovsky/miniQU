@@ -2303,3 +2303,14 @@ Measurements (idle machine, lower half 0-47; baseline vs `build/bench-M1-r2/mini
 - Acceptance 3 (DW group clearly above 1.10): met in both runs. Old `M1-r2-load-*` results used the mixed placement and are not evidence.
 
 Notes for the next tasks: a round lasts about 61 s because the slowest instance of some group (the two CM/DW unsat ones, finan, genbuf) times out at 60 s; a run of 2 rounds x 2 arms takes ~4 min. The groups' unfinished instances are listed in each load.md. Rounds are only 2, so single-instance ratios (min-max columns) are noisy; the group geomeans are the evidence.
+
+## M1-R3-T2 (worker, 2026-11-23): bench/gate.py
+
+Built (no solver source touched):
+- `bench/gate.py`: the identical-search gate per configuration (`--pair` gated, `--report` printed as `REPORT (above, to be explained)`, exit 0/1, exit 3 on incomparable run sets unless `--force`). Output per configuration: pooled line with per-seed values, the complete per-family table (PASS / FAIL / `n < 3`), memory-limit hits (`MEMOUT`, runs per arm) and ERROR/MISMATCH rows; then a table of all FAIL/REPORT lines and `GATE: ...`. Pooled limit default 1.04 (docstring: ROADMAP "about 1.03" plus 1-2% resolution of three seeds).
+- `paired.py`: `load_pair` (loading + comparability check, moved out of `compare.py`), `IdenticalSearches.pooled_ratios` / `family_ratios`; `compare.py --paired` output unchanged (test_compare passes).
+- `bench/test_gate.py` (ctest `bench-gate`): passing set, family of 3 above (FAIL), family of 2 (not gated), pooled above, `--report` above (exit 0), MEMOUT listed, incomparable refused. README: sections "gate.py" and "Benchmark reports" (rules 1-5 of D3).
+
+gate.py on round 2 (`M1-r2-reports/gate.md`, exit 1, `GATE: FAIL (3 lines)`): default pooled 1.037 (n=51) PASS at 1.04 but above "about 1.03"; default DW 1.144 (n=6) FAIL, hadw 1.133 (n=3) FAIL; dl pooled 1.001, DW 1.107 (n=4) FAIL; mode1 pooled 1.063 (n=35), DW 1.260 (n=5) and chess 1.119 (n=11) REPORT; 2.1 and 5.2-3 listed as MEMOUT in every run of both arms. All numbers equal the committed paired reports. `M1-r2-report.md` got the correction sentence at its top.
+
+Deviations: a configuration with no identical search counts as FAIL (nothing to judge). The summary table also lists the mode 1 pooled line as REPORT.

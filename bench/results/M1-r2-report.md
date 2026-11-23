@@ -1,5 +1,7 @@
 # M1-r2 benchmark report (port of miniQU to the new architecture, round 2)
 
+Correction (round 3): the family gate of ROADMAP 'M1 round 2' was not met, see M1-r2-reports/gate.md and review M1-r2; 2.1 and 5.2-3 hit the memory limit in every run of both binaries.
+
 New: release build (-O3 -DNDEBUG) of rewrite/cadical-style at 25216c2 (`build/bench-M1-r2`, tags `M1-r2-<cfg>-s<seed>`).
 Baseline: frozen c39005a binary, same machine (96 cores, 48 jobs on cores 48-95, 8 GB, timeout 60 s, all 376 instances),
 tags `baseline-c96-<cfg>-t60-s<seed>` (meta.json of the baseline runs matches the harness settings; reused, not rerun).
