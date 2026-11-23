@@ -31,6 +31,9 @@ legacy       | -legacyanalyze                   | yes | conflicts restarts learn
 # tests/fuzz_qdimacs.sh instead). gc-ccmin3: debug and asan builds connect no
 # default Checker with minimisation, so it runs reduce, shrink and collect on
 # constraints without ids under the sanitizers (STATUS.md, M1-R2-T2).
+# The gate runs the asan binary with -t 240 (STATUS.md, "Coordinator decisions
+# after M1 round 2", E3: owner decision on sanitizer-build timeouts) and the
+# release binary with the default 20 s; the limits below apply to both.
 gc           | --reduceint=2 --tier1glue=0 --gcfrac=0 | yes | conflicts restarts learned.clause learned.cube reductions reduced.clause reduced.cube collections relocated | stress | 2
 gc-dl        | --reduceint=30 --tier1glue=0 --gcfrac=0 -dl | yes | conflicts restarts learned.clause learned.cube dependencies reductions reduced.clause reduced.cube collections relocated | stress | 2
 gc-mode1     | --reduceint=100 --tier1glue=0 --gcfrac=0 -mode=1 | yes | conflicts restarts learned.clause learned.cube reductions reduced.clause reduced.cube collections relocated | stress | 5

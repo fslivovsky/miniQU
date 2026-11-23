@@ -13,7 +13,7 @@
 #   -c CHECKER      Lean checker (default /home/ec2-user/qu-check/.lake/build/bin/qlrup-check)
 #   -P PROOF_OPTS   solver options that select proof output for proof runs
 #                   (default -proof-binary; the file is added as -proof=FILE)
-#   -t SECONDS      solver timeout per run (default 20)
+#   -t SECONDS      solver timeout per run (default 20; gate: default for release, 240 for the asan build)
 #   -S              skip the smoke test      -F  skip the corpus runs
 #   -n              no proof checking
 #

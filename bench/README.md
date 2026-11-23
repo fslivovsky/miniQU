@@ -151,8 +151,8 @@ is hidden, because the neighbours of a process are not copies of itself. A bench
 binary, every core busy) is the situation all later milestones are judged in, so memory-layout
 decisions (ARCHITECTURE 5.2: header size, glue and id words) are measured with this script and
 not on an idle machine. The script refuses to start if more processes than cores are requested
-or `pgrep` finds another solver, `bench/run.py` or `load_measure.py` (`--force` overrides and is
-noted in the report); it must be the only heavy job on the machine.
+or another solver (a process named `miniQU`), `bench/run.py` or `load_measure.py` is running, judged by the
+processes' argv, not by words in command lines (`--force` overrides and is noted in the report); it must be the only heavy job on the machine.
 
 Every solver runs with `-verb=1` appended to its arguments. Output in `bench/results/TAG/`:
 `load.csv` (arm, round, instance, copy, core, result, user, sys, conflicts), `meta.json` (both
@@ -240,6 +240,9 @@ seed-0 timed phases (`m1-new-default-t60-s0` and the same with `--solver $BASE`)
       tests/fuzz_qdimacs.sh $NEW 1 300 --reduceint=2 --tier1glue=0 --gcfrac=0 $OPT
       tests/fuzz_qdimacs.sh $ASAN 1 100 --reduceint=2 --tier1glue=0 --gcfrac=0 $OPT
     done
+    # tests/regress.sh gates: release at the default 20 s timeout, asan with -t 240 (STATUS.md, "Coordinator decisions after M1 round 2", E3)
+    tests/regress.sh -S -j 16 -s 1:300 -M all $NEW
+    tests/regress.sh -S -j 16 -s 1:100 -M all -t 240 $ASAN
 
 ## smoke.txt
 
