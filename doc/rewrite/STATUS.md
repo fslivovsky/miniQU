@@ -1634,3 +1634,90 @@ cost more; the definitions of "better" / "not worse" and the report contents sta
 - Reviewer: judge the evidence against this budget. Do not block because the full tier, more seeds or
   larger fuzz ranges are missing; do say what the reduced evidence can and cannot show. Discrepancies,
   rejected proofs and sanitizer reports remain blocking.
+
+## M1 round 2: diagnosis of B1 and plan (coordinator, 2026-11-23)
+
+Review `doc/rewrite/reviews/M1-r1.md`: not approved, one blocking item (B1: the new engine needs more CPU time
+than the baseline on identical searches when the neighbouring cores run copies of it). Accepted without
+rebuttal: the report's "search-order variance" explanation was wrong.
+
+### Cause: the 12-byte constraint header (measured)
+
+Machine: EPYC 9R14, 96 cores, 1 MB L2 per core, **twelve L3 caches of 32 MB, each shared by 8 cores**
+(`cpu0/cache/index3/shared_cpu_list` = 0-7). A benchmark run puts one solver on every core of the upper half,
+so a process has about 4 MB of L3. The effect needs no 48 processes: 8 copies on cores 0-7 reproduce it in
+seconds (`DW-sat-08-22-1`, seed 1, user time, median of 8: baseline 3.1 s, new 3.7 s; alone on the machine
+both need 1.70 s with identical conflict and propagation counts).
+
+Prototypes (scratch copies of `src/` at `edd1f12`, only `constraint.hpp` changed, built with `-O3 -DNDEBUG
+-flto`; `/home/ec2-user/miniqu-work/coord/`: `build.sh`, `load48.sh`, `v0` unchanged, `v1` 4-byte header (no
+id, no glue), `v2` 8-byte header (no id; head word and glue word), raw output `l48.txt`). Load as in the
+review: its 12 instances x 4 copies = 48 processes of one binary at a time on cores 0-47, seed 1, arms in the
+order baseline, v0, v1, v2, two rounds; per instance the median user time of the 4 copies, mean of the two
+rounds; conflict counts identical in all four arms on every instance (none of them reduces in these runs,
+which is why the prototypes without glue run the same search):
+
+| instance | baseline s | 12-byte (r1) | 4-byte | 8-byte |
+|---|---|---|---|---|
+| DW-sat-08-22-1 | 1.99 | 2.58 (1.29) | 2.34 (1.18) | 2.58 (1.29) |
+| DW-unsat-09-22-1 | 9.38 | 11.59 (1.24) | 9.86 (1.05) | 10.00 (1.07) |
+| jctc10-fail | 7.21 | 9.26 (1.28) | 8.13 (1.13) | 8.71 (1.21) |
+| DW-sat-09-26-1 | 3.79 | 3.87 (1.02) | 3.25 (0.86) | 3.48 (0.92) |
+| chess_solving_mate_in_3_2003_UKR-CH_04 | 9.88 | 10.84 (1.10) | 9.57 (0.97) | 9.79 (0.99) |
+| 9.2 | 13.75 | 14.08 (1.02) | 12.61 (0.92) | 12.94 (0.94) |
+| chess_solving_mate_in_3_2012_GRE-CH-11_02 | 12.32 | 13.00 (1.06) | 11.50 (0.93) | 12.22 (0.99) |
+| chess_solving_mate_in_3_1991_WCSC-15_05 | 8.06 | 8.71 (1.08) | 7.81 (0.97) | 8.04 (1.00) |
+| 4.1 | 8.43 | 8.22 (0.98) | 7.24 (0.86) | 7.55 (0.90) |
+| 5.2-1 | 31.68 | 31.86 (1.01) | 28.19 (0.89) | 29.10 (0.92) |
+| hadw11-12 | 6.20 | 6.21 (1.00) | 5.43 (0.88) | 5.50 (0.89) |
+| ltl2dba_beta6.tlsf | 11.79 | 11.48 (0.97) | 10.97 (0.93) | 10.73 (0.91) |
+| **geometric mean of the ratio** | | **1.082** | **0.958** | **0.995** |
+
+A second pair of rounds (baseline, 4-byte, and the same 4-byte binary again under another name) gave 0.918 and
+0.920 for the two copies of the 4-byte binary, and shows the noise of single instances: the two identical
+binaries differed by up to 15% on the two shortest runs (`DW-sat-08-22-1` 0.80 / 0.93, `jctc10-fail` 1.20 /
+1.04) and by at most 2% on the instances above 8 s. So: the geometric mean over the twelve is reliable to
+about 0.01-0.04 between sessions (the 12-byte arm was 1.08 here and 1.23 in the reviewer's session, the
+direction and the ranking are the same), a single short instance is not. The idle-machine measurement of
+T07 could not see any of this; its conclusion ("no slower and smaller") was wrong for the protocol all
+milestones are measured with.
+
+Not the cause, as far as these numbers go: `std::vector<Watch>`, `VarData`, `stats.ticks`, the initial arena
+order (the old solver does not collect or simplify at start-up either: its `simplify ()` call is commented
+out). With the 4-byte header the new engine is 4-8% faster than the baseline under load without touching
+them. They stay as they are unless the measurement of R2-T2 on the real implementation says otherwise.
+
+### Decisions
+
+1. **Constraint layout** (ARCH 5.2 rewritten in this commit): 4-byte header, literals, then one glue word
+   only for redundant constraints, then two id words only when a tracer is connected (`has_id` flag in the
+   header, size field 26 bits as in the old solver). This is the old solver's memory per original and 4
+   bytes less per learnt constraint; with a proof the footprint is what round 1 had. The 8-byte uniform
+   header (parity, simpler) was the alternative; the 4-byte one is chosen because it is measurably faster and
+   it is MiniSat's own scheme ("as in MiniSat/miniQU"). The T07 header decision is withdrawn.
+2. **Rule**: layout decisions are measured under benchmark load with `bench/load_measure.py` (R2-T1), not on
+   an idle machine.
+3. **Reduce tie-break**: creation order (position in the `redundant` list, `std::stable_sort`) instead of
+   the id, so that the search is the same with and without stored ids. Same order as before, since ids grow
+   with creation; R2-T2 verifies identical conflict counts against the round-1 binary.
+4. **Coverage of the id-less layout**: debug/asan builds connect the default `Checker` (ids present) unless
+   `ccminmode > 0` or mode 2. The id-less paths of reduce/collect in an asan build are covered by the unit
+   tests (which build `Internal` without a tracer), by the `gc-mode2` row and by a new stress row `gc-ccmin3`.
+5. **Mode 1 "worse" by the sign test** (14 W / 31 L): same cause expected (mode 1 had the largest
+   identical-search ratio, 1.14); it is re-run in the benchmark stage, with seeds 2 and 3 of both arms if
+   the 2 hours allow.
+
+### Suggestions of the review
+
+- `struct Last` removed (R2-T1); ARCH 3.1 and 9.4 now say that the first package that reads it adds it.
+- Constants of `reduce.cpp` / `bump.cpp`: ARCH 9.1 relaxed (a constant ported unchanged is a named
+  `constexpr` until the package that changes it makes it an option; M2.2 for the reduce schedule).
+- `Solver::freeze`: comment in `miniqu.hpp` (R2-T1).
+- Benchmark reports state the arm order (R2-T1: the paired report prints the start time of every run).
+- Proof-coverage run on the benchmark set and modes 1/2 with three seeds: in the benchmark stage of round
+  2, in that order, as far as the 2 hours allow (9 new runs against the reused baseline runs take about one
+  hour).
+
+### Worker tasks of M1 round 2 (in this order; specs in the workflow, summary in ROADMAP "M1 round 2")
+
+- **R2-T1** tooling and clean-ups. - **R2-T2** constraint layout, measurements, gate.

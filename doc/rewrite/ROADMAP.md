@@ -466,6 +466,26 @@ allocator and the learnt-database trajectory dominate: coordinator decision
 after M1 round 1); the port-fidelity report shows no unexplained
 systematic shift; reviewer accepts structure and readability.
 
+### M1 round 2 (rework after review M1-r1, coordinator)
+
+Review M1-r1 accepted structure, soundness and proofs and blocked on engine
+speed under benchmark load (B1). The cause was found by the coordinator
+(STATUS.md, "M1 round 2: diagnosis of B1"): the 12-byte constraint header.
+Two tasks, in order:
+
+| task | content |
+|---|---|
+| R2-T1 | tooling and small clean-ups: `bench/load_measure.py` (identical-search CPU time of two binaries under benchmark load, arms separated), the identical-search section and the arm order in the paired report, regenerated M1-r1 reports; `struct Last` removed, `Solver::freeze` documented |
+| R2-T2 | constraint layout of ARCH 5.2 (4-byte header, trailing glue word for redundant constraints, trailing id words only with a tracer), `copy_constraint`, creation-order tie-break in `reduce`, stress row `gc-ccmin3`; load measurement before/after; fuzz gate of the budget decision |
+
+Round-2 gate (review M1-r1, B1 step 3): on the instances with equal conflict
+counts in both arms (baseline CPU time above 1 s) the CPU-time ratio new /
+baseline has a geometric mean of at most about 1.03 in default and `-dl`,
+no family (three or more such instances) is above 1.10, and mode 1 is not
+"worse" by the sign test. The benchmark stage reuses the same-machine
+baseline runs `baseline-c96-<config>-t60-s<seed>` and states the order in
+which the arms ran.
+
 Porting notes (behaviour that is easy to lose; each has a test or assertion):
 
 1. **Original constraints**: sort, remove duplicate literals, skip

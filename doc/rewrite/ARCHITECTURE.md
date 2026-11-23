@@ -161,7 +161,7 @@ and deleted only through `constraint.cpp`, assignments only through
 | `options.{hpp,cpp}` | X-macro option table (section 9.1) |
 | `stats.{hpp,cpp}` | counters and their printing (9.2) |
 | `profile.{hpp,cpp}` | `START`/`STOP` timers (9.3) |
-| `limit.hpp` | `Limit` (next-event thresholds), `Inc` (increments), `Last` (9.4) |
+| `limit.hpp` | `Limit` (next-event thresholds), `Inc` (increments); `Last` from the first package that reads it (9.4) |
 | `logging.{hpp,cpp}`, `message.{hpp,cpp}` | `LOG`, `PHASE`, `VERBOSE`, `MSG`, `fatal` (9.5); `logging.cpp` also defines `Internal::log` (the one base file that includes `internal.hpp`, as in CaDiCaL, and only with `MINIQU_LOGGING`) |
 | `contract.hpp` | `REQUIRE` for API misuse (9.6) |
 | `file.{hpp,cpp}` | buffered input (plain/gzip via zlib), buffered output |
@@ -534,43 +534,62 @@ benchmark set.
 ### 5.2 Constraint layout
 
 ```
-word 0      bits 0-4   kind        1   Clause / Cube
+word 0      bits 0-5   kind        1   Clause / Cube
                        redundant   1   learnt; may be deleted
                        garbage     1   deleted, memory not yet reclaimed
                        moved       1   relocated during GC; lits[0] holds the new Ref
                        reason      1   protected in reduce (set only inside reduce)
-            bits 5-31  size       27   number of literals (at most 134217727;
-                                       a larger constraint is a fatal error)
-word 1      proof id, bits 0-31
-word 2      bits 0-11  proof id, bits 32-43 (ids stay below 2^44)
-            bits 12-25 glue       14   LBD, saturating
-            bits 26-31 reserved    6   (`used` 2 and `keep` 1 for M2 tiers,
+                       has_id      1   two id words follow the literals
+            bits 6-31  size       26   number of literals (at most 67108863, as
+                                       in the old solver; a larger constraint
+                                       is a fatal error)
+word 1...   lits[size]
+then, only if redundant, one word:
+            bits 0-13  glue       14   LBD, saturating
+            bits 14-31 reserved   18   (`used` 2 and `keep` 1 for M2 tiers,
                                        scheduling marks for M3+. A bit gets its
                                        name and its accessors in the package
                                        that first uses it.)
-word 3...   lits[size]
+then, only if has_id, two words: the 64-bit proof id, low word first
 ```
 
-Twelve bytes of header for every constraint (the old solver: 4 bytes, 12
-for learnt constraints, so a binary original grows from 12 to 20 bytes).
-This is the variant that the measurement of ROADMAP M1.3 kept (task T07,
-STATUS.md): the first layout, with 16 bytes (a 32-bit size word, a flag word
-with a 20-bit glue, and the id in two full words), was measured first and
-gave the same propagation speed within noise but a higher peak RSS; the
-accessor-only rule below made the switch local to `constraint.hpp`. The id
-is stored inline and always present: the old solver kept ids in a hash map
-keyed by `CRef`, which has to be rebuilt at every garbage collection and
-costs a hash lookup per antecedent during analysis; ids are also what makes
-log output and sort orders stable across garbage collections. MiniSat's
-per-clause `activity` float and the `abstraction` word are not kept
-(database reduction sorts by glue and size; subsumption computes signatures
-in the occurrence pass).
+This is MiniSat's and the old solver's layout: four bytes of header, the
+literals, and optional trailing words. An irredundant constraint without a
+proof is exactly as large as in the old solver (a binary original: 12
+bytes); a redundant one is 4 bytes smaller (the old solver: `activity` and
+`lbd`). `has_id` is set for every constraint allocated while a tracer is
+connected (`Internal::proof != nullptr`; tracers are connected before the
+first original, so one solver run has ids on all constraints or on none),
+which includes the default `Checker` of builds with assertions. Without a
+tracer nothing reads an id: `id ()` asserts `has_id`.
+
+History, because the layout was measured twice. The first layouts had a
+uniform header in front of the literals with the id always inline (16 bytes,
+then 12 bytes after the measurement of task T07). T07 compared propagation
+speed on an idle machine and found no difference. Review M1-r1 (B1) then
+showed that under the benchmark protocol (one process per core, eight cores
+sharing a 32 MB L3 cache) the 12-byte header costs 8-25% CPU time on
+identical searches: the working set of propagation is the constraints
+themselves, and the eight extra bytes per original no longer fit the cache
+share of one process. Prototypes measured under that load (STATUS.md,
+"M1 round 2: diagnosis of B1"): 12-byte header 1.08 times the baseline's CPU
+time, 8-byte header 1.00, 4-byte header 0.96. **Layout decisions are
+measured under benchmark load (`bench/load_measure.py`), never on an idle
+machine.** The old solver's hash map from `CRef` to id is still not used:
+trailing id words need no rebuild at garbage collection and no lookup
+during analysis. Orders that must be stable across garbage collections use
+the position in the reference lists (4.3), which is creation order, not the
+id. MiniSat's per-clause `activity` float and the `abstraction` word are
+not kept (database reduction sorts by glue and size; subsumption computes
+signatures in the occurrence pass).
 
 `Constraint` is a non-copyable view type with accessors (`size ()`,
 `lits ()` returning `std::span<Lit>`, `begin ()/end ()`, flag getters and
-setters); nothing outside `constraint.hpp` does word arithmetic. Shrinking a
-constraint in place (`shrink_constraint`) lowers `size` and accounts the
-freed words as wasted. Because of that the arena cannot be walked linearly;
+setters); nothing outside `constraint.hpp` does word arithmetic or knows
+where the trailing words are. Shrinking a constraint in place
+(`shrink_constraint`) lowers `size`, moves the trailing words down and
+accounts the freed words as wasted; garbage collection copies a constraint
+word by word (`copy_constraint`), so no caller lists the fields. Because of that the arena cannot be walked linearly;
 all iteration over constraints goes through the reference lists (4.3).
 
 ### 5.3 Garbage collection ordered by access
@@ -597,7 +616,8 @@ right size in this order:
    garbage, relocating whatever has not been reached yet (unit constraints,
    the initial-cube buffer);
 5. the buffer of the initial cube (`model.cpp`) is allocated afresh in the new
-   arena: its contents are dead between two cubes, only its id is kept;
+   arena: its contents are dead between two cubes, only its id (if ids are
+   stored) is kept;
 6. any `Ref` held by an inprocessing pass must not exist at this point:
    passes do not call the collector while they hold references (occurrence
    lists are rebuilt, not relocated).
@@ -962,8 +982,13 @@ OPTION (ccminmode,   0, 0, 3,   "learnt constraint minimisation") \
 
 `options.hpp` expands it into `struct Options { int mode; ... }`, a table
 for parsing and `--help`, and range checks. Fractions are integers in percent
-or per mille (`vardecay=950`). Every heuristic constant is an option; no
-magic numbers in technique files.
+or per mille (`vardecay=950`). Every heuristic constant that a milestone
+tunes or ablates is an option; a constant ported unchanged from the old
+solver and not yet touched (M1: the learnt-limit schedule in `reduce.cpp`,
+the rescale threshold in `bump.cpp`) is a named `constexpr` at the top of
+its technique file and becomes an option in the package that first changes
+it (M2.2 for the reduce schedule). No unnamed magic numbers in technique
+files.
 
 Command line: `--name=value`, `--name` (set to 1), `--no-name` (set to 0);
 for compatibility with the old binary and the existing scripts a single
@@ -1037,7 +1062,9 @@ and printed with the statistics. Level 0 costs nothing in the inner loop.
 event fires next (`restart`, `reduce`, `rephase`, `stabilize`, `inprocess`,
 per-pass thresholds), plus user limits (`conflicts`, `decisions`, time via an
 alarm flag). `struct Inc` holds the growing intervals. `struct Last` records
-counters at the last run of each pass (to compute "effort since then").
+counters at the last run of each pass (to compute "effort since then"); it
+is added by the first package that reads it (not present in M1: review
+M1-r1).
 Events are only ever triggered by comparing `stats` with `lim` in the loop of
 7.1; no technique schedules itself from inside another.
 
@@ -1431,7 +1458,7 @@ departs from what the review asked.
 | **B5** layering claim false for the extension stack | Accepted, and taken one step further (with S10): there is no `External` class at all. `Solver` owns the variable maps and translates; the extension stack, reconstruction and certificate values live in `Internal` in internal literals; proof numbers are per-variable static data in `prefix.hpp`, read by `Proof`. No upward pointer exists | ARCH 3, 3.5, 10.4 |
 | S1 measure BVE yield first | Accepted: P0.3 / M3.0 with a decision point before M3.2, and the statement that E3 is not a soundness condition for QCIR goes to the owner with the numbers | ROADMAP M3.0 |
 | S2 QDIMACS elimination unverified | Accepted and strengthened: it is the optional package M3.6, off by default (`--elimqdimacs=0`); `check_model_cube ()` validates every initial cube; clause entries only on the extension stack | ROADMAP M3.4, M3.6; ARCH 4.5, 10.4 |
-| S3 header size | Accepted: layout provisional, measurement in M1.3, 12-byte fallback | ARCH 5.2; ROADMAP M1.3 |
+| S3 header size | Accepted: layout provisional, measurement in M1.3, 12-byte fallback; superseded after review M1-r1 by the 4-byte header with trailing words | ARCH 5.2; ROADMAP M1.3, M1 round 2 |
 | S4 propagation variants | Accepted: table of six variants, one templated watch loop (`Kind`, `Lone`), dispatch outside the loop | ARCH 7.2 |
 | S5 meaning of "pluggable" | Accepted: touch-point list, per-technique state structs, edits to the core are recorded design changes | ARCH 3.6 |
 | S6 port-fidelity diagnostics | Accepted | ROADMAP M1.9 |
