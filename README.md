@@ -6,8 +6,8 @@ started as. It reads prenex formulas in QDIMACS (CNF matrix) or QCIR (circuit ma
 learns clauses and terms (cubes), and supports dependency learning as well as propagation and
 learning with QU-resolution and long-distance Q-resolution. Constraints live in an arena and
 watch lists are kept in memory in the order of their accesses, as in MiniSat. The structure of
-the sources is described in `doc/rewrite/ARCHITECTURE.md`; the previous implementation is kept
-in `minisat/` (see below).
+the sources is described in `doc/rewrite/ARCHITECTURE.md`; where the previous implementation lives
+is said at the end of "Building".
 
 ## Building
 
@@ -32,8 +32,9 @@ ctest --preset release                 # unit tests, formatting, encoding, tooli
 baseline binary for the end-to-end tests. Without CMake presets, `cmake -S . -B build` builds the
 same targets: `miniQU`, `qlrup-trim` (proof trimmer) and the unit tests.
 
-The previous implementation is not part of the CMake build; `make r` builds it from `minisat/` to
-`build/release/bin/miniQU`.
+The previous implementation (commit c39005a, MiniSat layout) is no longer in the tree: its sources are
+`git show c39005a:minisat/core/Solver.cc` and the worktree `/home/ec2-user/miniqu-work/baseline-src`, and
+its frozen binary, the reference of the benchmarks, is `/home/ec2-user/miniqu-work/baseline/miniQU`.
 
 ## Usage
 
