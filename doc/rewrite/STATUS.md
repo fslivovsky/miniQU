@@ -2520,3 +2520,56 @@ None.
 ## M1 round 1 independent verification (test worker, head 098edce)
 
 Fresh release/asan/debug builds in miniqu-work/build-v1r1. ctest 40/40 (debug and release); `regress.sh -s 1:300 -M all` release (with smoke per row): PASSED, 0 wrong verdicts, 0 rejected proofs, only the known timeout warnings; asan `-S -s 1:100 -M all -t 240`: PASSED, 0 sanitizer reports; `fuzz_qdimacs.sh` 1:300 with '', -dl, -mode=1, -mode=2: 0 failures; run_regressions 7/7. No failures, no new test files.
+
+## M2 plan and decisions after review M1-r3 (coordinator, 2026-11-23)
+
+Review `reviews/M1-r3.md`: M1 **approved**. Its follow-ups are settled here; the plan of M2 is in ROADMAP
+"M2 execution plan" (seven worker tasks M2-T1 .. M2-T7, specs in the workflow).
+
+### H1. The `jctc` line of the M1-r3 gate (1.330, n=4, default): closed as noise
+
+By the reviewer's measurement (review M1-r3, section 4.2): `jctc10-fail` is bimodal under the benchmark load for
+the baseline binary too (about 5 s or about 11 s), the two baseline runs against each other give 0.840 on the
+family and the two new runs 0.788, and in isolation the new binary is 7-11% faster on both instances. No engine
+regression; the M1 gate line "no family above 1.10 on identical searches" is met. Rule from now on (implemented in
+`bench/gate.py` by M2-T1): a family FAIL is followed by one more back-to-back pair of the configuration; a FAIL
+that does not repeat is reported as noise with both values, one that repeats blocks.
+
+### H2. Old tree
+
+`minisat/` and the MiniSat top-level `Makefile` leave the branch in M2-T1 (ROADMAP M1: "removed from the build
+once parity is shown"). The old sources stay readable at `/home/ec2-user/miniqu-work/baseline-src/minisat/` (worktree
+of c39005a) and with `git show c39005a:minisat/core/Solver.cc`; the frozen baseline binary is untouched.
+
+### H3. Proof coverage on the benchmark set (D7 of M1, never measured)
+
+M2-T1 runs it once with the accepted M1 binary (`build/bench-M1-r3/miniQU`, seed 0, default, 60 s, proofs for
+instances solved within 20 s, checker limit 600 s), tag `M1-r3-proofcov-default-s0`. It is the reference of the
+"no unexplained drop" line of the M2 gate.
+
+### H4. Scope of M2 and what is deferred
+
+In: tiers with `used` and glue update (M2.2), dynamic tier limits (M2.2 second step), root-level simplification
+(M2.1, modes 0 and 1), minimisation with proofs (M2.3), glue-EMA restarts with trail reuse (M2.4, M2.5).
+Deferred to M5+: `--gluemode`, stable/focused switching, rephasing, arena order by decision order, reason-side
+bumping. Reason: the budget holds one ablation per technique and about two hours in total; none of the deferred
+items is an owner requirement.
+
+### H5. The M1-equivalent configuration is a gate
+
+`--no-tiers --no-glueupdate --reducetarget=50 --reducesize --reduceint=0 --no-recomputetier --no-rootsimp
+--ccminmode=0 --restartmode=0 --no-reusetrail` must reproduce the search of the M1 binary (`tests/m1_equiv.sh`).
+A task that cannot keep it explains the first diverging instance in its STATUS entry and stops; it does not edit
+the script to make it pass.
+
+### H6. Defaults
+
+Adopt items ship on (tiers, glue update, conflict schedule, root simplification, trail reuse); experiment items
+ship off (`recomputetier`, `ccminmode`, `restartmode=1`) and are decided by the screening of M2-T7 with the rule
+in ROADMAP (2.0 s PAR2, seeds 4 and 5, default and `-dl`).
+
+### H7. Stress rows
+
+New rows of `tests/matrix.txt` follow D1 of round 1: `--reduceint=2` in default rows, `--reduceint=30` with `-dl`,
+`100` with `-mode=1`; a row limit above 2% needs the same row measured without the new feature (or on the M1
+binary) with a comparable timeout rate, recorded in the task's STATUS entry.

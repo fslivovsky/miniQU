@@ -554,6 +554,81 @@ Each item is one package with an option, statistics and an ablation. Order =
 priority. "Adopt" means it becomes default unless the ablation shows a loss;
 "experiment" means it becomes default only if the ablation shows a gain.
 
+### M2 execution plan (coordinator, 2026-11-23; supersedes the package order and the budgets below)
+
+Scope of the milestone under the owner's budget (STATUS "Owner decision:
+testing and benchmarking budget per milestone"): one ablation per technique
+has to fit into two hours together with the main comparison, so M2 contains
+four techniques and no more. In this order, one worker task each unless noted:
+
+| task | content | default as shipped |
+|---|---|---|
+| M2-T1 | Housekeeping after review M1-r3: old `minisat/` tree and MiniSat `Makefile` leave the branch; `gate.py` noise rule; nits 4 and 5; proof-coverage reference run of the M1 binary | - |
+| M2-T2 | M2.2: `used` bits, glue update in analysis, tiers, conflict schedule `reduceint`, `reducetarget`; `tests/m1_equiv.sh` | on (`--tiers --glueupdate --reduceint=300 --reducetarget=75`, size trigger off) |
+| M2-T3 | M2.2 second step: tier limits per kind from the usage histogram (`--recomputetier`, CaDiCaL `tier.cpp`) | off, decided by M2-T7 |
+| M2-T4 | M2.1: root-level simplification (`--rootsimp`), modes 0 and 1 | on |
+| M2-T5 | M2.3: minimisation with proofs (chain extension), `Checker` rule removed | `ccminmode=0`, decided by M2-T7 |
+| M2-T6 | M2.4 + M2.5: glue-EMA restarts per kind (`--restartmode=1`), trail reuse (`--reusetrail`) | Luby, reuse on; decided by M2-T7 |
+| M2-T7 | Screening of the experiment items (at most one hour on the benchmark cores), defaults, matrix and docs as built, full fuzz gate | - |
+
+Decisions that differ from the package texts below:
+
+- **Option names (M2.2).** `tiers` (0/1), `glueupdate` (0/1), `tier1glue`,
+  `tier2glue`, `reducetarget` (percent), `reduceint` (interval trigger,
+  0 = none, default 300, `lim.reduce = conflicts + reduceint * reductions`
+  as in M1) and `reducesize` (0/1: MiniSat's size trigger of M1, default 0).
+  `used` follows CaDiCaL 1.x: set to 2 (glue within tier 2) or 1 when the
+  constraint is learnt or used in an analysis; `reduce` keeps a constraint
+  with `used > 0` and decrements it, keeps tier 1 always, and deletes
+  `reducetarget`% of the rest, worst (glue, size) first.
+- **The M1-equivalent configuration.** With
+  `--no-tiers --no-glueupdate --reducetarget=50 --reducesize --reduceint=0`
+  `--no-recomputetier --no-rootsimp --ccminmode=0 --restartmode=0 --no-reusetrail`
+  the M2 binary must make the *same search* as the accepted M1 binary
+  (`/home/ec2-user/miniqu-work/build/bench-M1-r3/miniQU`): equal `conflicts`,
+  `decisions`, `propagations`, `ticks` on `bench/smoke.txt` and on fuzz
+  instances, in default, `-dl`, `-mode=1`, `-mode=2`. `tests/m1_equiv.sh`
+  (M2-T2) checks it; every later task appends its off-switch and reruns it.
+  This is the regression test of the port inside M2 and the "all off" arm of
+  the benchmark stage.
+- **Root simplification (M2.1) runs in modes 0 and 1 only.** Mode 2 learns
+  constraints with complementary secondary literals and ignores a lone
+  secondary literal in propagation; removing literals there needs its own
+  argument and has no proof to check it. Revisit with M3 if elimination
+  wants it.
+- **Root literals in learnt constraints (M2.3)** are resolved away only by
+  minimisation (`ccminmode >= 1`), where a root literal with a unit of the
+  same kind is already "free"; with `ccminmode=0` they stay and M2.1 strips
+  them at the next root simplification.
+- **Dependency resets with EMA restarts (M2.4)**: `--depresetint` conflicts,
+  only with `--restartmode=1`; the Luby mode keeps the M1 rule.
+- **Deferred to M5+** (no task, no option): `--gluemode` (M2.2 experiment),
+  stable/focused switching (M2.6), rephasing (M2.7), arena order by decision
+  order (M2.8), reason-side bumping (M2.9). Each would need its own ablation
+  runs, which the budget of this milestone does not hold; none is an owner
+  requirement. They move behind vivification in the priority list of M5+.
+- **Screening rule of M2-T7** (replaces the two-step screening of 0.3 for
+  this milestone): seeds 4 and 5 (not used by the gate), 60 s, default and
+  `-dl`, candidate against the shipped default on the same binary. An
+  experiment item becomes default only if its mean PAR2 is lower by more
+  than 2.0 s (the seed spread measured in M1) in one main configuration and
+  not higher by more than 2.0 s in the other, with no discrepancy; an adopt
+  item is switched off only if it is worse by more than 2.0 s in one of
+  them. Anything else keeps the shipped default and is reported as "no
+  measurable difference".
+- **Fuzz gate of every solver task**: owner budget, i.e. matrix 1:300
+  release with Lean, 1:100 asan at `-t 240`, QDIMACS 1:300 in four modes.
+- **Benchmark stage of M2**: 60 s, seeds 1-3, default and `-dl` against the
+  M1-r3 results (same machine and settings, reused); then one proof-coverage
+  run against the M2-T1 reference, then the ablations "all off"
+  (M1-equivalent), tiers off, root simplification off, then modes 1 and 2.
+  Acceptance under this budget: no discrepancy, no rejected proof; default
+  and `-dl` **not worse** than M1-r3 (0.3) and `gate.py` on the "all off" arm
+  against the M1-r3 binary within its limits (same search, so this is the
+  engine-speed check); proof coverage without unexplained drop. "Better than
+  M1" is reported if measured and is not a condition: three seeds at 60 s
+  cannot resolve less than about five instances.
+
 ### M2.1 Root-level simplification (adopt; prerequisite for M3)
 
 `collect.cpp`, at decision level 0 after propagation, when new root

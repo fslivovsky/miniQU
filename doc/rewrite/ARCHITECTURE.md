@@ -546,8 +546,10 @@ word 0      bits 0-5   kind        1   Clause / Cube
 word 1...   lits[size]
 then, only if redundant, one word:
             bits 0-13  glue       14   LBD, saturating
-            bits 14-31 reserved   18   (`used` 2 and `keep` 1 for M2 tiers,
-                                       scheduling marks for M3+. A bit gets its
+            bits 14-15 used        2   M2 (task M2-T2): 2 or 1 when learnt or
+                                       used in an analysis, decremented by
+                                       every reduce; 0 = deletion candidate
+            bits 16-31 reserved   16   (scheduling marks for M3+. A bit gets its
                                        name and its accessors in the package
                                        that first uses it.)
 then, only if has_id, two words: the 64-bit proof id, low word first
