@@ -649,7 +649,8 @@ lists and flags were four separate arrays per kind; the record made
 identical searches 10-30% faster on the DW instances under benchmark load,
 STATUS.md M1-R2-T2.) The records are allocated in one step for all
 variables when the first constraint is added (`size_watches`), not grown
-variable by variable, which would raise the peak memory. `watches (kind, p)` is the list of constraints of that kind
+variable by variable, which would raise the peak memory. A list grows by
+about 3/2 (`push_watch`, as MiniSat's `vec`), not by the library's doubling. `watches (kind, p)` is the list of constraints of that kind
 to visit **when `p` becomes true**: clauses watching `~p`, cubes watching `p`
 (in terms of 4.1: constraints in which a watched literal just vanished). A
 constraint of size >= 2 watches its literals at positions 0 and 1, and each of

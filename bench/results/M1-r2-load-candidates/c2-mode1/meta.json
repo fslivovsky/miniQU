@@ -1,0 +1,56 @@
+{
+  "tag": "c2-mode1",
+  "cores": "0-47",
+  "copies": 4,
+  "rounds": 3,
+  "timeout": 60.0,
+  "force": false,
+  "host": "ip-172-31-34-83.eu-west-2.compute.internal",
+  "date": "2026-11-23T05:53:38",
+  "order": [
+    {
+      "arm": "A",
+      "round": 1,
+      "start": "2026-11-23T05:53:38"
+    },
+    {
+      "arm": "B",
+      "round": 1,
+      "start": "2026-11-23T05:54:38"
+    },
+    {
+      "arm": "A",
+      "round": 2,
+      "start": "2026-11-23T05:55:39"
+    },
+    {
+      "arm": "B",
+      "round": 2,
+      "start": "2026-11-23T05:56:39"
+    },
+    {
+      "arm": "A",
+      "round": 3,
+      "start": "2026-11-23T05:57:40"
+    },
+    {
+      "arm": "B",
+      "round": 3,
+      "start": "2026-11-23T05:58:41"
+    }
+  ],
+  "binaries": {
+    "A": {
+      "name": "miniQU-new",
+      "path": "/home/ec2-user/miniqu-work/r2t2/miniQU-new",
+      "sha256": "59aa524cbd5b4853ec370ef5a5207e5005e23c0d42497fc3281ffbc2f7da94d4",
+      "args": "--seed=1 -mode=1"
+    },
+    "B": {
+      "name": "miniQU-c2",
+      "path": "/home/ec2-user/miniqu-work/r2t2/miniQU-c2",
+      "sha256": "1b6759f85303591cf63eeefd0aceef65ab3f067da24a9ccf004e058a78aee379",
+      "args": "--seed=1 -mode=1"
+    }
+  }
+}

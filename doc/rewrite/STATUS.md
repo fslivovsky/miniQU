@@ -1792,3 +1792,256 @@ Checks: all four presets (release, debug, asan, release-clang) build without war
 `tests/regress.sh -S -j 16 -s 1:40 -M default,dl` on the release build passed (0 warnings). No proofs involved in
 this package. Nothing failed; the only deviation from the spec is that the `-verb=1` goes after the user's
 arguments and before the instance, and `-rnd-init` etc. are passed through unchanged.
+
+## M1-R2-T2 Constraint layout: 4-byte header, trailing glue and id words; watch records; load gate (worker, 2026-11-23)
+
+Commits: `b9ba11e` (layout, A-E of the spec), `84a94d6` (matrix row `gc-ccmin3`), `c6753ff` (watch records, F3
+candidate 2), `32a9714` (watch-list growth 3/2, F3 candidate 3), `60dce84` (watch records allocated once, for F6), and
+this one (STATUS, results). Logs and throwaway scripts: `/home/ec2-user/miniqu-work/logs/r2-t2/`,
+`/home/ec2-user/miniqu-work/r2t2/` (`f1.py`, `launch-*.sh`, `f5.sh`); proof files deleted.
+
+### What changed
+
+- `src/constraint.hpp`: the layout of ARCH 5.2 exactly (word 0: kind, redundant, garbage, moved, reason, has_id, 26-bit
+  size; literals; glue word iff redundant; two id words iff `has_id`). `words (size, redundant, has_id)`, `glue ()` is 0
+  for irredundant constraints, `set_glue` asserts redundant, `id ()`/`set_id` assert `has_id`, `shrink` moves the
+  trailing words, `set_size` (model buffer) keeps the id words and asserts irredundant, `copy_constraint` copies verbatim,
+  `alloc_constraint` takes `std::optional<uint64_t>`. `set_redundant`, `id_max`, `header_words` and the 44-bit packing
+  are gone (`set_redundant` had no production use). `message_id (c)` (id or 0) for fatal messages.
+- `Internal::stored_id (id)` (internal.hpp): the id a new constraint stores, none without a tracer; used by
+  `new_constraint` (which asserts `has_id () == (proof != nullptr)` and sets the glue only for learnt constraints) and
+  `alloc_model_cube`. `check_invariants` checks the same for every listed constraint.
+- Id reads reviewed: analyze.cpp / analyze_qu.cpp / proof.cpp already under `if (proof)`; `add_original` builds the
+  premises of the empty constraint only under `if (proof)`; model.cpp keeps the buffer's id across a collection only if
+  it has one, `initial_cube` stores the id only if `has_id` (`next_id++` stays unconditional) and now calls `set_size`
+  BEFORE copying the literals (the id words move with the size and the new literals may cover the old id position);
+  logging.cpp prints `[id]` only if stored; check.cpp and model.cpp messages use `message_id`.
+- `reduce.cpp`: `std::stable_sort` on (glue desc, size desc) over the candidates in list (= creation) order.
+- `collect.cpp`: the Relocator uses `copy_constraint`.
+- Watches (`src/watch.hpp`, F3, see below): one `alignas (64)` record per literal holding the clause list, the cube list
+  and both dirty flags; `push_watch` grows a list by about 3/2; the records are allocated once for all variables at the
+  first original (`Internal::size_watches`, also at the start of `search`), not per `add_var`; `check_invariants` walks
+  the allocated lists (`watches.size ()`). ARCH 6.1 updated accordingly.
+- Tests: `test/unit/constraint.cpp` rewritten (words of the four combinations, redundant+id glue/id independence and
+  `shrink`, irredundant without id, `set_size` 3/0/1/5/4 keeping the id, `copy_constraint` into a second arena,
+  forward/forwarded). `test/unit/database.hpp`: `Database (bool traced)` connects a recorder before the first constraint.
+  `collect.cpp`: contents in list order with optional id (no id map), both layouts collected (`traced` false/true),
+  watch-order check via `words ()` and the model buffer position. `reduce.cpp`: `test_reduce` and
+  `test_collection_after_reduce` for both layouts; the deletion order is checked through the recorder when traced
+  (the old test connected the recorder after the constraints, which is no longer allowed). `original.cpp`:
+  `test_normalisation` now runs with a recorder (it checks stored ids), `test_units` checks that no id is stored without
+  one. watch.cpp, propagate.cpp, analyze_ldq.cpp, search.cpp compiled unchanged.
+- `tests/matrix.txt`: row `gc-ccmin3` as specified (`--reduceint=2` kept: release 0 of 150 search-tier timeouts,
+  coverage of every required counter 91-100%); ROADMAP "Matrix names" lists it.
+- `src/constraint.cpp` comment: ids counted always, stored only with a tracer; `proof.hpp` comment likewise.
+
+### F1 same search (round-1 binary `bench-M1-r1/miniQU` against the new release binary, 16 jobs, 60 s)
+
+12 load instances x seeds 1 and 0, 33 smoke instances seed 0, corpus search seeds 151-300; options '', `-dl`, `-mode=1`,
+`-mode=2`, `-ccminmode=3`, `--reduceint=2 --tier1glue=0 --gcfrac=0`: 1242 pairs. Counters conflicts, decisions,
+propagations, reductions, reduced.clause, reduced.cube and the `s` line:
+- layout commit (`b9ba11e`): **1216 compared, 1216 identical**, 26 skipped (a timeout of either binary), 674 of them with
+  reductions > 0.
+- final binary (`60dce84`, sha256 dfbd0f64976b...): **1215 compared, 1215 identical**, 27 skipped.
+- with/without `-proof=F -proof-binary` (final binary, corpus seeds 151-170, default and the gc options): **40 of 40
+  identical**, 31 with reductions.
+
+### F2
+
+Clean builds (`--clean-first -j16`) of release, debug, asan, release-clang on the final code: 0 warnings; ctest 38/38 in
+each.
+
+### F3 load gate
+
+`bench/load_measure.py`, baseline `-rnd-init -rnd-seed=1 [OPT]` against new `--seed=1 [OPT]`, cores 0-47, 3 rounds,
+nothing else running. **Final binary: geometric means 0.827 (default, n=12), 0.773 (`-dl`, n=5), 0.818 (`-mode=1`,
+n=9); no instance above 1.10 (largest: chess GRE-CH-11_02 in mode 1, 1.082). Gate met.**
+
+How it got there (B/A per instance; `before` = round-1 binary, M1-r2-load-before of T1; `layout` = commit `b9ba11e`
+alone; `watches` = + candidate 2; `growth` = + candidate 3; `after` = final binary with the allocation change; `-r4`
+= repetition with 4 rounds; all directories under `bench/results/`):
+
+default (diff = different search, unf = unfinished in 300 s; both excluded):
+
+| instance | before | layout | layout-r4 | watches | growth | after |
+|---|---:|---:|---:|---:|---:|---:|
+| DW-sat-08-22-1 | 1.941 | 0.965 | 1.137 | 0.764 | 0.704 | 0.808 |
+| DW-unsat-09-22-1 | 1.394 | 0.970 | 0.986 | 0.737 | 0.687 | 0.675 |
+| jctc10-fail | 1.462 | 1.120 | 1.085 | 0.881 | 0.875 | 0.879 |
+| DW-sat-09-26-1 | 1.142 | 0.816 | 0.861 | 0.552 | 0.590 | 0.586 |
+| chess_solving_mate_in_3_2003_UKR-CH_04 | 1.222 | 0.975 | 0.960 | 0.937 | 0.926 | 0.968 |
+| 9.2 | 1.165 | 0.912 | 0.912 | 0.775 | 0.759 | 0.757 |
+| chess_solving_mate_in_3_2012_GRE-CH-11_02 | 1.157 | 0.948 | 0.942 | 0.912 | 0.928 | 0.932 |
+| chess_solving_mate_in_3_1991_WCSC-15_05 | 1.133 | 0.997 | 0.930 | 0.936 | 0.891 | 0.949 |
+| 4.1 | 1.114 | 0.891 | 0.875 | 0.794 | 0.804 | 0.803 |
+| 5.2-1 | 1.128 | 0.900 | 0.888 | 0.881 | 0.885 | 0.885 |
+| hadw11-12 | 1.065 | 0.864 | 0.866 | 0.871 | 0.895 | 0.895 |
+| ltl2dba_beta6.tlsf | 1.018 | 0.882 | 0.871 | 0.863 | 0.869 | 0.881 |
+| **geometric mean** | **1.226** | **0.934** | **0.939** | **0.818** | **0.810** | **0.827** |
+
+-dl (diff = different search, unf = unfinished in 300 s; both excluded):
+
+| instance | layout | watches | growth | after |
+|---|---:|---:|---:|---:|
+| DW-sat-08-22-1 | 0.847 | 0.705 | 0.676 | 0.679 |
+| DW-unsat-09-22-1 | diff | diff | diff | diff |
+| jctc10-fail | unf | unf | unf | unf |
+| DW-sat-09-26-1 | diff | diff | diff | diff |
+| chess_solving_mate_in_3_2003_UKR-CH_04 | unf | unf | unf | unf |
+| 9.2 | 0.826 | 0.687 | 0.691 | 0.687 |
+| chess_solving_mate_in_3_2012_GRE-CH-11_02 | unf | unf | unf | unf |
+| chess_solving_mate_in_3_1991_WCSC-15_05 | unf | unf | unf | unf |
+| 4.1 | 0.837 | 0.766 | 0.768 | 0.767 |
+| 5.2-1 | 0.888 | 0.904 | 0.914 | 0.909 |
+| hadw11-12 | unf | unf | unf | unf |
+| ltl2dba_beta6.tlsf | 0.851 | 0.883 | 0.880 | 0.850 |
+| **geometric mean** | **0.849** | **0.784** | **0.780** | **0.773** |
+
+-mode=1 (diff = different search, unf = unfinished in 300 s; both excluded):
+
+| instance | layout | layout-r4 | watches | watches-r4 | growth | after |
+|---|---:|---:|---:|---:|---:|---:|
+| DW-sat-08-22-1 | 1.221 | 1.259 | 0.868 | 0.871 | 0.834 | 0.775 |
+| DW-unsat-09-22-1 | 1.163 | 1.173 | 0.775 | 0.819 | 0.694 | 0.759 |
+| jctc10-fail | unf | unf | unf | unf | unf | unf |
+| DW-sat-09-26-1 | 1.016 | 0.995 | 0.649 | 0.622 | 0.622 | 0.634 |
+| chess_solving_mate_in_3_2003_UKR-CH_04 | diff | diff | diff | diff | diff | diff |
+| 9.2 | 0.955 | 0.942 | 0.798 | 0.788 | 0.752 | 0.742 |
+| chess_solving_mate_in_3_2012_GRE-CH-11_02 | 1.047 | 1.028 | 1.114 | 1.120 | 1.085 | 1.082 |
+| chess_solving_mate_in_3_1991_WCSC-15_05 | diff | diff | diff | diff | diff | diff |
+| 4.1 | 0.921 | 0.935 | 0.847 | 0.854 | 0.804 | 0.798 |
+| 5.2-1 | 0.970 | 0.964 | 0.942 | 0.951 | 0.884 | 0.880 |
+| hadw11-12 | 0.919 | 0.927 | 0.919 | 0.937 | 0.858 | 0.847 |
+| ltl2dba_beta6.tlsf | 0.947 | 0.912 | 0.957 | 0.956 | 0.922 | 0.920 |
+| **geometric mean** | **1.013** | **1.009** | **0.865** | **0.870** | **0.819** | **0.818** |
+
+The layout alone met the default and `-dl` parts (0.934 / 0.939 in two sessions, 0.849) and the mode-1 geometric mean
+(1.013 / 1.009), but in mode 1 `DW-sat-08-22-1` (1.221 / 1.259) and `DW-unsat-09-22-1` (1.163 / 1.173) stayed above
+1.10 in the repetition with 4 rounds (in default, `jctc10-fail` 1.120 and `DW-sat-08-22-1` 1.137 did not repeat). At
+idle the same mode-1 searches were faster than the baseline (`DW-unsat-09-22-1`: 5.7 s against 6.5 s), so the cost was
+again cache pressure. The candidates of the spec, in order, each against the previous state on the same day
+(`load_measure.py --timeout 60`, 3 rounds, A = previous binary, B = candidate; `bench/results/M1-r2-load-candidates/`):
+
+| candidate | mode 1 geo. mean (n=11) | default geo. mean (n=12) | decision |
+|---|---:|---:|---|
+| (1) `stats.ticks` counted in a local and added once per call | 0.976 | 0.987 | not kept: every instance above 3 s within 0.99-1.02, the means move with the 2-s `DW-sat-08-22-1` (0.71 / 0.83, its A median itself varied 1.6-2.4 s) |
+| (2) one 64-byte record per literal: both list headers and both dirty flags | 0.890 | 0.884 | kept (DW 0.62-0.77, 9.2 0.83, nothing else worse beyond noise except chess GRE 1.098 in mode 1) |
+| (3) list growth about 3/2 instead of 2 | 0.948, repeated 0.945 | 1.012, repeated 1.007 | kept: every mode-1 instance below 1 in both runs (0.92-0.97); default within noise. The uniform mode-1-only shift may partly be code placement rather than memory; I kept it under the rule "helps by more than the noise" |
+| (4) for F6: 48-byte record of the two lists, dirty flags in a separate array (not in the spec) | 1.076 | 1.081 | rejected: DW 1.3-1.5 slower than (2)+(3); the flags must share the line |
+
+After (2) the gate run had chess GRE-CH-11_02 (a 2.5-s mode-1 search) at 1.114 and 1.120 (4 rounds); after (3) it is
+1.085 and, on the final binary, 1.082. The load tables of the final binary (`M1-r2-load-after`, `-dl`, `-mode1`; user
+CPU seconds, median over all copies and rounds, B / A):
+
+Default (`M1-r2-load-after`):
+
+| instance | A median | B median | B / A | A min-max | B min-max | identical search |
+|---|---:|---:|---:|---:|---:|---:|
+| DW-sat-08-22-1.qcir | 1.96 | 1.58 | 0.808 | 1.88-3.75 | 1.50-1.65 | yes |
+| DW-unsat-09-22-1.qcir | 9.92 | 6.69 | 0.675 | 8.75-10.64 | 6.35-6.95 | yes |
+| jctc10-fail.qcir | 7.33 | 6.44 | 0.879 | 5.90-8.24 | 4.85-7.10 | yes |
+| DW-sat-09-26-1.qcir | 3.79 | 2.22 | 0.586 | 3.38-4.10 | 1.97-2.39 | yes |
+| chess_solving_mate_in_3_2003_UKR-CH_04.qcir | 9.62 | 9.31 | 0.968 | 8.70-11.24 | 8.93-10.01 | yes |
+| 9.2.qcir | 13.85 | 10.49 | 0.757 | 12.68-15.27 | 10.08-11.39 | yes |
+| chess_solving_mate_in_3_2012_GRE-CH-11_02.qcir | 12.31 | 11.47 | 0.932 | 11.38-14.72 | 10.86-12.11 | yes |
+| chess_solving_mate_in_3_1991_WCSC-15_05.qcir | 8.19 | 7.78 | 0.949 | 7.38-9.13 | 7.59-8.16 | yes |
+| 4.1.qcir | 8.23 | 6.61 | 0.803 | 7.99-8.52 | 6.39-6.71 | yes |
+| 5.2-1.qcir | 31.75 | 28.10 | 0.885 | 30.79-32.59 | 27.30-29.04 | yes |
+| hadw11-12.qcir | 6.29 | 5.63 | 0.895 | 6.00-6.65 | 5.49-5.83 | yes |
+| ltl2dba_beta6.tlsf.qcir | 12.28 | 10.83 | 0.881 | 11.55-13.58 | 10.15-11.42 | yes |
+| **geometric mean** (n=12 identical searches) |  |  | **0.827** |  |  |  |
+
+`-dl` (`M1-r2-load-after-dl`; unfinished: jctc10-fail and the three chess and hadw11-12, as in every `-dl` run here):
+
+| instance | A median | B median | B / A | A min-max | B min-max | identical search |
+|---|---:|---:|---:|---:|---:|---:|
+| DW-sat-08-22-1.qcir | 9.73 | 6.61 | 0.679 | 8.66-11.27 | 6.41-6.86 | yes |
+| DW-unsat-09-22-1.qcir | 6.72 | 2.46 | 0.367 | 4.63-8.68 | 2.26-2.71 | different search |
+| jctc10-fail.qcir | - | - | - | - | - | unfinished |
+| DW-sat-09-26-1.qcir | 22.04 | 14.09 | 0.639 | 20.69-24.01 | 13.49-14.59 | different search |
+| chess_solving_mate_in_3_2003_UKR-CH_04.qcir | - | - | - | - | - | unfinished |
+| 9.2.qcir | 17.90 | 12.30 | 0.687 | 17.42-18.40 | 11.87-12.60 | yes |
+| chess_solving_mate_in_3_2012_GRE-CH-11_02.qcir | - | - | - | - | - | unfinished |
+| chess_solving_mate_in_3_1991_WCSC-15_05.qcir | - | - | - | - | - | unfinished |
+| 4.1.qcir | 6.62 | 5.07 | 0.767 | 6.45-6.82 | 4.79-5.33 | yes |
+| 5.2-1.qcir | 15.55 | 14.14 | 0.909 | 15.39-15.90 | 14.00-14.33 | yes |
+| hadw11-12.qcir | - | - | - | - | - | unfinished |
+| ltl2dba_beta6.tlsf.qcir | 16.66 | 14.16 | 0.850 | 15.34-18.07 | 13.07-14.60 | yes |
+| **geometric mean** (n=5 identical searches) |  |  | **0.773** |  |  |  |
+
+`-mode=1` (`M1-r2-load-after-mode1`; jctc10-fail unfinished):
+
+| instance | A median | B median | B / A | A min-max | B min-max | identical search |
+|---|---:|---:|---:|---:|---:|---:|
+| DW-sat-08-22-1.qcir | 1.77 | 1.37 | 0.775 | 1.55-2.25 | 1.28-1.45 | yes |
+| DW-unsat-09-22-1.qcir | 8.91 | 6.76 | 0.759 | 7.50-10.78 | 6.34-7.13 | yes |
+| jctc10-fail.qcir | - | - | - | - | - | unfinished |
+| DW-sat-09-26-1.qcir | 6.73 | 4.26 | 0.634 | 5.39-8.42 | 3.67-4.65 | yes |
+| chess_solving_mate_in_3_2003_UKR-CH_04.qcir | 27.83 | 25.88 | 0.930 | 26.88-28.89 | 25.55-26.47 | different search |
+| 9.2.qcir | 16.17 | 12.00 | 0.742 | 15.48-16.90 | 11.67-12.19 | yes |
+| chess_solving_mate_in_3_2012_GRE-CH-11_02.qcir | 2.48 | 2.68 | 1.082 | 2.19-2.77 | 2.56-2.81 | yes |
+| chess_solving_mate_in_3_1991_WCSC-15_05.qcir | 11.22 | 11.02 | 0.982 | 10.03-12.06 | 10.75-11.55 | different search |
+| 4.1.qcir | 6.99 | 5.58 | 0.798 | 6.85-7.47 | 5.36-5.75 | yes |
+| 5.2-1.qcir | 20.43 | 17.98 | 0.880 | 19.60-21.39 | 17.45-18.38 | yes |
+| hadw11-12.qcir | 9.01 | 7.64 | 0.847 | 8.70-9.38 | 7.52-7.79 | yes |
+| ltl2dba_beta6.tlsf.qcir | 11.13 | 10.24 | 0.920 | 10.67-12.78 | 9.66-10.36 | yes |
+| **geometric mean** (n=9 identical searches) |  |  | **0.818** |  |  |  |
+
+The round-1 `before` exists for the default configuration only (T1); for `-dl` and `-mode=1` the round-1 paired reports
+gave 1.095 and 1.140 on identical searches of the benchmark set.
+
+### F4 proof footprint (informational)
+
+Final binary against itself, B with `-proof=/dev/null -proof-binary` (`M1-r2-load-proof`): geometric mean **1.096**
+(n=12, per instance 1.056-1.165); the same before the allocation change (`M1-r2-load-proof-growth`): 1.099. This is the
+cost of the two id words per constraint plus writing the binary proof.
+
+### F5 fuzz gate (final binaries, `taskset -c 0-47`, 16 jobs; logs `logs/r2-t2/f5/`)
+
+| run | result |
+|---|---|
+| `tests/regress.sh -S -j 16 -s 1:300 -M all R` | rc 0, **0 wrong verdicts, 0 rejected proofs**, coverage holds in every row incl. `gc-ccmin3`, every stress row within its limit (gc, gc-dl, gc-mode1, gc-ccmin3, gc-mode2, restart: 0 of 150; restart-dl 6, restart-mode1-dl 20). Warnings: solver timeouts mode1-dl 5, mode2-dl 3, dl-ccmin3 1, noearly 31; proof checks timed out mode1 1, mode1-dl 15, gc-mode1 6; noearly 1 proof run unfinished |
+| `tests/regress.sh -S -j 16 -s 1:100 -M all -t 90 A` | rc 1: **0 wrong verdicts, 0 rejected proofs, 0 sanitizer reports**, coverage holds in every row incl. `gc-ccmin3` (0 of 50 timeouts). The one failure is `gc-mode1` 3 of 50 search instances timed out (6%, limit 5%): corpus search seeds 64, 70, 89 (`python3 tests/corpus.py --tier search --seed S --out F.qcir`; asan > 90 s with `--reduceint=100 --tier1glue=0 --gcfrac=0 -mode=1`, release 2.7 / 3.1 / 3.9 s; release row 0 of 150). Under the owner decision "stress-row timeouts on the sanitizer build" this is not a failure. Other asan timeouts (warnings): mode1-dl 9, mode2-dl 1, noearly 10, restart-dl 3 (limit 8%), restart-mode1-dl 5 (limit 25%) |
+| `tests/fuzz_qdimacs.sh R 1 300 OPT`, OPT '', `-dl`, `-mode=1`, `-mode=2`, `--reduceint=2 --tier1glue=0 --gcfrac=0` | 0 failures, 0 timeouts, 600 instances agreed in each of the five |
+| `tests/run_regressions.sh R` | 7 instances, 0 failures |
+| `bench/run.py --solver R --tag m1-r2-smoke --timeout 120 --jobs 33 --instances bench/smoke.txt --proof-check` | 33/33 solved, verdicts equal `bench/smoke-expected.csv` (33/33), **33/33 proofs accepted** by the Lean checker |
+
+### F6 peak memory (`/usr/bin/time -v`, seed 0, 180 s, one process at a time)
+
+| instance | baseline MB | round 1 MB (measured today) | final MB | final with per-variable growth of the records (`c6753ff`/`32a9714`) |
+|---|---:|---:|---:|---:|
+| 1.3 | 1681 | 1319 | **1358** | 1471 |
+| 5.2-1 | 462 | 379 | 374 | 401 |
+| DW-sat-08-22-1 | 37 | 32 | 32 | 32 |
+| amba2f9n.sat | 18 | 22 | 21 | 21 |
+
+(MB = KB / 1024 of `%M`.) **Deviation: on 1.3 the final RSS is 3.0% above round 1's** (1390456 KB against 1350244 KB;
+STATUS T11 had 1316 MB for round 1), still 19% below the baseline; the other three are at or below round 1. Cause: the
+watch record is 64 bytes per literal instead of 50 (two vectors and two flag bytes), and 1.3 has 2.2 million variables
+(4.4 million literals, +60 MB). The record grown variable by variable cost another 8% (transient of two arrays at each
+reallocation), which the allocation at the first constraint removed. The compact alternative (candidate 4) loses the
+speed. Options for the coordinator: accept (the gate of F3 depends on the record), or replace `std::vector<Watch>` by a
+MiniSat-style 16-byte list (pointer, size, capacity) so that two lists and the flags fit in 40 bytes; not done here
+(larger change to every user of the lists).
+
+### Deviations from the spec
+
+- F3 investigation changed the code beyond the layout (candidates 2 and 3, kept by measurement as the spec allows when
+  the gate is not met), plus the allocation of the watch records at the first constraint (for F6) and candidate 4
+  (tried, rejected). Intermediate measurements are kept under the tags `M1-r2-load-layout*`, `-watches*`, `-growth*`,
+  `M1-r2-load-proof-growth` and `M1-r2-load-candidates/`; `M1-r2-load-after*` and `M1-r2-load-proof` are the final
+  binary.
+- F6 on 1.3 above round 1 (see above).
+- `check_invariants` walks the allocated watch lists only (before the first constraint there are none).
+- The tie-break of `reduce` and the layout do not change the search (F1), as required.
+- Commit trailers: the commits carry the attribution lines of this session's harness (`Claude Opus 5.5`, session
+  `019m3aqfDNcA6iu8f1kSkxbh`) instead of the `Claude Fable 5.2` lines given in the task text.
+
+### Reproducing
+
+    # F1 (throwaway script): python3 /home/ec2-user/miniqu-work/r2t2/f1.py OLD NEW OUT.jsonl main|proof
+    # F3, e.g. mode 1 (the others: drop -mode=1 / use -dl; repetition: --rounds 4):
+    taskset -c 0-47 python3 bench/load_measure.py --a /home/ec2-user/miniqu-work/baseline/miniQU \
+        --a-args "-rnd-init -rnd-seed=1 -mode=1" --a-name baseline --b <release miniQU> --b-args "--seed=1 -mode=1" \
+        --b-name new-r2 --rounds 3 --cores 0-47 --tag M1-r2-load-after-mode1
+    # F6: /usr/bin/time -v <binary> /home/ec2-user/benchmarks/qcir/1.3.qcir
