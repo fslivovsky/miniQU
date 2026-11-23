@@ -51,7 +51,8 @@ public:
   // the output or when there is none.
   void add_original (Kind, std::span<const int> lits, int proof_gate = 0);
 
-  // Protects a variable from elimination.
+  // Protects a variable from elimination.  Until elimination exists (M3) it
+  // only checks that the variable was declared and has no other effect.
   void freeze (int var);
 
   // The tracer receives every proof step from now on.

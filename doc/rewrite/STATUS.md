@@ -1721,3 +1721,74 @@ them. They stay as they are unless the measurement of R2-T2 on the real implemen
 ### Worker tasks of M1 round 2 (in this order; specs in the workflow, summary in ROADMAP "M1 round 2")
 
 - **R2-T1** tooling and clean-ups. - **R2-T2** constraint layout, measurements, gate.
+
+## M1-R2-T1 Bench tooling for B1 and clean-ups (worker, 2026-11-23)
+
+What exists now:
+- `bench/load_measure.py` + `bench/load-instances.txt` (the reviewer's twelve instances) + `bench/test_load_measure.py`
+  (ctest `bench-load-measure`, fake solvers; second case checks `different search`). Arms run in separate
+  rounds (A, B, A, B, ...), copy k of instance j on core `k*12+j` of `--cores` in both arms, user CPU time from
+  `os.wait4`, conflict counts via the new `run.parse_stats_text` (run.py's regexes, refactored out of `parse_stats`).
+  Refuses to start if more processes than cores or if `pgrep -af` finds `/miniQU`, `bench/run.py` or
+  `load_measure.py` processes other than its own ancestors (`--force` overrides). Gotcha: when launching it
+  detached from an agent shell, the shell wrapper's command line contains these words; start it through a small
+  launcher script that sleeps 5 s first (what I did: `/home/ec2-user/miniqu-work/logs/launch-load.sh`).
+  `--a-args`/`--b-args` accept values starting with `--` (`glue_arguments`).
+- `bench/paired.py`: section `## Identical searches` after `## Result` (class `IdenticalSearches`, constants
+  `MIN_CPU`, `FAMILY_MIN_N`, `FAMILY_LIMIT`) and the list "Order in which the runs started" in `## Parameters`;
+  tests in `bench/test_compare.py` (`IdenticalSearchTest`: geometric mean 1.5 / counts, exclusions, family mark,
+  run order, no stats.csv); `bench/README.md` documents both.
+- Part C: `struct Last` and `Internal::last` removed (no other use in src/ or test/), `freeze` comment corrected.
+
+Identical-search numbers regenerated from the committed CSVs (`bench/results/M1-r1-reports/*-paired-v2.md`; the
+round-1 reports are unchanged). Acceptance check against the review: all equal.
+
+| config | seed 1 | seed 2 | seed 3 | pooled per instance |
+|---|---|---|---|---|
+| default | 1.133 (n=39) | 1.125 (39) | 1.058 (37) | 1.119 (51) |
+| dl | 1.104 (40) | 1.074 (42) | 1.111 (30) | 1.095 (50) |
+| mode1 | 1.140 (35) | | | |
+| mode2 | 1.026 (33) | | | |
+| ccmin3 | 0.910 (4) | | | |
+
+Families marked `> 1.10` in default: DW (6 instances, 1.279), chess (16, 1.138), hadw (3, 1.166), jctc (4, 1.293);
+`numeric` (15) is at 1.013.
+
+Reproducing commands (options of compare.py go before the `--`):
+
+    B=baseline-c96; M=M1-r1
+    python3 bench/compare.py --paired --out bench/results/M1-r1-reports/default-paired-v2.md \
+        $B-default-t60-s{1,2,3} -- $M-default-s{1,2,3}      # likewise dl (3 seeds), mode1, mode2, ccmin3 (seed 1)
+
+Load measurement `M1-r2-load-before` (round-1 binary sha256 a48a1a946f47... against the baseline, nothing else
+running, 48 processes, 3 rounds per arm, 25 s to 40 s per round; log in the work dir):
+
+    taskset -c 0-47 python3 bench/load_measure.py --a /home/ec2-user/miniqu-work/baseline/miniQU \
+        --a-args "-rnd-init -rnd-seed=1" --a-name baseline --b /home/ec2-user/miniqu-work/build/bench-M1-r1/miniQU \
+        --b-args "--seed=1" --b-name new-r1 --rounds 3 --cores 0-47 --tag M1-r2-load-before
+
+User CPU seconds, median over all copies and rounds; ratio is B / A.
+
+| instance | A median | B median | B / A | A min-max | B min-max | identical search |
+|---|---:|---:|---:|---:|---:|---:|
+| DW-sat-08-22-1.qcir | 1.99 | 3.86 | 1.941 | 1.91-3.36 | 2.31-4.57 | yes |
+| DW-unsat-09-22-1.qcir | 9.48 | 13.22 | 1.394 | 8.07-11.08 | 11.79-14.27 | yes |
+| jctc10-fail.qcir | 6.78 | 9.92 | 1.462 | 6.32-8.18 | 9.67-11.72 | yes |
+| DW-sat-09-26-1.qcir | 3.85 | 4.39 | 1.142 | 3.47-4.15 | 4.09-4.65 | yes |
+| chess_solving_mate_in_3_2003_UKR-CH_04.qcir | 9.99 | 12.22 | 1.222 | 9.21-11.81 | 10.59-13.27 | yes |
+| 9.2.qcir | 13.79 | 16.06 | 1.165 | 12.67-15.01 | 15.14-16.80 | yes |
+| chess_solving_mate_in_3_2012_GRE-CH-11_02.qcir | 12.52 | 14.49 | 1.157 | 10.93-13.50 | 13.23-16.63 | yes |
+| chess_solving_mate_in_3_1991_WCSC-15_05.qcir | 8.41 | 9.53 | 1.133 | 7.30-9.57 | 8.47-10.30 | yes |
+| 4.1.qcir | 8.28 | 9.22 | 1.114 | 7.90-8.55 | 8.92-9.42 | yes |
+| 5.2-1.qcir | 31.66 | 35.70 | 1.128 | 30.80-32.91 | 34.55-36.95 | yes |
+| hadw11-12.qcir | 6.23 | 6.64 | 1.065 | 5.98-6.73 | 6.17-7.20 | yes |
+| ltl2dba_beta6.tlsf.qcir | 12.31 | 12.53 | 1.018 | 11.50-13.50 | 11.43-13.10 | yes |
+| **geometric mean** (n=12 identical searches) |  |  | **1.226** |  |  |  |
+
+Geometric mean 1.226 over 12 identical searches (conflict counts equal in all 288 runs): the reviewer's 1.23
+reproduces with the new tool. The ranges of A and B do not overlap for 8 of 12 instances.
+
+Checks: all four presets (release, debug, asan, release-clang) build without warnings and pass ctest (38 tests);
+`tests/regress.sh -S -j 16 -s 1:40 -M default,dl` on the release build passed (0 warnings). No proofs involved in
+this package. Nothing failed; the only deviation from the spec is that the `-verb=1` goes after the user's
+arguments and before the instance, and `-rnd-init` etc. are passed through unchanged.

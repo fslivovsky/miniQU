@@ -105,7 +105,6 @@ struct Internal {
   Profiles profiles{0};
   Limit lim;
   Inc inc;
-  Last last;
 
   Prefix prefix;
 

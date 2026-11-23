@@ -21,12 +21,6 @@ struct Inc {
   double adjust = 0; // current conflicts between two growths
 };
 
-// Conflict count when each pass last ran, to compute the effort since.
-struct Last {
-  int64_t restart = 0;
-  int64_t reduce = 0;
-};
-
 } // namespace miniqu
 
 #endif
