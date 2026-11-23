@@ -138,31 +138,81 @@ ratios. Without `stats.csv` it says `no instance with equal conflict counts`.
 ## load_measure.py
 
     python3 bench/load_measure.py --a BIN --a-args "-rnd-init -rnd-seed=1" --b BIN --b-args "--seed=1" \
-        --tag TAG [--a-name N] [--b-name N] [--instances bench/load-instances.txt] [--copies 4] \
-        [--rounds 2] [--cores 0-47] [--timeout 300] [--bench-dir DIR] [--force]
+        --tag TAG [--a-name N] [--b-name N] [--instances bench/load-instances.txt] [--rounds 2] \
+        [--cores 0-47] [--timeout 60] [--bench-dir DIR] [--force]
 
-CPU time (user) of two binaries on **identical searches under benchmark-like load**. The twelve
-instances of `bench/load-instances.txt` (the reviewer's list of M1 round 1) run in `--copies`
-copies, one process per core, copy k of instance j on core number `k * instances + j` of `--cores`
-(the same core in both arms). The arms run in **separate rounds** (A, B, A, B, ...): all processes
-alive at one time are the same binary. The machine has L3 caches of 32 MB shared by 8 cores each;
-on an idle machine, or with the two binaries interleaved, a binary with a larger cache footprint
-is hidden, because the neighbours of a process are not copies of itself. A benchmark run (one
-binary, every core busy) is the situation all later milestones are judged in, so memory-layout
-decisions (ARCHITECTURE 5.2: header size, glue and id words) are measured with this script and
-not on an idle machine. The script refuses to start if more processes than cores are requested
-or another solver (a process named `miniQU`), `bench/run.py` or `load_measure.py` is running, judged by the
-processes' argv, not by words in command lines (`--force` overrides and is noted in the report); it must be the only heavy job on the machine.
+CPU time (user) of two binaries on **identical searches under the load of a benchmark run**.
+
+*Placement.* `run.py` hands the name-sorted instances to the cores one by one, so the 8 cores that
+share an L3 cache (the machine has 12 caches of 8 cores) run 8 neighbouring names, usually one
+family, and a core takes the next job as soon as its job ends. `load_measure.py` reproduces
+this: `bench/load-instances.txt` is a list of **groups**, blocks of at most 8 instance names
+separated by blank lines (`#` comment lines above a block say why it was chosen). Group g runs
+on the g-th L3 group of `--cores`, instance j of the group on the j-th core of that L3 group.
+Every group must be a window of consecutive names of the sorted instance list (checked).
+`--cores` must consist of whole L3 groups (read from sysfs; default: the lower half, six
+groups); more file groups than L3 groups, more than 8 names in a group, or a group larger than
+its L3 group is an error. L3 groups without a file group stay idle, and so do the remaining cores
+of a group with fewer than 8 names (the report header says which). The shipped file has six
+windows: the DW window (mandatory: CM-unsat-07-01-06-2 ... DW-unsat-11-26-1), two numeric ones
+(4.1 and 5.2-1 regions), chess mate_in_2, chess mate_in_3 (with
+chess_solving_mate_in_3_2014_FRA-CH_03) and hadw10-11/hadw11-12; each holds at least three
+instances with identical searches and 1-60 s baseline CPU time in the round-2 benchmark runs.
+No other family has such a window, hence two numeric windows.
+
+*Rounds.* The arms run in **separate rounds** (A, B, A, B, ...): all processes alive at one
+time are the same binary, because on an idle machine or with the two binaries interleaved a
+binary with a larger cache footprint is hidden. In a round every core runs its instance in a
+loop, restarting as soon as it ends, so that all cores stay busy; a single run is limited by
+`--timeout`. The round ends when every core has completed at least one run (verdict or timeout);
+the remaining processes are then killed and their unfinished runs discarded. Every completed run
+is one CSV row; `copy` is the index of the run in the loop of its core.
+
+The script refuses to start if another solver (a process named `miniQU`), `bench/run.py` or
+`load_measure.py` is running, judged by the processes' argv, not by words in command lines
+(`--force` overrides and is noted in the report); it must be the only heavy job on the machine.
 
 Every solver runs with `-verb=1` appended to its arguments. Output in `bench/results/TAG/`:
 `load.csv` (arm, round, instance, copy, core, result, user, sys, conflicts), `meta.json` (both
-binaries with path, sha256 and arguments, cores, copies, rounds, date, host, the order of the
-rounds with start times) and `load.md`: per instance the median user time of A and B over all
-copies and rounds, the ratio B / A, the min-max of each arm, and whether the conflict counts
-(from `c stat conflicts N` or the baseline's `conflicts :` line) are equal in every run of both
-arms. Rows with different counts are marked `different search` and left out of the geometric mean
-in the last row; an instance with a timeout or another exit code than 10 / 20 is `unfinished` and
-also left out. `bench/test_load_measure.py` (ctest) tests the bookkeeping with fake solvers.
+binaries with path, sha256 and arguments, cores, groups with their cores, rounds, timeout, date,
+host, the order of the rounds with start times) and `load.md`: the placement ("L3 groups, cores
+kept busy"), per instance the median user time of A and B over all completed runs and rounds,
+the ratio B / A, the min-max of each arm and whether the conflict counts (from `c stat conflicts
+N` or the baseline's `conflicts :` line) are equal in every run of both arms; then a table per
+group (first instance, why it was chosen, n of identical searches, geometric mean of B / A).
+Rows with different counts are marked `different search` and left out of the geometric means;
+an instance with a timeout or another exit code than 10 / 20 is `unfinished` and also left out.
+`bench/test_load_measure.py` (ctest) tests the bookkeeping with fake solvers and a fake sysfs tree.
+
+Results with tags `M1-r2-load-*` were measured with the old placement (copies of the instances
+spread over cores, families mixed inside an L3 group, a core idle once its instance was solved).
+That placement reported the round-2 binary as faster where benchmark runs show it slower; those
+results are **not evidence** about benchmark runs.
+
+## l3.sh, cross.sh, nb.sh
+
+Shell reproducers of the L3 effect on one cache (cores inside one L3 group, checked; exit 2
+otherwise). Run them on the lower half of an idle machine and only while no `run.py` runs; they
+kill only the process groups they started.
+
+    # per-process user time of arms on the DW window, one process per core, arms one after the other
+    taskset -c 0-47 bench/l3.sh [-c BASECORE=0] [-t SECONDS=40] [-r ROUNDS=2] [-a "EXTRA ARGS"] \
+        [-i "INSTANCE NAMES"] OUT base=/home/ec2-user/miniqu-work/baseline/miniQU \
+        r2=/home/ec2-user/miniqu-work/build/bench-M1-r2/miniQU
+    # one target against loops of the DW neighbours with baseline or new binaries (env BASE, NEW, BASECORE=8)
+    taskset -c 0-47 bench/cross.sh DW-unsat-10-25-1
+    # seven warmed-up copies of one instance as neighbours, the baseline as target (env BASE, NEW, BASECORE=24)
+    taskset -c 0-47 bench/nb.sh DW-unsat-10-25-1 20 DW-unsat-09-22-1 [name="binary args" ...]
+
+`l3.sh` appends one line `ROUND ARM INSTANCE USER SYS EXIT` per process to OUT (which must not
+exist) and prints `l3_table.py OUT`: the mean user seconds of the first arm and, for every other
+arm, its mean and the ratio to the first arm per instance, the geometric mean in the last row.
+Instances with an exit status other than 10 or 20 in any run are left out (a timeout is only a
+neighbour). An arm named `base*`, or whose binary is the frozen baseline, gets `-rnd-init
+-rnd-seed=1`, every other arm `--seed=1`; `-a` arguments are appended for all arms.
+`cross.sh` prints the user time of the target for all four combinations of target binary and
+neighbour binary (is the new binary slower itself, or does it hurt its neighbours); `nb.sh`
+prints the time of a baseline target next to neighbours of each given kind.
 
 ## fidelity.py and overhead.py
 

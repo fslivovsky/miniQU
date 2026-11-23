@@ -1,12 +1,67 @@
+# Groups of instances for bench/load_measure.py.  One group per L3 cache (8 cores) of --cores,
+# instance j of a group on core j of the L3 group.  Every group is a window of 8 consecutive
+# names of the sorted instance list, because that is what shares an L3 cache in a benchmark run
+# (bench/run.py hands out the sorted names one per core).  A group is a block of names separated
+# from the next by a blank line; the comment above it says why it was chosen.  Each window holds
+# at least three instances with identical searches and 1-60 s baseline CPU time in the round-2
+# benchmark runs (M1-r2-default-s1 against baseline-c96-default-t60-s1).
+
+# CM/DW (mandatory). Reviewer's L3 reproducer of round 2: DW-sat/unsat 08-22 ... 11-26 run 1.14-1.27 times slower in benchmark runs; 6 instances with identical searches at 2-52 s.
+CM-unsat-07-01-06-2.qcir
 DW-sat-08-22-1.qcir
-DW-unsat-09-22-1.qcir
-jctc10-fail.qcir
+DW-sat-08-23-1.qcir
 DW-sat-09-26-1.qcir
-chess_solving_mate_in_3_2003_UKR-CH_04.qcir
-9.2.qcir
-chess_solving_mate_in_3_2012_GRE-CH-11_02.qcir
-chess_solving_mate_in_3_1991_WCSC-15_05.qcir
+DW-unsat-09-22-1.qcir
+DW-unsat-09-23-1.qcir
+DW-unsat-10-25-1.qcir
+DW-unsat-11-26-1.qcir
+
+# numeric, the 4.1 region (10.1 ... 4.1): 6 instances with identical searches at 1.1-43 s, long numeric runs next to short ones.
+10.1.qcir
+10.2.qcir
+11.1.qcir
+2.1.qcir
+2.2.qcir
+3.1.qcir
+3.2.qcir
 4.1.qcir
+
+# numeric, the 5.2-1 region (5.2-1 ... CM-sat-04-01-06-3): 4 instances with identical searches (8.1, 9.1, 9.2, 9.3) at 2-17 s. No third family has a window with three qualifying instances, so this is a second numeric window.
 5.2-1.qcir
+5.2-2.qcir
+5.2-3.qcir
+8.1.qcir
+9.1.qcir
+9.2.qcir
+9.3.qcir
+CM-sat-04-01-06-3.qcir
+
+# chess mate_in_2 (1982 ... 2002): 3 instances with identical searches at 1.2-1.4 s, short runs that change often.
+chess_solving_mate_in_2_1982_WCSC-6_02.qcir
+chess_solving_mate_in_2_1983_FIN-CH-4_01.qcir
+chess_solving_mate_in_2_1987_FIN-CH-8_01.qcir
+chess_solving_mate_in_2_1991_GER-CH-15_01.qcir
+chess_solving_mate_in_2_1996_FIN-CH-17_03.qcir
+chess_solving_mate_in_2_1997_WCCC-OPEN-40_03.qcir
+chess_solving_mate_in_2_1998_GBR-CH-19_01.qcir
+chess_solving_mate_in_2_2002_MAC-CH-6_03.qcir
+
+# chess mate_in_3 (2001_UKR-CH_06 ... 2014_FRA-CH_03): 6 instances with identical searches at 5-13 s, contains chess_solving_mate_in_3_2014_FRA-CH_03.
+chess_solving_mate_in_3_2001_UKR-CH_06.qcir
+chess_solving_mate_in_3_2003_UKR-CH_04.qcir
+chess_solving_mate_in_3_2008_ISC-4B_07.qcir
+chess_solving_mate_in_3_2010_UKR-CH_04.qcir
+chess_solving_mate_in_3_2011_UKR-OPEN-25_04.qcir
+chess_solving_mate_in_3_2012_GRE-CH-11_02.qcir
+chess_solving_mate_in_3_2012_NED-CH-18B_04.qcir
+chess_solving_mate_in_3_2014_FRA-CH_03.qcir
+
+# hadw10-11, hadw11-12 with ex, finan, finding_nemo and genbuf neighbours: 3 instances with identical searches (finding_nemo_1, hadw10-11, hadw11-12) at 3-12 s.
+ex92_7S700.qcir
+finan01-finan01_mov.qcir
+finan01_mov-finan01.qcir
+finding_nemo_1.tlsf.qcir
+genbuf10b4n.unsat.qcir
+genbuf9b4n.unsat.qcir
+hadw10-11.qcir
 hadw11-12.qcir
-ltl2dba_beta6.tlsf.qcir
