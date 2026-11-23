@@ -1,0 +1,25 @@
+## cross.sh DW-sat-08-23-1, NEW = r3-pre
+DW-sat-08-23-1 target=base neighbours=base round=1 user=1.64
+DW-sat-08-23-1 target=base neighbours=new round=1 user=2.04
+DW-sat-08-23-1 target=new neighbours=base round=1 user=1.42
+DW-sat-08-23-1 target=new neighbours=new round=1 user=1.45
+DW-sat-08-23-1 target=base neighbours=base round=2 user=1.47
+DW-sat-08-23-1 target=base neighbours=new round=2 user=1.50
+DW-sat-08-23-1 target=new neighbours=base round=2 user=1.39
+DW-sat-08-23-1 target=new neighbours=new round=2 user=1.39
+## cross.sh DW-sat-08-23-1, NEW = r2
+DW-sat-08-23-1 target=base neighbours=base round=1 user=1.52
+DW-sat-08-23-1 target=base neighbours=new round=1 user=2.31
+DW-sat-08-23-1 target=new neighbours=base round=1 user=1.74
+DW-sat-08-23-1 target=new neighbours=new round=1 user=2.53
+DW-sat-08-23-1 target=base neighbours=base round=2 user=2.15
+DW-sat-08-23-1 target=base neighbours=new round=2 user=2.32
+DW-sat-08-23-1 target=new neighbours=base round=2 user=1.59
+DW-sat-08-23-1 target=new neighbours=new round=2 user=2.54
+## nb.sh DW-unsat-11-26-1 12 DW-sat-08-23-1
+neigh=DW-unsat-11-26-1(base) target=base user=1.40
+neigh=DW-unsat-11-26-1(r2) target=base user=2.16
+neigh=DW-unsat-11-26-1(new) target=base user=1.43
+neigh=DW-unsat-11-26-1(base) target=base user=1.40
+neigh=DW-unsat-11-26-1(r2) target=base user=2.16
+neigh=DW-unsat-11-26-1(new) target=base user=1.43

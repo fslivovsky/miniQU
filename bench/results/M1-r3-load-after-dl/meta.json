@@ -1,0 +1,186 @@
+{
+  "tag": "M1-r3-load-after-dl",
+  "cores": "0-47",
+  "rounds": 2,
+  "groups": [
+    {
+      "comment": "CM/DW (mandatory). Reviewer's L3 reproducer of round 2: DW-sat/unsat 08-22 ... 11-26 run 1.14-1.27 times slower in benchmark runs; 6 instances with identical searches at 2-52 s.",
+      "instances": [
+        "CM-unsat-07-01-06-2.qcir",
+        "DW-sat-08-22-1.qcir",
+        "DW-sat-08-23-1.qcir",
+        "DW-sat-09-26-1.qcir",
+        "DW-unsat-09-22-1.qcir",
+        "DW-unsat-09-23-1.qcir",
+        "DW-unsat-10-25-1.qcir",
+        "DW-unsat-11-26-1.qcir"
+      ],
+      "l3_cores": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ]
+    },
+    {
+      "comment": "numeric, the 4.1 region (10.1 ... 4.1): 6 instances with identical searches at 1.1-43 s, long numeric runs next to short ones.",
+      "instances": [
+        "10.1.qcir",
+        "10.2.qcir",
+        "11.1.qcir",
+        "2.1.qcir",
+        "2.2.qcir",
+        "3.1.qcir",
+        "3.2.qcir",
+        "4.1.qcir"
+      ],
+      "l3_cores": [
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15
+      ]
+    },
+    {
+      "comment": "numeric, the 5.2-1 region (5.2-1 ... CM-sat-04-01-06-3): 4 instances with identical searches (8.1, 9.1, 9.2, 9.3) at 2-17 s. No third family has a window with three qualifying instances, so this is a second numeric window.",
+      "instances": [
+        "5.2-1.qcir",
+        "5.2-2.qcir",
+        "5.2-3.qcir",
+        "8.1.qcir",
+        "9.1.qcir",
+        "9.2.qcir",
+        "9.3.qcir",
+        "CM-sat-04-01-06-3.qcir"
+      ],
+      "l3_cores": [
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23
+      ]
+    },
+    {
+      "comment": "chess mate_in_2 (1982 ... 2002): 3 instances with identical searches at 1.2-1.4 s, short runs that change often.",
+      "instances": [
+        "chess_solving_mate_in_2_1982_WCSC-6_02.qcir",
+        "chess_solving_mate_in_2_1983_FIN-CH-4_01.qcir",
+        "chess_solving_mate_in_2_1987_FIN-CH-8_01.qcir",
+        "chess_solving_mate_in_2_1991_GER-CH-15_01.qcir",
+        "chess_solving_mate_in_2_1996_FIN-CH-17_03.qcir",
+        "chess_solving_mate_in_2_1997_WCCC-OPEN-40_03.qcir",
+        "chess_solving_mate_in_2_1998_GBR-CH-19_01.qcir",
+        "chess_solving_mate_in_2_2002_MAC-CH-6_03.qcir"
+      ],
+      "l3_cores": [
+        24,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30,
+        31
+      ]
+    },
+    {
+      "comment": "chess mate_in_3 (2001_UKR-CH_06 ... 2014_FRA-CH_03): 6 instances with identical searches at 5-13 s, contains chess_solving_mate_in_3_2014_FRA-CH_03.",
+      "instances": [
+        "chess_solving_mate_in_3_2001_UKR-CH_06.qcir",
+        "chess_solving_mate_in_3_2003_UKR-CH_04.qcir",
+        "chess_solving_mate_in_3_2008_ISC-4B_07.qcir",
+        "chess_solving_mate_in_3_2010_UKR-CH_04.qcir",
+        "chess_solving_mate_in_3_2011_UKR-OPEN-25_04.qcir",
+        "chess_solving_mate_in_3_2012_GRE-CH-11_02.qcir",
+        "chess_solving_mate_in_3_2012_NED-CH-18B_04.qcir",
+        "chess_solving_mate_in_3_2014_FRA-CH_03.qcir"
+      ],
+      "l3_cores": [
+        32,
+        33,
+        34,
+        35,
+        36,
+        37,
+        38,
+        39
+      ]
+    },
+    {
+      "comment": "hadw10-11, hadw11-12 with ex, finan, finding_nemo and genbuf neighbours: 3 instances with identical searches (finding_nemo_1, hadw10-11, hadw11-12) at 3-12 s.",
+      "instances": [
+        "ex92_7S700.qcir",
+        "finan01-finan01_mov.qcir",
+        "finan01_mov-finan01.qcir",
+        "finding_nemo_1.tlsf.qcir",
+        "genbuf10b4n.unsat.qcir",
+        "genbuf9b4n.unsat.qcir",
+        "hadw10-11.qcir",
+        "hadw11-12.qcir"
+      ],
+      "l3_cores": [
+        40,
+        41,
+        42,
+        43,
+        44,
+        45,
+        46,
+        47
+      ]
+    }
+  ],
+  "idle_l3_groups": [],
+  "timeout": 60,
+  "force": false,
+  "host": "ip-172-31-34-83.eu-west-2.compute.internal",
+  "order": [
+    {
+      "arm": "A",
+      "round": 1,
+      "start": "2026-11-23T17:09:22"
+    },
+    {
+      "arm": "B",
+      "round": 1,
+      "start": "2026-11-23T17:10:24"
+    },
+    {
+      "arm": "A",
+      "round": 2,
+      "start": "2026-11-23T17:11:25"
+    },
+    {
+      "arm": "B",
+      "round": 2,
+      "start": "2026-11-23T17:12:27"
+    }
+  ],
+  "date": "2026-11-23T17:09:22",
+  "binaries": {
+    "A": {
+      "name": "baseline",
+      "path": "/home/ec2-user/miniqu-work/baseline/miniQU",
+      "sha256": "10ff614c6694e5f8170c1cc65a616660236ef7158ae08af4e7ccf43b8b71c25b",
+      "args": "-rnd-init -rnd-seed=1 -dl"
+    },
+    "B": {
+      "name": "new",
+      "path": "/home/ec2-user/miniqu-work/build/bench-M1-r3-pre/miniQU",
+      "sha256": "006221175f2fdfcbae31daaf10e01bea0ca947523c15cb5c443ea0976a0d85ad",
+      "args": "--seed=1 -dl"
+    }
+  }
+}
