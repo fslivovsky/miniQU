@@ -138,6 +138,7 @@ ratios. Without `stats.csv` it says `no instance with equal conflict counts`.
 ## gate.py
 
     python3 bench/gate.py --pair default:BASE_TAGS:NEW_TAGS --pair dl:... --report mode1:... [--out FILE]
+        [--confirm default:BASE_TAGS:NEW_TAGS ...] [--self NAME:TAGS_1:TAGS_2 ...]
         [--results-dir DIR] [--pooled-limit 1.04] [--family-limit 1.10] [--family-min 3] [--force]
 
 Evaluates the identical-search gate (section **Identical searches** of `compare.py --paired`, the same
@@ -150,10 +151,18 @@ geometric mean above 1.10, or `n < 3` = not gated, value printed), the instances
 limit (result string `MEMOUT`) with the number of runs per arm, and the number of `ERROR` /
 `MISMATCH` rows. A `--report` configuration (mode 1 in M1) is evaluated the same way, but its lines
 read `REPORT (above, to be explained)` and do not change the exit status. The last lines are a table
-of all FAIL and REPORT lines and `GATE: PASS` or `GATE: FAIL (k lines)`; exit status 0 or 1. The
+of all FAIL, NOISE and REPORT lines and `GATE: PASS` or `GATE: FAIL (k lines)`; exit status 0 or 1. The
 default pooled limit 1.04 is the ROADMAP's "at most about 1.03" with the 1-2% resolution of three
-seeds (review M1-r2, section 5). A configuration without any identical search is a FAIL. Command
-for a milestone round:
+seeds (review M1-r2, section 5). A configuration without any identical search is a FAIL. 
+**Noise rule** (STATUS "M2 plan and decisions", H1). A family can fail by chance when an instance is bimodal under
+the benchmark load. A failing gate ends with the hint to rerun the configuration back to back (same binaries, same
+seeds, new tags) and to pass it as `--confirm NAME:BASE_TAGS:NEW_TAGS`, a second pair of the `--pair` of the same
+NAME. Then a family that FAILs in the pair and is within the limit in the confirm pair reads
+`NOISE (first X, repeat Y)` and does not fail the gate; one above the limit in both reads `FAIL (repeated)` and
+does. The pooled line is never excused, a family that is missing in the confirm pair keeps its FAIL, and the full
+output of the confirm pair is printed as `NAME (confirm)`. `--self NAME:TAGS_1:TAGS_2` takes two runs of the same
+binary and prints their pooled and family ratios as information (no verdict): the spread of pure noise on this
+machine, to compare a FAIL with. Command for a milestone round:
 
     python3 bench/gate.py \
       --pair default:baseline-c96-default-t60-s1,baseline-c96-default-t60-s2,baseline-c96-default-t60-s3:M1-r3-default-s1,M1-r3-default-s2,M1-r3-default-s3 \
@@ -237,12 +246,16 @@ kill only the process groups they started.
     taskset -c 0-47 bench/l3.sh [-c BASECORE=0] [-t SECONDS=40] [-r ROUNDS=2] [-a "EXTRA ARGS"] \
         [-i "INSTANCE NAMES"] OUT base=/home/ec2-user/miniqu-work/baseline/miniQU \
         r2=/home/ec2-user/miniqu-work/build/bench-M1-r2/miniQU
-    # one target against loops of the DW neighbours with baseline or new binaries (env BASE, NEW, BASECORE=8)
-    taskset -c 0-47 bench/cross.sh DW-unsat-10-25-1
-    # seven warmed-up copies of one instance as neighbours, the baseline as target (env BASE, NEW, BASECORE=24)
+    # one target against loops of the DW neighbours with baseline or new binaries
+    # (env NEW is required, BASE defaults to the frozen baseline, BASECORE=8)
+    NEW=/path/to/miniQU taskset -c 0-47 bench/cross.sh DW-unsat-10-25-1
+    # seven warmed-up copies of one instance as neighbours, the baseline as target
+    # (env BASE, NEW unless specs are given, BASECORE=24)
     taskset -c 0-47 bench/nb.sh DW-unsat-10-25-1 20 DW-unsat-09-22-1 [name="binary args" ...]
 
-`l3.sh` appends one line `ROUND ARM INSTANCE USER SYS EXIT` per process to OUT (which must not
+There is no default for the binary under test (a build directory holds whatever was built last). All three
+scripts print `sha256 ARM HASH PATH` for each arm's binary before they measure, so that the output says what was
+measured. `l3.sh` appends one line `ROUND ARM INSTANCE USER SYS EXIT` per process to OUT (which must not
 exist) and prints `l3_table.py OUT`: the mean user seconds of the first arm and, for every other
 arm, its mean and the ratio to the first arm per instance, the geometric mean in the last row.
 Instances with an exit status other than 10 or 20 in any run are left out (a timeout is only a

@@ -9,7 +9,8 @@
 # never mixed) the instances start together on the cores BASECORE.., one per core, each under
 # `timeout SECONDS`.  Appended to OUT: one line "ROUND ARM INSTANCE USER SYS EXIT" per process.
 # An arm named base* or the frozen baseline binary gets `-rnd-init -rnd-seed=1`, every other arm
-# `--seed=1`.  The table (mean user seconds, ratios to the first arm) is printed at the end.
+# `--seed=1`.  The sha256 of each arm's binary is printed first, the table (mean user seconds,
+# ratios to the first arm) at the end.
 # Exit 2 if the cores are not inside one L3 group or OUT exists.
 # Run it on an idle machine (lower half of the cores, e.g. taskset -c 0-47) and only while no
 # bench/run.py is running.
@@ -29,6 +30,7 @@ out=$1; shift
 [ ! -e "$out" ] || { echo "$0: $out exists" >&2; exit 2; }
 count=$(wc -w <<<"$instances")
 require_one_l3 "$base" "$count"
+for spec in "$@"; do print_sha "${spec%%=*}" "${spec#*=}"; done
 
 for ((round = 1; round <= rounds; round++)); do
   for spec in "$@"; do

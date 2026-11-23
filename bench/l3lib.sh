@@ -1,7 +1,6 @@
 # Shared by l3.sh, cross.sh and nb.sh (sourced).
 
 BASELINE=/home/ec2-user/miniqu-work/baseline/miniQU
-NEW_DEFAULT=/home/ec2-user/miniqu-work/build/release/miniQU
 BENCH_DIR=${BENCH_DIR:-/home/ec2-user/benchmarks/qcir}
 # The instances of one L3 cache in a benchmark run (eight neighbouring names, see load-instances.txt).
 DW_GROUP="CM-unsat-07-01-06-2 DW-sat-08-22-1 DW-sat-08-23-1 DW-sat-09-26-1 DW-unsat-09-22-1 DW-unsat-09-23-1 DW-unsat-10-25-1 DW-unsat-11-26-1"
@@ -17,6 +16,12 @@ require_one_l3() {
       echo "$0: cores $first-$((first + count - 1)) are not inside one L3 group (core $c: $have, core $first: $want)" >&2
       exit 2; }
   done
+}
+
+# print_sha ARM BINARY: one line "sha256 ARM HASH PATH" so that every output says which binary was measured.
+print_sha() {
+  [ -x "$2" ] || { echo "$0: $2 (arm $1) is not an executable" >&2; exit 2; }
+  echo "sha256 $1 $(sha256sum "$2" | cut -d' ' -f1) $(realpath "$2")"
 }
 
 # seed_args BINARY ARM: the seed arguments; the frozen baseline has other option names.
