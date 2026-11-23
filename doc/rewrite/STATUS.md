@@ -2629,3 +2629,30 @@ total 3.8 GB (binary format); the slowest check took 329 s of the 600 s limit, s
 reach the checker limit first. No rejected proof, no M1 blocker.
 
 Open: nothing from this task. The coverage reference for the M2 gate is 117/117 attempted accepted (151 solved, limit 20 s).
+
+## Owner decision: instance changed to m7a.12xlarge, 48 cores (2026-11-23)
+
+The owner moved the project from the 96-core m7a.24xlarge to an **m7a.12xlarge: 48 cores on one socket,
+184 GB RAM, six 32 MB L3 caches of 8 cores each**, between M2-T1 and M2-T2, to halve the cost. The time
+budgets stay as decided before (benchmark stage about 2 hours per milestone round, tuning 8 hours).
+
+- The harness derives everything from `nproc`: benchmark jobs on cores 24-47 with `--jobs 24 --mem-gb 8`,
+  all other heavy work on cores 0-23 with at most 16 parallel jobs. The core numbers "48-95, 48 jobs" in
+  ROADMAP "M2 execution plan" and in earlier STATUS sections are superseded.
+- **No timing from the 96-core machine is comparable any more.** That covers `baseline-c96-*`, `M1-r1-*`,
+  `M1-r2-*`, `M1-r3-*`, the `M1-r*-load-*` / `l3` measurements and the proof-coverage reference
+  `M1-r3-proofcov-default-s0` as far as its times are concerned. Verdicts, proof acceptance and search
+  statistics (conflicts, decisions, propagations, ticks) from those runs remain valid evidence.
+- **Reference runs on this machine, once, outside the 2-hour budget:** the accepted M1 binary
+  `/home/ec2-user/miniqu-work/build/bench-M1-r3/miniQU` in `default` and `-dl`, seeds 1-3, 60 s, tags
+  `M1-r3-c48-<config>-s<seed>`. The first benchmark stage that needs them runs them first. M2 is judged
+  against these, not against `M1-r3-*`. A frozen-baseline reference (`baseline-c48-*`) is only needed where
+  a report compares with the original miniQU; run it when the budget allows, at the latest in the final
+  stage.
+- **Within the 2 hours, with 24 jobs a 60 s run takes about 11 minutes, so about 10 runs fit.** Order: the
+  milestone's default in `default` and `-dl`, seeds 1-3 (6 runs); the proof-coverage run; then one seed-1
+  run per ablation configuration in the coordinator's order, as far as the time goes. Say in the report
+  what was dropped.
+- The L3 reproducers and `load_measure.py` groups were chosen for the 96-core layout (12 L3 groups); with
+  6 groups, the benchmark cores 24-47 are L3 groups 3-5. Re-derive the windows from the machine before
+  using these tools, and do not compare their numbers with the M1 ones.
