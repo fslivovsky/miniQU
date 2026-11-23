@@ -28,10 +28,13 @@ legacy       | -legacyanalyze                   | yes | conflicts restarts learn
 # on any waste; restart every conflict and reset dependencies often. The
 # options and limits are those of STATUS.md, "Coordinator decisions after M1
 # round 1", D1 (the extreme --reduceint=2 of the dl and mode rows is run by
-# tests/fuzz_qdimacs.sh instead).
+# tests/fuzz_qdimacs.sh instead). gc-ccmin3: debug and asan builds connect no
+# default Checker with minimisation, so it runs reduce, shrink and collect on
+# constraints without ids under the sanitizers (STATUS.md, M1-R2-T2).
 gc           | --reduceint=2 --tier1glue=0 --gcfrac=0 | yes | conflicts restarts learned.clause learned.cube reductions reduced.clause reduced.cube collections relocated | stress | 2
 gc-dl        | --reduceint=30 --tier1glue=0 --gcfrac=0 -dl | yes | conflicts restarts learned.clause learned.cube dependencies reductions reduced.clause reduced.cube collections relocated | stress | 2
 gc-mode1     | --reduceint=100 --tier1glue=0 --gcfrac=0 -mode=1 | yes | conflicts restarts learned.clause learned.cube reductions reduced.clause reduced.cube collections relocated | stress | 5
+gc-ccmin3    | --reduceint=2 --tier1glue=0 --gcfrac=0 -ccminmode=3 | yes | conflicts restarts learned.clause learned.cube minimized reductions reduced.clause reduced.cube collections relocated | stress | 2
 gc-mode2     | --reduceint=10 --tier1glue=0 --gcfrac=0 -mode=2 | no | conflicts restarts learned.clause learned.cube reductions reduced.clause reduced.cube collections relocated | stress | 2
 restart      | --no-luby --rfirst=1 --rinc=100 --depreset=1 | yes | conflicts restarts learned.clause learned.cube | stress | 2
 restart-dl   | --no-luby --rfirst=1 --rinc=100 --depreset=1 -dl | yes | conflicts restarts learned.clause learned.cube dependencies depresets | stress | 8

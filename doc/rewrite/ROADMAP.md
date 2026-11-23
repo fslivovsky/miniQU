@@ -452,7 +452,7 @@ Deviations from the package list, with reasons:
 
 Matrix names (`tests/matrix.txt`): normal `default dl mode1 mode1-dl mode2
 mode2-dl ccmin3 dl-ccmin3 noearly legacy`; stress `gc gc-dl gc-mode1
-gc-mode2 restart restart-dl restart-mode1-dl`. Per-task acceptance uses
+gc-ccmin3 gc-mode2 restart restart-dl restart-mode1-dl`. Per-task acceptance uses
 seeds 1:300 (`release`) and 1:100 (`asan`) on the rows listed above.
 
 Acceptance of M1: no discrepancies; the coverage rule of 0.3 holds against
