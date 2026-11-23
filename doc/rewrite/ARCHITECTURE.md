@@ -589,7 +589,7 @@ setters); nothing outside `constraint.hpp` does word arithmetic or knows
 where the trailing words are. Shrinking a constraint in place
 (`shrink_constraint`) lowers `size`, moves the trailing words down and
 accounts the freed words as wasted; garbage collection copies a constraint
-word by word (`copy_constraint`), so no caller lists the fields. Because of that the arena cannot be walked linearly;
+word by word (`copy_constraint`), so no caller lists the fields. Because `redundant` decides whether the glue word exists, the flag cannot be changed in place: promoting a learnt constraint to irredundant (subsumption, BVE in M3) allocates a new constraint and marks the old one garbage. Because of the optional words the arena cannot be walked linearly;
 all iteration over constraints goes through the reference lists (4.3).
 
 ### 5.3 Garbage collection ordered by access
@@ -641,16 +641,32 @@ CaDiCaL's `arenatype=3` and an M2 experiment. The option is not called
 struct Watch { Ref ref; Lit blocker; };          // 8 bytes
 ```
 
-`Watches` holds one 64-byte-aligned record per literal with the two watch
-lists of that literal (`std::vector<Watch>` per kind) and their two dirty
-flags, so that propagating a literal touches one cache line of list
-headers, and per kind the list of dirty literals. (Until M1-R2-T2 the
-lists and flags were four separate arrays per kind; the record made
-identical searches 10-30% faster on the DW instances under benchmark load,
-STATUS.md M1-R2-T2.) The records are allocated in one step for all
+`WatchList` is MiniSat's `vec` for watches: a pointer and 32-bit size and
+capacity, 16 bytes, growing by about 3/2 with `realloc` (a `Watch` is
+trivially copyable). `Watches` holds one 32-byte-aligned record per literal
+with the two lists of that literal (one per kind), so the four list headers
+of a variable share one cache line; the dirty flags of lazy cleaning are a
+separate dense array of two bytes per literal, and per kind there is the
+list of dirty literals.
+
+History, because this layout was measured three times. Until M1-R2-T2 the
+lists and flags were four separate arrays per kind. Round 2 put two
+`std::vector<Watch>` (24 bytes each) and the flags into one 64-byte record
+per literal, which `bench/load_measure.py` reported as a gain. Review M1-r2
+(B1) showed with the benchmark placement (eight instances of one family on
+the eight cores of one L3 cache) that this record costs 20-30% CPU time on
+the DW family: the list headers are touched once per propagated literal, so
+they are hot, and 64 bytes per literal are twice the old solver's two
+16-byte `vec` headers (DW-unsat-09-22-1: 148000 literals, 9.5 MB against
+4.7 MB, with a 4-MB share of the L3 cache per process). A prototype with the
+layout above brought the reviewer's reproducer from 1.24 to 1.02 times the
+baseline's CPU time (STATUS.md, "M1 round 3: diagnosis of B1"). **The size
+of everything that is touched per propagated literal is compared with the
+old solver's before it is changed, and measured with the benchmark
+placement (`bench/l3.sh`, `bench/load_measure.py` with L3 groups).** The
+records are allocated in one step for all
 variables when the first constraint is added (`size_watches`), not grown
-variable by variable, which would raise the peak memory. A list grows by
-about 3/2 (`push_watch`, as MiniSat's `vec`), not by the library's doubling. `watches (kind, p)` is the list of constraints of that kind
+variable by variable, which would raise the peak memory. `watches (kind, p)` is the list of constraints of that kind
 to visit **when `p` becomes true**: clauses watching `~p`, cubes watching `p`
 (in terms of 4.1: constraints in which a watched literal just vanished). A
 constraint of size >= 2 watches its literals at positions 0 and 1, and each of

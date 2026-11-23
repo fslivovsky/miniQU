@@ -488,6 +488,28 @@ no family (three or more such instances) is above 1.10, and mode 1 is not
 baseline runs `baseline-c96-<config>-t60-s<seed>` and states the order in
 which the arms ran.
 
+### M1 round 3 (rework after review M1-r2, coordinator)
+
+Review M1-r2 accepted everything except engine speed on the DW family under
+the benchmark protocol (B1). Cause, found by the coordinator with a
+prototype (STATUS.md, "M1 round 3: diagnosis of B1"): the 64-byte watch
+record per literal, twice the old solver's list headers. Tasks, in order:
+
+| task | content |
+|---|---|
+| R3-T1 | reproducers in `bench/` (`l3.sh` with its table, `cross.sh`, `nb.sh`); `bench/load_measure.py` places instances as `run.py` does (one family window per L3 group, cores kept busy) |
+| R3-T2 | `bench/gate.py`: the identical-search gate evaluated line by line (pooled and per family, every configuration), memory-limit hits listed; rules for benchmark reports in `bench/README.md` |
+| R3-T3 | `WatchList` (16 bytes) and the 32-byte record of ARCH 6.1; `Watches::init` removed; `l3.sh` and load measurement before/after; fuzz gate of the budget decision |
+
+Round-3 gate (review M1-r2, B1 step 4): `bench/l3.sh` on the DW group has a
+geometric mean new / baseline of at most about 1.05 in default; in the
+benchmark stage (`bench/gate.py`) the identical-search ratio is at most
+about 1.03 pooled and no family of three or more instances is above 1.10,
+in default and `-dl`; mode 1 is reported with the same table and explained
+if a family is above 1.10. An excess is acceptable only by a decision
+recorded in STATUS.md. `bench/load_measure.py` results from before R3-T1
+(tags `M1-r2-load-*`) are not evidence about benchmark runs.
+
 Porting notes (behaviour that is easy to lose; each has a test or assertion):
 
 1. **Original constraints**: sort, remove duplicate literals, skip

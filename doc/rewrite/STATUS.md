@@ -2185,3 +2185,97 @@ mode1, mode2, ccmin3 seed 1; compared with the reused same-machine `baseline-c96
 no error. Differences to the baseline are within seed noise in every configuration (PAR2 new-base: default +0.24 s, dl +0.05 s,
 mode1 +0.41 s, mode2 -1.10 s, ccmin3 -1.32 s, all CIs contain 0); against round 1 PAR2 -0.34 s (default, dl) and
 identical-search CPU ratio 0.95. No proof run, no ablations (budget). Report: `bench/results/M1-r2-report.md`, commit 5b56822.
+
+## M1 round 3: diagnosis of B1 and plan (coordinator, 2026-11-23)
+
+Review `doc/rewrite/reviews/M1-r2.md`: not approved, one blocking item (B1): on identical searches of the DW family
+the new binary is 12-27% slower than the baseline under the benchmark protocol; the round-2 family gate was not
+evaluated; cause unknown. No rebuttal: the reviewer's measurements reproduce, and the round-2 gate table above was
+wrong to call the load gate evidence. The coordinator's own measurements follow (prototype and scripts in
+`/home/ec2-user/miniqu-work/coord/r3/`, nothing of it committed).
+
+### Cause: 64 bytes of watch-list headers per literal
+
+- DW-unsat-09-22-1 (default, seed 1): 6785 conflicts, 208 million propagations, no reduction, no collection. The time
+  is propagation, and every propagated literal reads its list headers. Run alone on an idle machine the new binary
+  is faster than the baseline (6.61 s against 6.95 s) and smaller (36 MB against 43 MB peak RSS), so the deficit is
+  not instructions and not total memory; it is what is hot.
+- The instance has 74039 solver variables, 148078 literals. New binary: one `alignas (64)` record per literal (two
+  `std::vector<Watch>` of 24 bytes and two flags): 9.5 MB. Old solver: two `OccLists`, 16 bytes of `vec` header per
+  literal and kind: 4.7 MB, four literals per cache line. Eight processes share a 32-MB L3 cache (4 MB each, 1 MB of
+  L2 per core): the header array alone is more than twice a process's share. Without `alignas` the record is 56
+  bytes, which is why the reviewer's experiment 3 left the table at 1.20.
+- Round 2 introduced the record because `load_measure.py` reported a gain (decision E1/E2). That instrument mixes
+  instances within an L3 group and lets cores go idle, so it did not show the cost. **E1's sentence "not a close
+  call" is withdrawn**; its deferred M2 candidate (16-byte list type, 32 bytes per literal) is the fix and is done now.
+- Prototype `v32` (`coord/r3/v32/watch.hpp.diff` against `src/watch.hpp` at `5ea3adf`; everything else unchanged):
+  a 16-byte list (pointer, 32-bit size and capacity, `realloc`, growth 3/2), `alignas (32)` record with the two lists,
+  dirty flags in a separate array of two bytes per literal. Same search (DW-unsat-09-22-1: 6785 conflicts, 208403301
+  propagations, 624908363 ticks as before), 33 MB peak RSS.
+- Reviewer's reproducer with a third arm (`coord/r3/l3x.sh OUT 0 "" base=... new=... v32=...`: the eight instances of
+  the DW group on cores 0-7, one binary at a time, two rounds, 40 s; user seconds, mean of the two rounds; `new` is
+  `build/bench-M1-r2/miniQU`, sha256 `30bd8fe6b956`):
+
+  | instance | baseline | new | ratio | v32 | ratio |
+  |---|---:|---:|---:|---:|---:|
+  | DW-sat-08-22-1 | 2.04 | 2.98 | 1.46 | 2.19 | 1.07 |
+  | DW-sat-08-23-1 | 1.81 | 2.54 | 1.40 | 2.15 | 1.18 |
+  | DW-sat-09-26-1 | 3.34 | 3.46 | 1.03 | 3.15 | 0.94 |
+  | DW-unsat-09-22-1 | 8.89 | 11.80 | 1.33 | 8.39 | 0.94 |
+  | DW-unsat-09-23-1 | 17.98 | 19.55 | 1.09 | 18.55 | 1.03 |
+  | DW-unsat-10-25-1 | 24.48 | 29.19 | 1.19 | 23.18 | 0.95 |
+  | geometric mean | | | 1.239 | | 1.016 |
+
+  Mode 1 (`-mode=1`, same script; DW-unsat-10-25-1 not solved in 40 s by any arm):
+
+  | instance | baseline | new | ratio | v32 | ratio |
+  |---|---:|---:|---:|---:|---:|
+  | DW-sat-08-22-1 | 1.94 | 2.56 | 1.32 | 1.89 | 0.97 |
+  | DW-sat-08-23-1 | 1.73 | 2.57 | 1.49 | 1.71 | 0.99 |
+  | DW-sat-09-26-1 | 6.46 | 7.08 | 1.10 | 6.81 | 1.05 |
+  | DW-unsat-09-22-1 | 8.88 | 12.47 | 1.40 | 8.73 | 0.98 |
+  | DW-unsat-09-23-1 | 9.59 | 13.31 | 1.39 | 12.18 | 1.27 |
+  | geometric mean | | | 1.333 | | 1.048 |
+
+- Not measured by the coordinator: the chess family in mode 1 (1.12 in the benchmark run), `cross.sh` and `nb.sh`
+  with the prototype, the whole benchmark set. One instance stays high in mode 1 (DW-unsat-09-23-1, 1.27, two
+  rounds). R3-T3 measures these; they are not claimed here.
+
+### Decisions
+
+- **D1. Watch lists**: `WatchList` of 16 bytes and a 32-byte record per literal (ARCH 6.1, rewritten in this commit).
+  This is MiniSat's `vec<Watcher>` in size and growth, so the owner's constraint (watch lists as in MiniSat/miniQU,
+  collection in access order) is kept, more literally than with `std::vector`. Task R3-T3.
+- **D2. Load instrument**: `bench/load_measure.py` results up to now (`M1-r2-load-*`, gate F3 of round 2) are not
+  evidence about benchmark runs. R3-T1 changes the placement to the one of `run.py` (one window of the name-sorted
+  instance list per L3 group, every core kept busy). ARCH 5.2's rule "layout decisions are measured under benchmark
+  load" stands with the corrected instrument and `bench/l3.sh`.
+- **D3. Benchmark reports** evaluate the gate of the round line by line with `bench/gate.py` (R3-T2) and paste its
+  output; a report may not state "blocking items: none" while a line of that output says FAIL without a recorded
+  decision. Instances that hit the memory limit are listed (2.1 and 5.2-3 hit 8 GB in every run of both binaries;
+  the round-2 report's "no MEMOUT problems" was wrong in wording, the verdict counts were right).
+- **D4. Unused functions** (review suggestion): `Watches::init` is removed in R3-T3 (`resize` is what the solver
+  calls). `Internal::shrink_constraint` and `Proof::strengthen` stay: vivification and strengthening (M3) are their
+  callers, both are unit-tested, and the layout work of round 2 (trailing words moved on shrink) is exactly what
+  they exercise.
+- **D5. `redundant` cannot be cleared in place** (review suggestion): added to ARCH 5.2 in this commit.
+- **D6. Mode 1 pooled ratio** (1.06 in round 2): re-evaluated after R3-T3 by the benchmark stage; if it is still
+  above about 1.03 it is recorded here as a known deficit with its per-family table.
+- **D7. Proof coverage on the benchmark set**: one `--proof-check` run of the default configuration in the benchmark
+  stage of round 3 if the two hours allow it (budget decision); otherwise stated as not measured.
+
+### Round-3 gates
+
+| gate | measured by |
+|---|---|
+| `bench/l3.sh` DW group, default: geometric mean new / baseline at most about 1.05 | R3-T3 |
+| same search as round 2 (conflicts, propagations, ticks equal on the smoke set and the load instances) | R3-T3 |
+| fuzz: release 1:300 matrix, asan 1:100 `-t 240`, QDIMACS 1:300; ctest; smoke with proofs | R3-T3 |
+| peak memory not above round 2 on 1.3, 5.2-1, DW-sat-08-22-1, amba2f9n.sat (the record shrinks) | R3-T3 |
+| benchmark stage, `bench/gate.py`: pooled at most about 1.03, no family (n >= 3) above 1.10, default and `-dl`; mode 1 reported, explained if above | benchmark stage |
+
+### Worker tasks
+
+- **R3-T1** (tooling): `bench/l3.sh` and its table, `cross.sh`, `nb.sh`; `load_measure.py` with L3-group placement.
+- **R3-T2** (tooling): `bench/gate.py`, report rules in `bench/README.md`.
+- **R3-T3** (solver): `WatchList`, 32-byte record, measurements, fuzz gate.
