@@ -129,8 +129,9 @@ limit above 2% is allowed only with a measurement showing that the baseline
 (or the closest configuration it has) times out at a comparable rate on the
 same instances, i.e. that the timeouts are a property of the algorithm under
 that schedule and not of the port. The solver limit of the gate is 20 s for
-the `release` binary and 90 s (`-t 90`) for the `asan` binary, which is 7 to
-13 times slower. The extreme setting `--reduceint=2` stays exercised with
+the `release` binary and 240 s (`-t 240`) for the `asan` binary, which is 7 to
+13 times slower and up to 40 times on some mode-1 stress instances (90 s
+until M1 round 2; STATUS.md, "Coordinator decisions after M1 round 2", E3). The extreme setting `--reduceint=2` stays exercised with
 `-dl`, `-mode=1` and `-mode=2` by `tests/fuzz_qdimacs.sh` (verdicts only,
 timeouts counted), which is part of every gate from M1 on.
 
@@ -471,12 +472,13 @@ systematic shift; reviewer accepts structure and readability.
 Review M1-r1 accepted structure, soundness and proofs and blocked on engine
 speed under benchmark load (B1). The cause was found by the coordinator
 (STATUS.md, "M1 round 2: diagnosis of B1"): the 12-byte constraint header.
-Two tasks, in order:
+Tasks, in order:
 
 | task | content |
 |---|---|
 | R2-T1 | tooling and small clean-ups: `bench/load_measure.py` (identical-search CPU time of two binaries under benchmark load, arms separated), the identical-search section and the arm order in the paired report, regenerated M1-r1 reports; `struct Last` removed, `Solver::freeze` documented |
 | R2-T2 | constraint layout of ARCH 5.2 (4-byte header, trailing glue word for redundant constraints, trailing id words only with a tracer), `copy_constraint`, creation-order tie-break in `reduce`, stress row `gc-ccmin3`; load measurement before/after; fuzz gate of the budget decision |
+| R2-T3 | after the triage of round 2 (STATUS.md, "Coordinator decisions after M1 round 2"): busy check of `load_measure.py` by `argv`, asan gate at `-t 240` in `bench/README.md` and `tests/matrix.txt`, confirmation of the `gc-mode1` row on the asan binary |
 
 Round-2 gate (review M1-r1, B1 step 3): on the instances with equal conflict
 counts in both arms (baseline CPU time above 1 s) the CPU-time ratio new /

@@ -2045,3 +2045,99 @@ MiniSat-style 16-byte list (pointer, size, capacity) so that two lists and the f
         --a-args "-rnd-init -rnd-seed=1 -mode=1" --a-name baseline --b <release miniQU> --b-args "--seed=1 -mode=1" \
         --b-name new-r2 --rounds 3 --cores 0-47 --tag M1-r2-load-after-mode1
     # F6: /usr/bin/time -v <binary> /home/ec2-user/benchmarks/qcir/1.3.qcir
+
+## Coordinator decisions after M1 round 2 (coordinator, 2026-11-23)
+
+Every open point of R2-T1 and R2-T2 is settled here. One worker task follows (R2-T3, tooling and documentation
+only; no solver code changes). Measurements of this section: `/home/ec2-user/miniqu-work/coord/r2triage/` (`run.sh`,
+`*.time`).
+
+### E1. Peak memory on 1.3 (R2-T2 point 1, "F6"): accepted, no task
+
+- Re-measured (`/usr/bin/time -v`, one process, cores 0-47 otherwise idle): final binary (`build/release`, `60dce84`)
+  1390732 KB, round-1 binary (`build/bench-M1-r1`) 1350028 KB: +3.0%, as the worker reported. Baseline: 1681 MB.
+- F6 ("not above round 1") was an acceptance line of the R2-T2 task spec, written before the watch record was known
+  to be needed. The milestone gate is ROADMAP M1: peak memory not more than 10% above the **baseline** (16 MB
+  absolute below 64 MB). That gate is met on all four instances (1.3: 19% below the baseline; 5.2-1: 19% below;
+  DW-sat-08-22-1: 5 MB below; amba2f9n.sat: +3 MB, absolute rule). **F6 is withdrawn as a criterion; the M1 memory
+  gate is the ROADMAP one and it is green.**
+- Why the 3% is the right trade: the 64-byte record is what brought the mode-1 identical searches under load from
+  1.01 to 0.87 and the default ones from 0.93 to 0.82 (R2-T2, F3); the compact 48-byte variant lost that (1.08). 60 MB
+  on a 1.3-GB instance against 10-30% CPU time on the DW family is not a close call.
+- **Deferred to M2 (as a measured candidate, not a gate):** a 16-byte list type (pointer, 32-bit size and capacity,
+  MiniSat's `vec`) so that both lists and the two dirty flags of a literal fit in 32 bytes and the two literals of a
+  variable share one cache line. M2 touches propagation and the watch lists anyway (tiers, binary handling); the
+  candidate is taken only if `bench/load_measure.py` shows a gain beyond the noise (rule of round 2, decision 2) and
+  the code does not get harder to read than `std::vector<Watch>` with `push_watch`. It is not done now because round 2
+  has met its gate and the change touches every user of the lists.
+
+### E2. Code changes beyond the layout (R2-T2 point 2): accepted, no task
+
+The spec allowed the candidates when the layout alone missed the load gate, each kept only by measurement; that is
+what happened (candidate 1 not kept, 2 and 3 kept, 4 rejected, all with numbers in STATUS and results committed).
+ARCH 6.1 describes the record, the one-time allocation and the 3/2 growth. The owner's requirements (arena, watch
+lists as in MiniSat/miniQU: one list of 8-byte watches with blockers per literal and kind, collection in access
+order) are unchanged by it. The same-search check F1 (1215 of 1215 identical to round 1) covers these commits too,
+since it was repeated on the final binary.
+
+### E3. `gc-mode1` on the asan build, 3 of 50 timeouts at `-t 90` (R2-T2 point 3): asan gate limit raised to 240 s
+
+- Binding owner decision ("stress-row timeouts on the sanitizer build"): not a failure; make the gate green by a
+  longer time limit for the asan run where the run time allows it.
+- Measured now (asan binary of `60dce84`, `--reduceint=100 --tier1glue=0 --gcfrac=0 -mode=1`, 12 processes side by
+  side on cores 0-11, limit 900 s): all twelve seeds that ever timed out in this row finish with the right verdict.
+  Seeds of the 1:100 gate: 64: 105 s, 70: 101 s, 89: 124 s. Seeds of T12's 1:300 run: 179: 92 s, 184: 139 s, 199: 334 s,
+  204: 156 s, 209: 101 s, 214: 103 s, 234: 106 s, 280: 152 s, 290: 108 s. So these are slow runs of the asan build with its
+  internal checker (release: 2.7-3.9 s), not hangs.
+- **Decision: the gate command of the asan binary is `tests/regress.sh -S -j 16 -s 1:100 -M all -t 240 A`** (was
+  `-t 90`); 240 s is about twice the slowest of the gate's seeds. The row, its options and its 5% limit stay as they
+  are, so what the row protects (reductions and collections in mode 1 under the sanitizers, verdict and proof
+  checked) is kept and more instances are checked than before. Release stays at 20 s. ROADMAP 0.1 amended in this
+  commit; R2-T3 updates `bench/README.md` and the comment in `tests/matrix.txt` and confirms the row.
+- For the verifier: with `-t 240` the row is expected green on 1:100. Should an asan-only timeout-limit miss of a
+  stress row still appear (machine load), the owner decision applies: report the numbers, not a failure. Wrong
+  verdicts, rejected proofs and sanitizer reports stay blocking.
+
+### E4. Commit trailers (R2-T2 point 4): accepted, history is not rewritten
+
+The trailer lines are supplied to each session by its harness and differ between sessions (model name, session id);
+a worker that follows its harness is right. Commits `b9ba11e`..`f2679c5` keep their lines. Rewriting local history
+to change attribution is not worth the risk for the other agents' work.
+
+### E5. `check_invariants` walks only the allocated watch lists (R2-T2 point 5): accepted, no task
+
+Follows from the one-time allocation: before the first constraint there are no records and no watches to check.
+`check.cpp` asserts `watches.size () <= vars`, and `size_watches ()` is called by `add_original` and at the start of
+`search`, the only two places after which a list can be read; `Solver::add_var` rejects variables after the first
+original (`REQUIRE` in solver.cpp), so the records are never too short.
+
+### E6. Bench tooling of R2-T1 (points 1, 2, 4): accepted as built
+
+`parse_stats_text` split out of `parse_stats`; `-verb=1` after the user's arguments (the solver's option parser does
+not depend on the order; a later user `-verb=0` cannot occur because the script appends last); `--a-args=--seed=1`
+handled by `glue_arguments`. No effect on results.
+
+### E7. Busy-process check of `load_measure.py` matches the launching shell (R2-T1 point 3): task R2-T3
+
+The check must look at what a process *is*, not at words in its command line: a shell whose `-c` string mentions
+`miniQU` is not a solver. R2-T3 replaces the `pgrep -af` pattern by an inspection of `argv[0]` / the script argument
+from `/proc/PID/cmdline`, with a test, so that no launcher script with a sleep is needed and the benchmark stage
+cannot trip over it. Until then the workaround of R2-T1 stands.
+
+### Gates of M1 round 2 after these decisions
+
+| gate | state |
+|---|---|
+| same search as round 1 (F1) | green: 1215 of 1215 |
+| builds without warnings, ctest (F2) | green |
+| load gate (F3): default 0.827, `-dl` 0.773, mode 1 0.818, no instance above 1.10 | green |
+| fuzz, release 1:300 (F5) | green |
+| fuzz, asan 1:100 | green by E3 after R2-T3 (0 wrong verdicts, 0 rejected proofs, 0 sanitizer reports at `-t 90` already) |
+| QDIMACS fuzz, regressions, smoke with 33/33 proofs accepted | green |
+| peak memory against the baseline (ROADMAP M1) | green (E1) |
+| benchmark-set gate of ROADMAP "M1 round 2" (identical-search ratio, mode-1 sign test) | open: measured in the benchmark stage |
+
+### Worker task
+
+- **R2-T3** (tooling, docs): busy check by `argv` in `load_measure.py` with a test; `-t 240` for the asan gate in
+  `bench/README.md` and `tests/matrix.txt`; confirmation run of the `gc-mode1` row on the asan binary.
