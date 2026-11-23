@@ -2279,3 +2279,27 @@ wrong to call the load gate evidence. The coordinator's own measurements follow 
 - **R3-T1** (tooling): `bench/l3.sh` and its table, `cross.sh`, `nb.sh`; `load_measure.py` with L3-group placement.
 - **R3-T2** (tooling): `bench/gate.py`, report rules in `bench/README.md`.
 - **R3-T3** (solver): `WatchList`, 32-byte record, measurements, fuzz gate.
+
+## M1-R3-T1 (worker, 2026-11-23): bench tooling with the placement of run.py
+
+Built (commits f9d9c4f, f70f7da, results commit after them; no solver source touched):
+- `bench/l3.sh` (+ `bench/l3lib.sh`, sourced by the three scripts: L3 check, seed arguments, neighbour loops), `bench/l3_table.py`, `bench/cross.sh`, `bench/nb.sh`. The neighbour loops of cross.sh and nb.sh run in their own process group (setsid, `timeout --foreground` so the solver stays in it) and only that group is killed; the reviewer's `pkill -f` is gone. Smoke-tested: no `miniQU` process left after a run, refusal exits 2 (cores across two L3 groups, existing OUT).
+- `bench/load_measure.py` replaced: groups file, group g on L3 group g, instance j on core j of it, every core loops until every core has completed a run, unfinished runs discarded, per-group table, header "L3 groups, cores kept busy". `--copies` removed; `copy` is the repetition index; default `--timeout` 60. Extra checks: group windows must be consecutive in the sorted bench dir; a group larger than its L3 group is refused. A hidden `--sysfs-root` serves the fake-sysfs test.
+- Tests: `bench/test_load_measure.py` (group parsing, placement, refusals, per-group means, loop bookkeeping with a fast fake instance running 3+ times next to a slow one) and `bench/test_l3_table.py` (ctest `bench-l3-table`, new). ctest in the release tree: 39/39 passed (bench tests included).
+
+Chosen groups (windows of 8 consecutive sorted names; "qualifying" = identical search in M1-r2-default-s1 vs baseline-c96-default-t60-s1, baseline CPU 1-60 s):
+1. DW (mandatory) CM-unsat-07-01-06-2 .. DW-unsat-11-26-1: 6 qualifying.
+2. numeric 10.1 .. 4.1: 6 qualifying.
+3. numeric 5.2-1 .. CM-sat-04-01-06-3: 4 qualifying.
+4. chess mate_in_2 1982_WCSC-6_02 .. 2002_MAC-CH-6_03: 3 qualifying.
+5. chess mate_in_3 2001_UKR-CH_06 .. 2014_FRA-CH_03: 6 qualifying (contains FRA-CH_03).
+6. ex92_7S700 .. hadw11-12 (finan, finding_nemo, genbuf, hadw10-11): 3 qualifying.
+Deviation: only numeric, CM/DW, chess and the hadw window have a window with three qualifying instances, so no "two other families" exist; I used a second numeric window and the chess mate_in_2 window (a different name family, same results family "chess").
+
+Measurements (idle machine, lower half 0-47; baseline vs `build/bench-M1-r2/miniQU`, sha 30bd8fe6):
+- `bench/l3.sh` default (results in `bench/results/M1-r3-l3-before/default.md`, raw `default.raw.txt`): geometric mean r2/base **1.243**, n=6 (DW-sat-08-22-1 1.503, 08-23-1 1.348, 09-26-1 1.069, DW-unsat-09-22-1 1.220, 09-23-1 1.095, 10-25-1 1.273). CM-unsat-07-01-06-2 and DW-unsat-11-26-1 time out at 40 s and are left out. Matches reviewer 1.25 and coordinator 1.24.
+- `load_measure.py`, 2 rounds, tag `M1-r3-load-before` (default): overall geomean 1.032 (n=33); group geomeans DW **1.243** (n=6), numeric-1 0.909, numeric-2 0.928, chess_in_2 1.017 (n=8), chess_in_3 1.069, hadw 1.024. DW instances: 1.594, 1.771, 1.004, 1.072, 1.156, 1.053.
+- Tag `M1-r3-load-before-mode1` (`-mode=1` on both): overall 1.067 (n=32); DW group **1.326** (n=5; DW-unsat-10-25-1 timed out and is unfinished); numeric-1 0.932, chess_in_2 1.055, hadw 1.042 (n=2).
+- Acceptance 3 (DW group clearly above 1.10): met in both runs. Old `M1-r2-load-*` results used the mixed placement and are not evidence.
+
+Notes for the next tasks: a round lasts about 61 s because the slowest instance of some group (the two CM/DW unsat ones, finan, genbuf) times out at 60 s; a run of 2 rounds x 2 arms takes ~4 min. The groups' unfinished instances are listed in each load.md. Rounds are only 2, so single-instance ratios (min-max columns) are noisy; the group geomeans are the evidence.
