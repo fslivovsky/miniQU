@@ -2177,3 +2177,11 @@ Part C (asan binary, lower cores):
   - no wrong verdict, rejected proof or sanitizer report.
 
 Deviations: none. The rc of the regress run is inferred from its final line, not measured directly.
+
+## M1-r2 benchmark stage (benchmark worker, 2026-11-23)
+
+Release build of 25216c2 (`build/bench-M1-r2`), 376 instances, 60 s, 48 jobs on cores 48-95; default and `-dl` seeds 1-3,
+mode1, mode2, ccmin3 seed 1; compared with the reused same-machine `baseline-c96-*` runs and with `M1-r1-*`. No discrepancy,
+no error. Differences to the baseline are within seed noise in every configuration (PAR2 new-base: default +0.24 s, dl +0.05 s,
+mode1 +0.41 s, mode2 -1.10 s, ccmin3 -1.32 s, all CIs contain 0); against round 1 PAR2 -0.34 s (default, dl) and
+identical-search CPU ratio 0.95. No proof run, no ablations (budget). Report: `bench/results/M1-r2-report.md`, commit 5b56822.
