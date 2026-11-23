@@ -17,6 +17,9 @@ SIGN_ALPHA = 0.05
 MARGIN_SECONDS = 1.0       # a score difference below this is a tie ...
 MARGIN_FRACTION = 0.10     # ... as is one below this fraction of the smaller score
 MEMORY_FACTOR = 1.10
+MIN_CPU = 1.0              # identical searches: A must have used more CPU time than this (s)
+FAMILY_MIN_N = 3           # identical searches: families need this many instances to be marked ...
+FAMILY_LIMIT = 1.10        # ... when their geometric mean exceeds this
 LIMIT_KEYS = ("jobs", "mem_gb", "cores", "timeout", "instances_sha256")
 
 
@@ -144,6 +147,81 @@ class Comparison:
         return sorted(rows, key=lambda r: -float(r[3][:-1]))
 
 
+def geomean(values):
+    return math.exp(sum(math.log(v) for v in values) / len(values))
+
+
+class IdenticalSearches:
+    """CPU-time ratios B / A of the instances on which both arms ran the same search.
+
+    Per seed, an instance qualifies if both arms solved it with the same result, both
+    have a conflict counter that is equal, and A used more than MIN_CPU seconds.
+    """
+
+    def __init__(self, set_a, set_b):
+        self.per_seed = {}   # seed -> {instance: (cpu_a, cpu_b)}
+        for ra, rb in zip(sorted(set_a, key=lambda r: r.meta.get("seed", 0)),
+                          sorted(set_b, key=lambda r: r.meta.get("seed", 0))):
+            found = {}
+            for i in sorted(set(ra.rows) & set(rb.rows)):
+                a, b = ra.rows[i], rb.rows[i]
+                ca, cb = ra.stats.get(i, {}).get("conflicts"), rb.stats.get(i, {}).get("conflicts")
+                if (ra.solved(i) and rb.solved(i) and a["result"] == b["result"]
+                        and ca is not None and ca == cb and float(a["cpu"]) > MIN_CPU):
+                    found[i] = (float(a["cpu"]), float(b["cpu"]))
+            self.per_seed[ra.meta.get("seed")] = found
+        self.family = {i: ra.rows[i]["family"] for ra in set_a for i in ra.rows}
+        by_instance = {}
+        for found in self.per_seed.values():
+            for i, (a, b) in found.items():
+                by_instance.setdefault(i, []).append((a, b))
+        # ratio of an instance: geometric mean over its seeds; cpu: arithmetic mean over its seeds
+        self.instances = {i: (geomean([b / a for a, b in v]), sum(a for a, _ in v) / len(v),
+                              sum(b for _, b in v) / len(v)) for i, v in by_instance.items()}
+
+    def seed_rows(self):
+        rows = []
+        for seed, found in sorted(self.per_seed.items(), key=lambda kv: str(kv[0])):
+            ratios = [b / a for a, b in found.values()]
+            rows.append([seed, len(ratios)] + (
+                ["%.3f" % geomean(ratios), sum(r > 1 for r in ratios), sum(r < 1 for r in ratios)]
+                if ratios else ["-", 0, 0]))
+        ratios = [r for r, _, _ in self.instances.values()]
+        rows.append(["all (per instance)", len(ratios)] + (
+            ["%.3f" % geomean(ratios), sum(r > 1 for r in ratios), sum(r < 1 for r in ratios)]
+            if ratios else ["-", 0, 0]))
+        return rows
+
+    def family_rows(self):
+        rows = []
+        for fam in sorted({self.family[i] for i in self.instances}):
+            ratios = [self.instances[i][0] for i in self.instances if self.family[i] == fam]
+            g = geomean(ratios)
+            mark = "> 1.10" if len(ratios) >= FAMILY_MIN_N and g > FAMILY_LIMIT else ""
+            rows.append([fam, len(ratios), "%.3f" % g, mark])
+        return rows
+
+
+def identical_section(set_a, set_b, top=15, bottom=5):
+    ident = IdenticalSearches(set_a, set_b)
+    out = ["## Identical searches", "",
+           "Instances that both arms solved with the same result and the same number of "
+           "conflicts (A used more than %g s of CPU time) ran the same search, so the CPU-time "
+           "ratio B / A measures engine speed alone." % MIN_CPU, ""]
+    if not ident.instances:
+        return out + ["no instance with equal conflict counts", ""]
+    out += table(["seed", "n", "geometric mean", "slower", "faster"], ident.seed_rows()) + [""]
+    out += ["Per family (instances pooled over the seeds; `> 1.10` marks families of at least "
+            "%d instances with a geometric mean above %.2f):" % (FAMILY_MIN_N, FAMILY_LIMIT), ""]
+    out += table(["family", "n", "geometric mean", "mark"], ident.family_rows()) + [""]
+    ordered = sorted(ident.instances.items(), key=lambda kv: -kv[1][0])
+    row = lambda kv: [kv[0], "%.3f" % kv[1][0], "%.2f" % kv[1][1], "%.2f" % kv[1][2]]
+    hdr = ["instance", "ratio", "A cpu s", "B cpu s"]
+    out += ["Largest ratios:", ""] + table(hdr, [row(kv) for kv in ordered[:top]]) + [""]
+    out += ["Smallest ratios:", ""] + table(hdr, [row(kv) for kv in reversed(ordered[-bottom:])]) + [""]
+    return out
+
+
 def problems(runs):
     """Blocking problems of a list of runs: verdict discrepancies, solver errors, rejected proofs."""
     out = []
@@ -193,6 +271,9 @@ def report(set_a, set_b, reasons, top=30):
         table_rows.append([name, "`%s`" % m.get("args", ""), m.get("solver_git", "?"),
                            (m.get("solver_sha256") or "?")[:12], m.get("date", "?")])
     out += table(["arm", "args", "git", "sha256", "date"], table_rows) + [""]
+    started = sorted((r.meta.get("date", "?"), r.tag) for r in set_a + set_b)
+    out += ["Order in which the runs started:", ""]
+    out += ["- %s `%s`" % kv for kv in started] + [""]
 
     out += ["## Result", "",
             "PAR2 difference (B - A, mean over %d instances, scores are means over %d seeds): "
@@ -205,6 +286,8 @@ def report(set_a, set_b, reasons, top=30):
             "**Verdict: B is %s than A.**" % cmp.verdict if cmp.verdict in ("better", "worse") else
             "**Verdict: %s.**" % cmp.verdict, "",
             "B is not worse than A: **%s**." % ("yes" if cmp.not_worse else "no"), ""]
+
+    out += identical_section(set_a, set_b)
 
     out += ["## Per seed (SAT/UNSAT/total solved, PAR2 in s)", ""]
     out += table(["seed", "A solved", "A PAR2", "B solved", "B PAR2"], cmp.per_seed_rows()) + [""]

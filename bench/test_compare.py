@@ -26,8 +26,9 @@ def base_times():
 
 
 def write_run(results, tag, seed, times, factor=1.0, timeout=TIMEOUT, verdicts=None, proofs=None,
-              noise_seed=0):
-    """A run with the times scaled by factor and a little noise (the same for every arm)."""
+              noise_seed=0, conflicts=None, cpus=None, date=None):
+    """A run with the times scaled by factor and a little noise (the same for every arm).
+    conflicts and cpus map instances to a conflict counter (stats.csv) and a CPU time."""
     rng = random.Random(1000 * seed + noise_seed)
     d = os.path.join(results, tag)
     os.makedirs(d)
@@ -41,10 +42,15 @@ def write_run(results, tag, seed, times, factor=1.0, timeout=TIMEOUT, verdicts=N
             row.update(instance=name, family=name.split("-")[0], rss_mb="100",
                        result=(verdicts or {}).get(name, "UNSAT") if solved else "TIMEOUT",
                        exit=20 if solved else -9, wall="%.3f" % (t * factor * noise if solved else timeout),
-                       cpu="1", proof_status=(proofs or {}).get(name, ""))
+                       cpu=str((cpus or {}).get(name, 1)), proof_status=(proofs or {}).get(name, ""))
             w.writerow(row)
+    if conflicts:
+        with open(os.path.join(d, "stats.csv"), "w", newline="") as f:
+            w = csv.writer(f)
+            w.writerow(["instance", "counter", "value"])
+            w.writerows([name, "conflicts", c] for name, c in conflicts.items())
     with open(os.path.join(d, "meta.json"), "w") as f:
-        json.dump({"jobs": 48, "mem_gb": 16, "cores": "64-127", "timeout": timeout, "seed": seed,
+        json.dump({"date": date or "2026-01-01T00:00:00", "jobs": 48, "mem_gb": 16, "cores": "64-127", "timeout": timeout, "seed": seed,
                    "instances_sha256": "x", "args": "", "proof_check": bool(proofs)}, f)
 
 
@@ -125,6 +131,68 @@ class PairedTest(unittest.TestCase):
         self.assertIn("checker timeout (1): `%s`" % INSTANCES[0], r.stdout)
         self.assertIn("too large (1): `%s`" % INSTANCES[1], r.stdout)
         self.assertIn("not attempted", r.stdout)
+
+
+class IdenticalSearchTest(unittest.TestCase):
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.results = self.dir.name
+        solved = [n for n, t in base_times().items() if t is not None]
+        self.times = {n: 10.0 for n in solved}
+        self.conflicts = {n: 100 for n in solved}
+        self.cpu_a = dict.fromkeys(solved, 2.0)
+        self.cpu_b = dict.fromkeys(solved, 3.0)
+
+    def tearDown(self):
+        self.dir.cleanup()
+
+    def report(self, conflicts_b=None, cpu_a=None, cpu_b=None, with_stats=True):
+        for seed in (1, 2):
+            write_run(self.results, "a-s%d" % seed, seed, self.times, cpus=cpu_a or self.cpu_a,
+                      conflicts=self.conflicts if with_stats else None, date="2026-01-0%dT10:00:00" % seed)
+            write_run(self.results, "b-s%d" % seed, seed, self.times, cpus=cpu_b or self.cpu_b,
+                      conflicts=(conflicts_b or self.conflicts) if with_stats else None,
+                      date="2026-01-0%dT09:00:00" % seed)
+        r = compare(self.results, ["a-s1", "a-s2"], ["b-s1", "b-s2"])
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return r.stdout
+
+    def test_geometric_mean_and_counts(self):
+        out = self.report()
+        section = out[out.index("## Identical searches"):]
+        self.assertIn("| 1 | 50 | 1.500 | 50 | 0 |", section)
+        self.assertIn("| all (per instance) | 50 | 1.500 | 50 | 0 |", section)
+        self.assertLess(out.index("## Result"), out.index("## Identical searches"))
+
+    def test_excluded_instances(self):
+        different = dict(self.conflicts)
+        different[INSTANCES[0]] = 101
+        cpu_a = dict(self.cpu_a)
+        cpu_a[INSTANCES[1]] = 0.5
+        out = self.report(conflicts_b=different, cpu_a=cpu_a)
+        self.assertIn("| 1 | 48 | 1.500 | 48 | 0 |", out)
+        self.assertNotIn("| %s | 1.500" % INSTANCES[0], out)
+
+    def test_family_mark(self):
+        fam1 = [n for n in self.cpu_a if n.startswith("fam1-")]
+        cpu_a = dict(self.cpu_a)
+        cpu_b = dict(self.cpu_b)
+        for n in fam1[3:]:
+            cpu_a[n] = 0.5  # below the CPU limit: not an identical search
+        for n in fam1[:3]:
+            cpu_b[n] = 2.4  # ratio 1.2
+        out = self.report(cpu_a=cpu_a, cpu_b=cpu_b)
+        self.assertIn("| fam1 | 3 | 1.200 | > 1.10 |", out)
+        self.assertNotIn("| fam1 | 2 |", out)
+
+    def test_order_of_runs(self):
+        out = self.report()
+        lines = out[out.index("Order in which the runs started:"):].splitlines()[2:6]
+        self.assertEqual(lines, ["- 2026-01-01T09:00:00 `b-s1`", "- 2026-01-01T10:00:00 `a-s1`",
+                                 "- 2026-01-02T09:00:00 `b-s2`", "- 2026-01-02T10:00:00 `a-s2`"])
+
+    def test_no_stats(self):
+        self.assertIn("no instance with equal conflict counts", self.report(with_stats=False))
 
 
 class StatisticsTest(unittest.TestCase):
