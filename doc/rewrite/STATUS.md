@@ -2516,3 +2516,7 @@ section: `/home/ec2-user/miniqu-work/coord/r3triage/time{1,2,3}.txt`.
 ### Worker tasks
 
 None.
+
+## M1 round 1 independent verification (test worker, head 098edce)
+
+Fresh release/asan/debug builds in miniqu-work/build-v1r1. ctest 40/40 (debug and release); `regress.sh -s 1:300 -M all` release (with smoke per row): PASSED, 0 wrong verdicts, 0 rejected proofs, only the known timeout warnings; asan `-S -s 1:100 -M all -t 240`: PASSED, 0 sanitizer reports; `fuzz_qdimacs.sh` 1:300 with '', -dl, -mode=1, -mode=2: 0 failures; run_regressions 7/7. No failures, no new test files.
