@@ -9,6 +9,8 @@ import sys
 import tempfile
 import unittest
 
+import load_measure
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 CORES = [0, 1, 2, 3]
 
@@ -20,6 +22,21 @@ def fake_solver(path, conflicts):
                 "python3 -c 'import time; t = time.process_time()\nwhile time.process_time() - t < 0.1: pass'\n"
                 "exit 10\n" % conflicts)
     os.chmod(path, 0o755)
+
+
+class IsBusyTest(unittest.TestCase):
+    def test_processes_that_disturb(self):
+        for argv in (["/x/build/release/miniQU", "a.qcir"],
+                     ["/home/u/miniqu-work/baseline/miniQU", "-rnd-init", "a.qcir"],
+                     ["python3", "bench/run.py", "--tag", "t"],
+                     ["python3", "-u", "/r/bench/load_measure.py"]):
+            self.assertTrue(load_measure.is_busy(argv), argv)
+
+    def test_words_in_arguments_do_not_count(self):
+        for argv in (["bash", "-c", "nohup python3 bench/load_measure.py --a /x/miniQU"],
+                     ["SCREEN", "-S", "miniQU"], ["tail", "-f", "/x/miniQU.log"],
+                     ["python3", "tests/regress.py"], ["vim", "bench/run.py"], []):
+            self.assertFalse(load_measure.is_busy(argv), argv)
 
 
 class LoadMeasureTest(unittest.TestCase):

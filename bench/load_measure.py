@@ -39,12 +39,8 @@ DEFAULT_INSTANCES = os.path.join(HERE, "load-instances.txt")
 DEFAULT_BENCH_DIR = "/home/ec2-user/benchmarks/qcir"
 CSV_COLUMNS = ["arm", "round", "instance", "copy", "core", "result", "user", "sys", "conflicts"]
 VERDICTS = {10: "SAT", 20: "UNSAT"}
-# Processes that disturb the measurement: a solver, a benchmark run, another measurement.
-BUSY_PATTERN = r"/miniQU( |$)|bench/run\.py|load_measure\.py"
-
-
 def ancestors():
-    """Pids of this process and its parents (pgrep also matches the shell that started us)."""
+    """Pids of this process and its parents (the shell that started us is not a disturbance)."""
     pids, pid = set(), os.getpid()
     while pid > 1:
         pids.add(pid)
@@ -53,11 +49,38 @@ def ancestors():
     return pids
 
 
+def is_busy(argv):
+    """Whether a process with this argv disturbs the measurement: a solver, a benchmark run
+    or another measurement.  Only what the process is counts, not words in its arguments:
+    a shell whose -c string mentions miniQU is harmless."""
+    if not argv:
+        return False
+    program = os.path.basename(argv[0])
+    if program in ("miniQU", "load_measure.py") or argv[0].endswith("bench/run.py"):
+        return True
+    if not program.startswith("python"):
+        return False
+    script = next((a for a in argv[1:] if not a.startswith("-")), "")
+    return (os.path.basename(script) == "load_measure.py"
+            or (os.path.basename(script) == "run.py"
+                and os.path.basename(os.path.dirname(script)) == "bench"))
+
+
 def busy_processes():
-    """Command lines of other processes that would disturb the measurement."""
-    found = subprocess.run(["pgrep", "-af", BUSY_PATTERN], capture_output=True, text=True).stdout
+    """'PID command line' of every other process that would disturb the measurement."""
     mine = ancestors()
-    return [line for line in found.splitlines() if int(line.split(None, 1)[0]) not in mine]
+    found = []
+    for entry in os.listdir("/proc"):
+        if not entry.isdigit() or int(entry) in mine:
+            continue
+        try:
+            with open("/proc/%s/cmdline" % entry, "rb") as f:
+                argv = f.read().decode(errors="replace").split("\0")[:-1]
+        except OSError:  # the process exited or is not readable
+            continue
+        if is_busy(argv):
+            found.append("%s %s" % (entry, " ".join(argv)))
+    return found
 
 
 def sha256(path):
