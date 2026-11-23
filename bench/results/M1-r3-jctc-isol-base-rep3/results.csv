@@ -1,0 +1,4 @@
+instance,family,result,exit,wall,cpu,rss_mb,proof_status,proof_check_sec,proof_bytes,proof_trim_bytes
+jctc10-fail.qcir,jctc,UNSAT,20,4.685,4.677,56.0,,,,
+jctc2-pass.qcir,jctc,SAT,10,1.811,1.773,50.0,,,,
+jctc8-pass.qcir,jctc,SAT,10,15.206,15.159,74.4,,,,

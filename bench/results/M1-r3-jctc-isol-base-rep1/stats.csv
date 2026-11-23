@@ -1,0 +1,13 @@
+instance,counter,value
+jctc2-pass.qcir,conflicts,3792
+jctc2-pass.qcir,decisions,3286637
+jctc2-pass.qcir,propagations,34068192
+jctc2-pass.qcir,restarts,20
+jctc10-fail.qcir,conflicts,13807
+jctc10-fail.qcir,decisions,9269308
+jctc10-fail.qcir,propagations,93866832
+jctc10-fail.qcir,restarts,61
+jctc8-pass.qcir,conflicts,47477
+jctc8-pass.qcir,decisions,31368684
+jctc8-pass.qcir,propagations,320660577
+jctc8-pass.qcir,restarts,142
