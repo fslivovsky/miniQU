@@ -87,12 +87,29 @@ static void test_redundant_with_id () {
   c.set_id (big);
   c.set_glue (12);
 
-  // Shrinking moves glue and id behind the new last literal.
+  // Glue and used are independent; saturation of the glue does not spill
+  // into used.
+  CHECK_EQ (c.used (), 0u);
+  c.set_used (2);
+  CHECK_EQ (c.used (), 2u);
+  CHECK_EQ (c.glue (), 12u);
+  c.set_glue (UINT32_MAX);
+  CHECK_EQ (c.glue (), Constraint::glue_max);
+  CHECK_EQ (c.used (), 2u);
+  c.set_glue (12);
+  c.set_used (1);
+  CHECK_EQ (c.glue (), 12u);
+  CHECK_EQ (c.used (), 1u);
+  c.set_used (2);
+  CHECK_EQ (c.id (), big);
+
+  // Shrinking moves glue, used and id behind the new last literal.
   CHECK_EQ (c.shrink (2), 2u);
   CHECK_EQ (c.size (), 2u);
   CHECK_EQ (c.words (), Constraint::words (2, true, true));
   CHECK (same_lits (c, lits_of ({1, -2})));
   CHECK_EQ (c.glue (), 12u);
+  CHECK_EQ (c.used (), 2u);
   CHECK_EQ (c.id (), big);
   CHECK (c.redundant () && c.has_id () && c.kind () == Kind::Cube);
 }
@@ -104,6 +121,7 @@ static void test_irredundant_without_id () {
   Constraint &c = deref (arena, r);
   CHECK (!c.redundant () && !c.has_id ());
   CHECK_EQ (c.glue (), 0u);
+  CHECK_EQ (c.used (), 0u);
   CHECK_EQ (c.words (), 1u + 3u);
   CHECK_EQ (c.shrink (1), 2u);
   CHECK_EQ (c.words (), 2u);
@@ -143,6 +161,7 @@ static void test_copy_and_forward () {
   const Ref neighbour =
       alloc_constraint (arena, lits_of ({-4}), Kind::Clause, false, 43);
   deref (arena, r).set_glue (5);
+  deref (arena, r).set_used (1);
 
   Arena to (16);
   const Ref filler = alloc_constraint (to, ls, Kind::Clause, false, {});
@@ -155,6 +174,7 @@ static void test_copy_and_forward () {
   CHECK_EQ (c.size (), 3u);
   CHECK (same_lits (c, ls));
   CHECK_EQ (c.glue (), 5u);
+  CHECK_EQ (c.used (), 1u);
   CHECK_EQ (c.id (), 42u);
   CHECK_EQ (to.size (), Constraint::words (3, false, false) +
                             Constraint::words (3, true, true));

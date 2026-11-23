@@ -40,10 +40,23 @@ namespace miniqu {
   OPTION (check, 0, 0, 1, "check every learnt constraint internally") \
   OPTION (log, 0, 0, 1, "print LOG lines (needs MINIQU_LOGGING)") \
   OPTION (seed, 0, 0, 1000000000, "random initial scores if nonzero") \
-  OPTION (reduceint, 0, 0, 1000000000, \
-          "if nonzero also reduce every n-th (growing) conflict") \
+  OPTION (reduceint, 300, 0, 1000000000, \
+          "reduce every n-th (arithmetically growing) conflict " \
+          "interval, 0=never") \
+  OPTION (reducetarget, 75, 10, 100, \
+          "percent of the reduction candidates deleted") \
+  OPTION (reducesize, 0, 0, 1, \
+          "also reduce when the learnt constraints exceed the MiniSat " \
+          "size limit") \
+  OPTION (tiers, 1, 0, 1, \
+          "recently used learnt constraints survive reduction") \
+  OPTION (glueupdate, 1, 0, 1, \
+          "recompute the glue of learnt constraints used in analysis") \
   OPTION (tier1glue, 2, 0, 1000000000, \
           "learnt constraints up to this glue are kept") \
+  OPTION ( \
+      tier2glue, 6, 0, 1000000000, \
+      "learnt constraints up to this glue are used for two reductions") \
   OPTION (depreset, 20, 1, 1000000000, \
           "reset dependencies every n restarts") \
   OPTION (profile, 0, 0, 3, "profiling level")

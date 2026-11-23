@@ -184,13 +184,13 @@ and deleted only through `constraint.cpp`, assignments only through
 | `analyze.cpp` | Q-resolution analysis (mode 0, default) (7.5) |
 | `analyze_qu.cpp` | the older level-by-level analysis: mode 1, and mode 0 with `--legacyanalyze` |
 | `analyze_ldq.cpp` | long-distance analysis (mode 2) |
-| `learn.cpp` | common tail of the analyses: minimise, reduce, backjump level, glue, proof step, attach, assign; learning a dependency; the final empty constraint |
+| `learn.cpp` | common tail of the analyses: minimise, reduce, backjump level, glue (stamp table), proof step, attach, assign; learning a dependency; the final empty constraint |
 | `minimize.cpp` | learnt-constraint minimisation (`ccminmode` 1-3) |
 | `model.cpp` | initial cube from a satisfying assignment (4.5) |
-| `bump.cpp` | variable scores (EVSIDS), constraint `used`/glue update |
+| `bump.cpp` | variable scores (EVSIDS) |
 | `restart.cpp` | Luby and (M2) EMA restarts, trail reuse |
-| `reduce.cpp` | learnt-database reduction (the *database* sense of "reduce") |
-| `tier.cpp` | (M2) glue tiers, usage histogram, tier limit recomputation |
+| `reduce.cpp` | learnt-database reduction (the *database* sense of "reduce"): conflict and size triggers, tier-aware candidate selection |
+| `tier.cpp` | `used` marks and glue update of learnt constraints bumped by an analysis (M2-T2); usage histogram and tier limit recomputation (M2-T3) |
 | `rephase.cpp`, `mode.cpp` | (M2) rephasing; stable/focused switching |
 | `collect.cpp` | root-level simplification of the databases, arena garbage collection (5.3) |
 | `report.cpp` | progress lines |
@@ -549,6 +549,8 @@ then, only if redundant, one word:
             bits 14-15 used        2   M2 (task M2-T2): 2 or 1 when learnt or
                                        used in an analysis, decremented by
                                        every reduce; 0 = deletion candidate
+                                       (`used ()`, `set_used ()`, 0 for
+                                       irredundant constraints)
             bits 16-31 reserved   16   (scheduling marks for M3+. A bit gets its
                                        name and its accessors in the package
                                        that first uses it.)
@@ -745,9 +747,11 @@ solve ():
 ```
 
 `reduce` does not end the iteration. The old size trigger (`#learnt -
-#assigned >= max_learnts`) can stay true after a reduction (reasons and the
-better half survive), and the old `search` decides right after `reduceDB`;
-ending the iteration would reduce again before the next decision, forever.
+#assigned >= max_learnts`, now `--reducesize`, off by default since M2.2) can
+stay true after a reduction (reasons and the better half survive), and the old
+`search` decides right after `reduceDB`; ending the iteration would reduce
+again before the next decision, forever. The conflict trigger cannot, since
+`reduce` moves `lim.reduce`.
 
 Each `...ing ()` predicate compares a counter with a threshold in `lim`
 (9.4); each action updates its threshold. `analyze` dispatches on the mode,
@@ -1040,15 +1044,23 @@ added. From M1:
 | option | default (M1) | range | stress value | meaning |
 |---|---|---|---|---|
 | `gcfrac` | 20 | 0..100 | 0 | percent of wasted arena that triggers a collection; 0 = collect at every safe point (5.3) |
-| `reduceint` | 0 | 0..1e9 | 2 | if nonzero: also reduce when `conflicts >= lim.reduce`, then `lim.reduce = conflicts + reduceint * reductions` (`reductions` counts this one; the base is the current conflict count so that a burst of conflicts does not cause a burst of reductions). 0 in M1 leaves the old size-based trigger alone; M2.2 makes this the schedule |
-| `tier1glue` | 2 | 0..1e9 | 0 | learnt constraints with glue up to this value are never reduced (the old hard-wired "glue > 2"); becomes the tier-1 limit in M2.2 |
+| `reduceint` | 0 (M1), 300 (M2) | 0..1e9 | 2 | if nonzero: reduce when `conflicts >= lim.reduce`, then `lim.reduce = conflicts + reduceint * reductions` (`reductions` counts this one; the base is the current conflict count so that a burst of conflicts does not cause a burst of reductions). M1: a second trigger beside the size limit; M2.2: the schedule, with the size trigger behind `--reducesize` (default off); 0 = no conflict trigger |
+| `reducesize` | 1 (M1, implicit), 0 (M2) | 0..1 | 1 | MiniSat's size trigger `#learnt - #assigned >= max_learnts` (`lim.max_learnts` and its growth stay named constants in `reduce.cpp`) |
+| `reducetarget` | 50 (M1, implicit), 75 (M2) | 10..100 | 100 | percent of the reduction candidates deleted, worst glue and size first; `candidates * reducetarget / 100` in integers, so 50 is the old half |
+| `tiers` | 1 | 0..1 | 0 | learnt constraints carrying a nonzero `used` mark are not reduction candidates (5.2; `tier.cpp`) |
+| `glueupdate` | 1 | 0..1 | 0 | recompute the glue of a learnt constraint above tier 1 when an analysis uses it, keep it if lower |
+| `tier1glue` | 2 | 0..1e9 | 0 | tier 1: learnt constraints with glue up to this value are never reduced (the old hard-wired "glue > 2") |
+| `tier2glue` | 6 | 0..1e9 | 0 | tier 2: a learnt constraint with glue up to this value gets `used = 2` when learnt or used, the others `used = 1`, so it survives two reductions without use instead of one |
 | `luby`, `rfirst`, `rinc` | 1, 100, 200 (%) | `rfirst` 1.., `rinc` 100.. | `--no-luby --rfirst=1 --rinc=100` | restart after every conflict |
 | `depreset` | 20 | 1..1e9 | 1 | reset dependencies every n-th restart |
+
+The M1-equivalent configuration is `--no-tiers --no-glueupdate
+--reducetarget=50 --reducesize --reduceint=0` (`tests/m1_equiv.sh`).
 
 The arithmetic growth of the `reduceint` schedule is deliberate: a fixed tiny
 interval would keep the learnt database at constant size, and together with
 restarts that can cost termination. Later milestones add their own rows
-(`tier2glue` from 0, `restartint` from 1, `inprocessint` from 1, effort
+(`restartint` from 1, `inprocessint` from 1, effort
 options up to "unbounded", occurrence and size limits from 0); ROADMAP names
 them with each package. Stress values are for tests only and are never
 benchmarked.
@@ -1058,7 +1070,8 @@ benchmarked.
 `struct Stats` contains plain `int64_t` counters grouped by technique
 (`conflicts`, `decisions`, `propagations`, `ticks`, `restarts`,
 `learned[kind]`, `learnedlits[kind]`, `minimized`, `dependencies`,
-`reductions`, `reduced[kind]`, `collections`, `modelcubes`, and per pass:
+`reductions`, `reduced[kind]`, `used[kind]`, `glueupdates[kind]`,
+`promoted[kind]`, `collections`, `modelcubes`, and per pass:
 rounds, tried, successful, removed literals...). They are incremented
 directly (`stats.conflicts++`) and printed in one place (`stats.cpp`) at
 verbosity >= 1, each line prefixed with `c `. Current database sizes are

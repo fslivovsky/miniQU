@@ -51,7 +51,7 @@ int main () {
   CHECK_EQ (o.gcfrac, 20);
   CHECK_EQ (o.tier1glue, 2);
   CHECK_EQ (o.depreset, 20);
-  CHECK_EQ (o.reduceint, 0);
+  CHECK_EQ (o.reduceint, 300);
   CHECK_EQ (o.seed, 0);
 
   // The table agrees with the struct, and every option accepts both ends

@@ -27,6 +27,9 @@ namespace miniqu {
   COUNTER (depresets) \
   COUNTER (reductions) \
   KIND_COUNTER (reduced) \
+  KIND_COUNTER (used) \
+  KIND_COUNTER (glueupdates) \
+  KIND_COUNTER (promoted) \
   COUNTER (collections) \
   COUNTER (relocated) \
   COUNTER (modelcubes) \

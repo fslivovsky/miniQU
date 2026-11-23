@@ -132,12 +132,13 @@ struct Internal {
   // 'analyze' and 'initial_cube'; so are 'level_count' and, at 'no_var',
   // 'level_blocked' (both per decision level).
   std::vector<uint8_t> seen;
-  std::vector<Lit> analyzed;      // every literal added to the resolvent
-  std::vector<int> level_count;   // primary literals per level
-  std::vector<Var> level_blocked; // leftmost secondary variable per level
-  std::vector<Lit> derived;       // the learnt constraint
-  std::vector<uint64_t> chain;    // antecedent ids, only with a proof
-  std::vector<int> glue_levels;
+  std::vector<Lit> analyzed;        // every literal added to the resolvent
+  std::vector<int> level_count;     // primary literals per level
+  std::vector<Var> level_blocked;   // leftmost secondary variable per level
+  std::vector<Lit> derived;         // the learnt constraint
+  std::vector<uint64_t> chain;      // antecedent ids, only with a proof
+  std::vector<int64_t> glue_stamps; // per level: stamp of the last count
+  int64_t glue_stamp = 0;           // running stamp of 'compute_glue'
   LevelAnalysis qu;
   LongDistanceAnalysis ldq;
   Minimizer minimizer;
@@ -231,7 +232,7 @@ struct Internal {
   void analyze_ldq (Ref conflict);
 
   // learn.cpp
-  uint32_t compute_glue (std::span<const Lit>);
+  uint32_t compute_glue (std::span<const Lit>, uint32_t bound = UINT32_MAX);
   bool minimizing () const;
   void learn (Kind, Var asserting);
   void learn_watched (Kind);
@@ -248,6 +249,10 @@ struct Internal {
   void protect_reasons ();
   void unprotect_reasons ();
   void reduce ();
+
+  // tier.cpp
+  void mark_used (Constraint &);
+  void bump_constraint (Constraint &);
 
   // collect.cpp
   bool collecting () const;

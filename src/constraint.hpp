@@ -19,7 +19,8 @@ namespace miniqu {
 //   word 0          bits 0-5: kind, redundant, garbage, moved, reason,
 //                   has_id; bits 6-31: size
 //   words 1..size   literals
-//   if redundant    one word: bits 0-13 saturating glue, 14-31 reserved
+//   if redundant    one word: bits 0-13 saturating glue, 14-15 used,
+//                   16-31 reserved
 //   if has_id       two words: the 64-bit proof id, low word first
 //
 // This is MiniSat's scheme.  Under benchmark load (eight processes sharing
@@ -51,6 +52,8 @@ class Constraint {
   static constexpr uint32_t flags_mask = (1u << size_shift) - 1;
   static constexpr unsigned glue_bits = 14;
   static constexpr uint32_t glue_mask = (1u << glue_bits) - 1;
+  static constexpr unsigned used_shift = glue_bits;
+  static constexpr uint32_t used_mask = 3u << used_shift;
 
   bool test (uint32_t bit) const { return head & bit; }
   void set (uint32_t bit, bool value) {
@@ -93,6 +96,7 @@ public:
   // saturates.
   static constexpr uint32_t size_max = (1u << (32 - size_shift)) - 1;
   static constexpr uint32_t glue_max = glue_mask;
+  static constexpr uint32_t used_max = 2;
 
   // Number of arena words of a constraint.  A constraint has at least one
   // literal, which also holds the forwarding reference during garbage
@@ -161,6 +165,18 @@ public:
     assert (redundant ());
     uint32_t &w = *word (glue_word ());
     w = (w & ~glue_mask) | std::min (g, glue_max);
+  }
+
+  // How recently a learnt constraint was learnt or used in an analysis
+  // (tier.cpp): 0 for irredundant constraints and deletion candidates.
+  uint32_t used () const {
+    return redundant () ? (*word (glue_word ()) & used_mask) >> used_shift
+                        : 0;
+  }
+  void set_used (uint32_t u) {
+    assert (redundant () && u <= used_max);
+    uint32_t &w = *word (glue_word ());
+    w = (w & ~used_mask) | u << used_shift;
   }
 
   uint64_t id () const {

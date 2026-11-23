@@ -24,7 +24,9 @@
 // Glue is the number of distinct decision levels of the assigned literals,
 // computed before the backjump unassigns them (porting note 8).  Learnt
 // constraints are redundant, except units, which 'new_constraint' stores
-// irredundant (ARCHITECTURE 4.3).
+// irredundant (ARCHITECTURE 4.3).  A redundant one starts with the usage
+// mark of 'tier.cpp', so it survives the next reductions as a recently
+// used constraint does.
 //
 // In mode 1 the asserting literal may be secondary (QU-resolution
 // propagates such literals too).  It is never removed by reduction there:
@@ -48,15 +50,27 @@
 
 namespace miniqu {
 
-uint32_t Internal::compute_glue (std::span<const Lit> lits) {
-  glue_levels.clear ();
-  for (Lit l : lits)
-    if (val (l))
-      glue_levels.push_back (level (var (l)));
-  std::sort (glue_levels.begin (), glue_levels.end ());
-  return static_cast<uint32_t> (
-      std::unique (glue_levels.begin (), glue_levels.end ()) -
-      glue_levels.begin ());
+// One stamp per decision level instead of a sort (CaDiCaL's 'gtab'): the
+// count is linear in the size and recomputations in analysis stay cheap.
+// With a 'bound' the count stops once it reaches it, since the caller only
+// wants to know whether the glue is below.
+uint32_t Internal::compute_glue (std::span<const Lit> lits,
+                                 uint32_t bound) {
+  if (glue_stamps.size () <= (size_t) decision_level ())
+    glue_stamps.resize ((size_t) decision_level () + 1, 0);
+  const int64_t stamp = ++glue_stamp;
+  uint32_t glue = 0;
+  for (Lit l : lits) {
+    if (!val (l))
+      continue;
+    int64_t &last = glue_stamps[(size_t) level (var (l))];
+    if (last == stamp)
+      continue;
+    last = stamp;
+    if (++glue >= bound)
+      break;
+  }
+  return glue;
 }
 
 bool Internal::minimizing () const { return opts.ccminmode && !proof; }
@@ -102,6 +116,8 @@ void Internal::learn_watched (Kind kind) {
   stats.learnedlits[index (kind)] += (int64_t) derived.size ();
   backtrack (jump);
   const Ref ref = new_constraint (next_id++, kind, derived, true, glue);
+  if (Constraint &learnt = deref (arena, ref); learnt.redundant ())
+    mark_used (learnt);
   if (proof)
     proof->add_derived (deref (arena, ref), chain);
   assign (forced (kind, derived[0]), ref);

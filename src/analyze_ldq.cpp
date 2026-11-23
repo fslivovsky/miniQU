@@ -35,7 +35,9 @@
 // y.  Root-level literals are resolved only while no literal above the
 // root is left, which then ends with the empty constraint.
 //
-// Every variable that enters the resolvent is bumped.  Minimisation does
+// Every variable that enters the resolvent is bumped, and so is every
+// constraint the analysis starts from or resolves with ('tier.cpp').
+// Minimisation does
 // not apply to long-distance resolvents (the old code calls it only from
 // the other two analyses).
 //
@@ -127,7 +129,8 @@ private:
 };
 
 void LongDistanceAnalyzer::start (Ref conflict) {
-  const Constraint &c = deref (s.arena, conflict);
+  Constraint &c = deref (s.arena, conflict);
+  s.bump_constraint (c);
   for (Lit l : c)
     if (is_primary (var (l)))
       rightmost = std::max (rightmost, depth (var (l)));
@@ -193,8 +196,9 @@ Var LongDistanceAnalyzer::next_pivot () {
 }
 
 void LongDistanceAnalyzer::resolve (Var pivot) {
-  const Constraint &c = deref (s.arena, s.reason (pivot));
+  Constraint &c = deref (s.arena, s.reason (pivot));
   assert (var (c[0]) == pivot && c.kind () == kind);
+  s.bump_constraint (c);
   remove (vanished (pivot));
   count (pivot)--;
   s.seen[pivot] = 0;

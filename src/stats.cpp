@@ -19,7 +19,10 @@ void Stats::print (FILE *file, double seconds) const {
     fprintf (file, "c %-16s %12" PRId64 " %12.2f per second\n", name, count,
              relative ((double) count, seconds));
   };
-  const int64_t learned_total = learned[0] + learned[1];
+  const auto total = [] (const int64_t (&counter)[2]) {
+    return counter[0] + counter[1];
+  };
+  const int64_t learned_total = total (learned);
   fprintf (file, "c\n");
   row ("conflicts:", conflicts);
   row ("decisions:", decisions);
@@ -30,6 +33,11 @@ void Stats::print (FILE *file, double seconds) const {
            "size:",
            relative ((double) (learnedlits[0] + learnedlits[1]),
                      (double) learned_total));
+  row ("reductions:", reductions);
+  row ("reduced:", total (reduced));
+  row ("used:", total (used));
+  row ("glue updates:", total (glueupdates));
+  row ("promoted:", total (promoted));
   fprintf (file, "c %-16s %12.2f seconds\n", "time:", seconds);
 }
 

@@ -35,6 +35,9 @@
 // comparisons of variables are index comparisons (INV-ORDER); 'no_var' is
 // greater than every variable, so "no blocked variable" needs no case.
 //
+// Every constraint whose literals are added to the resolvent is bumped
+// ('tier.cpp'), the conflict and the reasons resolved with.
+//
 // Proof: the learnt constraint is one QLRUP step whose chain is the
 // conflict id followed by the reason ids in resolution order ('chain',
 // filled only when a proof is written), logged by 'learn'.
@@ -80,8 +83,9 @@ void Internal::analyze_q (Ref conflict) {
 
   // Adds the literals of a constraint from position 'from' on.
   const auto add = [&] (Ref ref, uint32_t from) {
-    const Constraint &c = deref (arena, ref);
+    Constraint &c = deref (arena, ref);
     assert (c.kind () == kind);
+    bump_constraint (c);
     if (proof)
       chain.push_back (c.id ());
     for (uint32_t i = from; i < c.size (); i++) {

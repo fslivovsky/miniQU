@@ -35,9 +35,10 @@
 // leftmost blocked variable, which is left of it and on its level or
 // above.
 //
-// Every variable that enters the resolvent is bumped.  Root-level literals
-// are resolved only while no literal above the root is left, which then
-// ends with the empty constraint.
+// Every variable that enters the resolvent is bumped, and so is every
+// constraint a round starts from or resolves with ('tier.cpp').  Root-level
+// literals are resolved only while no literal above the root is left, which
+// then ends with the empty constraint.
 //
 // Proof: as in 'analyze.cpp', the chain is the id of the constraint the
 // round started from, followed by the reason ids in resolution order; a
@@ -145,7 +146,8 @@ private:
 };
 
 void LevelAnalyzer::start (Ref conflict) {
-  const Constraint &c = deref (s.arena, conflict);
+  Constraint &c = deref (s.arena, conflict);
+  s.bump_constraint (c);
   if (s.proof)
     s.chain.push_back (c.id ());
   for (Lit l : c)
@@ -200,8 +202,9 @@ Outcome LevelAnalyzer::run (Ref conflict) {
 }
 
 void LevelAnalyzer::resolve (Var v, Ref ref) {
-  const Constraint &c = deref (s.arena, ref);
+  Constraint &c = deref (s.arena, ref);
   assert (var (c[0]) == v);
+  s.bump_constraint (c);
   if (s.proof)
     s.chain.push_back (c.id ());
   remove (v);

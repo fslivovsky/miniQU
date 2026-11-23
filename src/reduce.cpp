@@ -6,27 +6,44 @@
 // deletion is a QLRUP 'd' step that 'mark_garbage' emits (soundness class
 // 11.2 "deletion").  Units are irredundant and never deleted.
 //
-// Old policy (porting note 7), still the default in M1: reduce when the
-// number of learnt constraints of both kinds minus the number of assigned
-// variables reaches 'lim.max_learnts'.  That limit starts at a third of the
-// original constraints (at least '--minlearnts') and grows by 10% after
-// each of the conflict counts 100, 150, 225, ... (the interval itself grows
-// by 50%), as in MiniSat.  '--reduceint=n' adds a second trigger for stress
-// tests: every 'n * (reductions + 1)' conflicts.  Its growth is arithmetic
-// on purpose: a fixed tiny interval would keep the databases at a constant
-// size and, together with restarts, can cost termination.
+// Two triggers, either of which starts a reduction:
 //
-// Per kind, the candidates are the learnt constraints that are not the
-// reason of an assignment and have glue above '--tier1glue'; the worse half
-// is deleted, ordered by glue, then by size, both descending (the old
-// tie-break by activity is replaced by size).  The sort is stable and the
-// candidates are taken in the order of the list, which is creation order
-// (garbage collection keeps it), so ties keep creation order: the order of
-// the ids, without reading them, which are not stored without a proof.
-// Reasons are protected by a header bit that is set only inside 'reduce'.
+//  - the conflict schedule ('--reduceint=n', 0 = never): the first
+//    reduction after n conflicts, then 'reductions' times n conflicts after
+//    the previous one.  The growth is arithmetic on purpose: a fixed tiny
+//    interval would keep the databases at a constant size and, together
+//    with restarts, can cost termination.  The base is the current conflict
+//    count so that a burst of conflicts does not cause a burst of
+//    reductions.
+//  - the size limit of MiniSat ('--reducesize', off by default): the number
+//    of learnt constraints of both kinds minus the number of assigned
+//    variables reaches 'lim.max_learnts'.  That limit starts at a third of
+//    the original constraints (at least '--minlearnts') and grows by 10%
+//    after each of the conflict counts 100, 150, 225, ... (the interval
+//    itself grows by 50%).  The constants below are MiniSat's.
 //
-// The size trigger can stay true after a reduction (protected constraints,
-// the half that is kept), so the search loop decides right after 'reduce',
+// Per kind, a learnt constraint that is not the reason of an assignment is
+// kept if
+//
+//  1. '--tiers' and its 'used' mark is nonzero (the mark is decremented,
+//  see
+//     'tier.cpp'), or
+//  2. its glue is at most '--tier1glue'.
+//
+// Everything else is a candidate.  The candidates are sorted by glue, then
+// by size, both descending (the old tie-break by activity is replaced by
+// size), and the first '--reducetarget' percent of them are deleted, so the
+// worst go.  The sort is stable and the candidates are taken in the order
+// of the list, which is creation order (garbage collection keeps it), so
+// ties keep creation order: the order of the ids, without reading them,
+// which are not stored without a proof.  Reasons are protected by a header
+// bit that is set only inside 'reduce'.
+//
+// The M1 solver is reproduced bit for bit by '--no-tiers --no-glueupdate
+// --reducetarget=50 --reducesize --reduceint=0' (tests/m1_equiv.sh).
+//
+// A trigger can stay true after a reduction (protected constraints, the
+// share that is kept), so the search loop decides right after 'reduce',
 // like the old 'search' does, instead of reducing again at once.
 
 #include "internal.hpp"
@@ -65,6 +82,8 @@ void Internal::adjust_learnt_limit () {
 bool Internal::reducing () const {
   if (opts.reduceint && stats.conflicts >= lim.reduce)
     return true;
+  if (!opts.reducesize)
+    return false;
   const int64_t learnts =
       (int64_t) (redundant[0].size () + redundant[1].size ());
   return (double) (learnts - (int64_t) trail.size ()) >= lim.max_learnts;
@@ -91,8 +110,14 @@ void Internal::reduce () {
     std::vector<Ref> &list = redundant[index (kind)];
     candidates.clear ();
     for (Ref ref : list) {
-      const Constraint &c = deref (arena, ref);
-      if (!c.reason () && c.glue () > (uint32_t) opts.tier1glue)
+      Constraint &c = deref (arena, ref);
+      if (c.reason ())
+        continue;
+      if (opts.tiers && c.used ()) {
+        c.set_used (c.used () - 1);
+        continue;
+      }
+      if (c.glue () > (uint32_t) opts.tier1glue)
         candidates.push_back (ref);
     }
     std::stable_sort (candidates.begin (), candidates.end (),
@@ -103,7 +128,8 @@ void Internal::reduce () {
                           return x.glue () > y.glue ();
                         return x.size () > y.size ();
                       });
-    const size_t deleted = candidates.size () / 2;
+    const size_t deleted =
+        candidates.size () * (size_t) opts.reducetarget / 100;
     for (size_t i = 0; i < deleted; i++)
       mark_garbage (candidates[i]);
     stats.reduced[index (kind)] += (int64_t) deleted;
