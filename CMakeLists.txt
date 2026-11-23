@@ -160,6 +160,8 @@ add_test(NAME bench-compare
          COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/bench/test_compare.py)
 add_test(NAME bench-load-measure
          COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/bench/test_load_measure.py)
+add_test(NAME bench-l3-table
+         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/bench/test_l3_table.py)
 add_test(NAME regress-limits
          COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_regress_limits.sh
          WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
