@@ -2573,3 +2573,59 @@ in ROADMAP (2.0 s PAR2, seeds 4 and 5, default and `-dl`).
 New rows of `tests/matrix.txt` follow D1 of round 1: `--reduceint=2` in default rows, `--reduceint=30` with `-dl`,
 `100` with `-mode=1`; a row limit above 2% needs the same row measured without the new feature (or on the M1
 binary) with a comparable timeout rate, recorded in the task's STATUS entry.
+
+## M2-T1 (worker, 2026-11-23): housekeeping after review M1-r3
+
+Commits on `rewrite/cadical-style`: `f024ced` old tree removed, `e85b759` gate.py noise rule, `2d2e7f1` bench scripts,
+`50ede3f` nits, then the proof-coverage results. No solver behaviour change.
+
+**Old tree (H2).** `git rm -r minisat Makefile`. The whole tree was searched (CMakeLists.txt, tests/, test/, bench/,
+tools/, README.md, qbfuzz.py, qbfdd.py, test_correctness): the only references were README.md (build instructions of the old
+Makefile, now the CMake presets plus one sentence on where the old sources are) and two comments about the baseline heap
+(`src/heap.hpp`, `test/unit/heap.cpp`), which now say "old solver, commit c39005a". No script used a binary of the old
+Makefile. `test_correctness` is a generic bash driver (random QBFs against a trusted solver, expects `qbfuzz.py` and a
+`dd-discrepancy.sh` in the working directory); it does not depend on the old build, its purpose is older than the
+rewrite, and it was left untouched. Committed files under `bench/results/` and `doc/` still mention `minisat/` as history.
+
+**gate.py (H1).** `--confirm NAME:BASE_TAGS:NEW_TAGS` (second back-to-back pair of the `--pair` NAME): a family FAIL that is
+within the limit in the repeat is `NOISE (first X, repeat Y)` and does not fail the gate, otherwise `FAIL (repeated)`. The
+pooled line is never excused; a family missing in the confirm pair keeps its FAIL. A failing run without `--confirm` ends
+with the hint to rerun back to back and pass `--confirm`. `--self NAME:TAGS_A:TAGS_B` prints the same-binary pooled and
+family ratios as information. Six new cases in `bench/test_gate.py` (fail then pass = NOISE and exit 0, fail-fail = exit 1,
+no `--confirm` = old behaviour plus hint, pooled not excused, `--confirm` without `--pair` of that name = exit 2, `--self`
+table). Documented in `bench/README.md`. The summary line without findings now reads "no FAIL, NOISE and REPORT lines".
+
+**Nits.** `WatchList::erase (first, last)` replaced by `truncate (first)` (callers in `propagate.hpp`,
+`propagate_ldq.cpp`, `watch.hpp`, `test/unit/watch.cpp`); the capacity messages of `fatal` use `PRIu64` (also the two
+`%lu` casts in `model.cpp`). `bench/l3lib.sh` has no default binary any more (`cross.sh` requires `NEW`, `nb.sh` requires
+`NEW` unless specs are given); `l3.sh`, `cross.sh` and `nb.sh` print `sha256 ARM HASH PATH` per arm first (tried with
+`l3.sh -t 2 -r 1` on one instance).
+
+**Checks.** Presets release, debug, asan and release-clang build without warnings. `ctest --preset release` and `--preset debug`:
+40/40 passed (including `bench-gate`; `format` needed one `clang-format -i` of the touched files). `taskset -c 0-47
+tests/regress.sh -j 16 -s 1:40 -M all build/release/miniQU`: REGRESSION TESTS PASSED (3 warnings, all solver timeouts of the
+rows `noearly`, `restart-dl`, `restart-mode1-dl`, one each, as before). Same search: for every instance of
+`bench/smoke.txt` with `''` and `-dl`, the `c stat` lines conflicts/decisions/propagations/ticks of the new release binary
+are identical to `build/bench-M1-r3/miniQU` (no difference, none empty). `git grep -n 'minisat/'` outside `doc/` and
+`bench/results/` shows only the README sentence and the two comments.
+
+**Proof coverage of the M1 binary (H3).** Command (cores 48-95, 48 jobs, nothing else on them; proofs on cores 0-47):
+`python3 bench/run.py --solver /home/ec2-user/miniqu-work/build/bench-M1-r3/miniQU --tag M1-r3-proofcov-default-s0
+--timeout 60 --seed 0 --proof-check --proof-max-solve-sec 20 --proof-timeout 600`; results in
+`bench/results/M1-r3-proofcov-default-s0/` (`solver_sha256` 006221...85ad; the `solver_git` field says 50ede3f because it
+records the repo HEAD, not the commit of the binary). The proof binary format was used (`-proof-binary`).
+
+| solved (60 s) | attempted (solved <= 20 s) | accepted | rejected | checker timeout | checker memout | too large | proof run unfinished | not attempted |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 151 (89 SAT, 62 UNSAT) | 117 | 117 | 0 | 0 | 0 | 0 | 0 | 34 |
+
+Unsolved in 60 s: 224 timeouts and one memory-limit hit (`2.1.qcir`). Every non-accepted solved instance is "not
+attempted" because its solve time exceeded 20 s: 11.1, 3.1, 5.1-1, 5.2-1, 9.2, DW-unsat-10-25-1, Lights2_0f5381e9.tlsf,
+amba2c7n.sat, bt-3x6_9.ig, connect-6x6_9_connect3.ig, eequery_query42_1344, jctc14-unrolled-fail,
+klieber2017q-064-16-eq, -066-16-eq, -068-17-t1, -070-17-eq, -072-18-eq, -072-18-t1, -074-18-eq, -074-18-t1, -076-19-eq,
+-076-19-t1, -078-19-eq, -078-19-t1, -080-20-t1, -086-21-t1, -100-25-t1, -108-27-t1, mult9.sat, sc-ungrounded-2x2X2x2_1,
+test_5_5_el.pg-13, test_5_5_fatty.pg-9, test_5_5_skinny.pg-9, test_5_5_tippy.pg-9 (all `.qcir`). The 117 accepted proofs
+total 3.8 GB (binary format); the slowest check took 329 s of the 600 s limit, so later rounds with larger proofs will
+reach the checker limit first. No rejected proof, no M1 blocker.
+
+Open: nothing from this task. The coverage reference for the M2 gate is 117/117 attempted accepted (151 solved, limit 20 s).
