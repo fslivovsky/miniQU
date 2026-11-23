@@ -33,6 +33,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include <cinttypes>
 #include <optional>
 
 namespace miniqu {
@@ -70,8 +71,8 @@ void Internal::check_model_cube () const {
     if (std::none_of (c.begin (), c.end (), [this] (Lit l) {
           return seen[var (l)] && val (l) > 0;
         }))
-      fatal ("internal error: initial cube misses clause %lu",
-             (unsigned long) message_id (c));
+      fatal ("internal error: initial cube misses clause %" PRIu64,
+             message_id (c));
   }
 }
 
@@ -93,9 +94,10 @@ Ref Internal::initial_cube () {
           hit = l;
       }
     if (hit == lit_undef)
-      fatal ("internal error: clause %lu not satisfied by a complete "
+      fatal ("internal error: clause %" PRIu64
+             " not satisfied by a complete "
              "assignment",
-             (unsigned long) message_id (c));
+             message_id (c));
     if (!seen[var (hit)]) {
       seen[var (hit)] = 1;
       model.push_back (hit);

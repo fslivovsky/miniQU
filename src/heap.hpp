@@ -12,11 +12,11 @@ namespace miniqu {
 // Indexed binary max-heap on variables, ordered by a score vector owned by
 // the solver (so that bumping writes the score and calls 'update').
 // Scores are compared strictly, and every operation does what the
-// baseline's MiniSat heap ('minisat/mtl/Heap.h') does, step by step: the
-// order of equal scores then follows from the history of heap operations
-// exactly as in the baseline, so that an unseeded run (all initial scores
-// 0) makes the baseline's decisions as far as the rest of the port is
-// faithful (ARCHITECTURE 7.3).
+// baseline's MiniSat heap (old solver, commit c39005a,
+// 'minisat/mtl/Heap.h') does, step by step: the order of equal scores then
+// follows from the history of heap operations exactly as in the baseline,
+// so that an unseeded run (all initial scores 0) makes the baseline's
+// decisions as far as the rest of the port is faithful (ARCHITECTURE 7.3).
 // The score vector must outlive the heap and cover every variable pushed.
 //
 // A heap only ever holds variables from 'offset' on, and its position table

@@ -78,7 +78,7 @@ template <Kind K, Lone R> Ref Internal::propagate_watches (Lit p) {
       break;
     }
   }
-  list.erase (j, end);
+  list.truncate (j);
   return conflict;
 }
 

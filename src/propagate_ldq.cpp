@@ -139,7 +139,7 @@ template <Kind K> Ref Internal::propagate_ldq_watches (Lit p) {
     }
     assign (forced (K, first), w.ref);
   }
-  list.erase (j, end);
+  list.truncate (j);
   return conflict;
 }
 

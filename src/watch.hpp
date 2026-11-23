@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <array>
 #include <cassert>
+#include <cinttypes>
 #include <cstdint>
 #include <cstdlib>
 #include <type_traits>
@@ -41,8 +42,7 @@ class WatchList {
       fatal ("out of memory: watch list exceeds 2^32 watches");
     void *p = std::realloc (data, sizeof (Watch) * (size_t) capacity);
     if (!p)
-      fatal ("out of memory: watch list of %lu watches",
-             (unsigned long) capacity);
+      fatal ("out of memory: watch list of %" PRIu64 " watches", capacity);
     data = static_cast<Watch *> (p);
     capacity_ = static_cast<uint32_t> (capacity);
   }
@@ -83,10 +83,9 @@ public:
     data[size_++] = w;
   }
 
-  // Truncates to 'first'; '[first, last)' must be the suffix.
-  void erase (Watch *first, [[maybe_unused]] Watch *last) {
+  // Drops the suffix starting at 'first'.
+  void truncate (Watch *first) {
     assert (begin () <= first && first <= end ());
-    assert (last == end ());
     size_ = static_cast<uint32_t> (first - data);
   }
 
@@ -128,11 +127,10 @@ class Watches {
   std::array<std::vector<Lit>, 2> dirty_lits; // flag set, once each
 
   static void remove_garbage (WatchList &list, const Arena &arena) {
-    list.erase (std::remove_if (list.begin (), list.end (),
-                                [&arena] (const Watch &w) {
-                                  return deref (arena, w.ref).garbage ();
-                                }),
-                list.end ());
+    list.truncate (std::remove_if (list.begin (), list.end (),
+                                   [&arena] (const Watch &w) {
+                                     return deref (arena, w.ref).garbage ();
+                                   }));
   }
 
   void clear_dirty_flags () {

@@ -7,9 +7,9 @@
 
 using namespace miniqu;
 
-// The reference: the baseline's heap ('minisat/mtl/Heap.h' with the strict
-// order of 'VarOrderLt'), transcribed operation by operation (positions
-// unsigned, 'absent' for MiniSat's -1).
+// The reference: the baseline's heap (old solver, commit c39005a,
+// 'minisat/mtl/Heap.h' with the strict order of 'VarOrderLt'), transcribed
+// operation by operation (positions unsigned, 'absent' for MiniSat's -1).
 class MinisatHeap {
   static constexpr uint32_t absent = UINT32_MAX;
   const std::vector<double> &activity;

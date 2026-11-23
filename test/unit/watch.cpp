@@ -66,9 +66,9 @@ static void test_erase_and_clear () {
   CHECK (holds (list, {0, 1, 3, 4, 5}));
   list.erase (list.end () - 1);
   CHECK (holds (list, {0, 1, 3, 4}));
-  list.erase (list.begin () + 3, list.end ()); // suffix
+  list.truncate (list.begin () + 3); // suffix
   CHECK (holds (list, {0, 1, 3}));
-  list.erase (list.end (), list.end ());
+  list.truncate (list.end ());
   CHECK (holds (list, {0, 1, 3}));
   const size_t capacity = list.capacity ();
   list.clear ();
