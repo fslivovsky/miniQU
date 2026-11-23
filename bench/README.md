@@ -117,12 +117,52 @@ PAR2 difference `B - A` (instance score = mean PAR2 over the seeds) with its 95%
 (10000 resamples over instances, fixed generator seed, percentile method); the sign test with
 margin `max(1 s, 10% of the smaller score)` and the two-sided binomial p-value; the verdict
 (`better`, `worse` or `no measurable difference`) and the line "B is not worse than A: yes/no", all
-as defined in ROADMAP 0.3; solved (SAT/UNSAT/total) and PAR2 per seed and the noise band; the
+as defined in ROADMAP 0.3; the section **Identical searches** (below); solved (SAT/UNSAT/total) and PAR2 per seed and the noise band; the
 instances gained and lost in a majority of seeds, by name; a per-family table; the largest
 differences; instances solved by both whose peak RSS in B exceeds A's by more than 10%; and the
 proof coverage table (solved, attempted, accepted, rejected, checker timeout, checker memout, too
 large, checker error, proof run unfinished, not attempted; every non-accepted instance by name).
 `bench/test_compare.py` (run by ctest) tests this on synthetic CSVs.
+
+The `## Parameters` section also lists every run of both sets with its tag and the `date` of its
+`meta.json`, sorted by date ("Order in which the runs started"), so that the order of the arms is
+visible. The section `## Identical searches` follows `## Result`. For each seed the A run and the B
+run are paired; an instance qualifies if both solved it with the same result, both have a
+`conflicts` counter in `stats.csv` and the counters are equal, and A's `cpu` exceeds 1 s. Both
+arms then ran the same search, so the ratio `cpu_B / cpu_A` measures engine speed. The report has
+a table per seed (n, geometric mean, number slower and faster) and a row with the instances pooled
+over the seeds (geometric mean over the seeds of an instance first), a per-family table (marked
+`> 1.10` for families of at least 3 instances above 1.10), and the 15 largest and 5 smallest
+ratios. Without `stats.csv` it says `no instance with equal conflict counts`.
+
+## load_measure.py
+
+    python3 bench/load_measure.py --a BIN --a-args "-rnd-init -rnd-seed=1" --b BIN --b-args "--seed=1" \
+        --tag TAG [--a-name N] [--b-name N] [--instances bench/load-instances.txt] [--copies 4] \
+        [--rounds 2] [--cores 0-47] [--timeout 300] [--bench-dir DIR] [--force]
+
+CPU time (user) of two binaries on **identical searches under benchmark-like load**. The twelve
+instances of `bench/load-instances.txt` (the reviewer's list of M1 round 1) run in `--copies`
+copies, one process per core, copy k of instance j on core number `k * instances + j` of `--cores`
+(the same core in both arms). The arms run in **separate rounds** (A, B, A, B, ...): all processes
+alive at one time are the same binary. The machine has L3 caches of 32 MB shared by 8 cores each;
+on an idle machine, or with the two binaries interleaved, a binary with a larger cache footprint
+is hidden, because the neighbours of a process are not copies of itself. A benchmark run (one
+binary, every core busy) is the situation all later milestones are judged in, so memory-layout
+decisions (ARCHITECTURE 5.2: header size, glue and id words) are measured with this script and
+not on an idle machine. The script refuses to start if more processes than cores are requested
+or `pgrep` finds another solver, `bench/run.py` or `load_measure.py` (`--force` overrides and is
+noted in the report); it must be the only heavy job on the machine.
+
+Every solver runs with `-verb=1` appended to its arguments. Output in `bench/results/TAG/`:
+`load.csv` (arm, round, instance, copy, core, result, user, sys, conflicts), `meta.json` (both
+binaries with path, sha256 and arguments, cores, copies, rounds, date, host, the order of the
+rounds with start times) and `load.md`: per instance the median user time of A and B over all
+copies and rounds, the ratio B / A, the min-max of each arm, and whether the conflict counts
+(from `c stat conflicts N` or the baseline's `conflicts :` line) are equal in every run of both
+arms. Rows with different counts are marked `different search` and left out of the geometric mean
+in the last row; an instance with a timeout or another exit code than 10 / 20 is `unfinished` and
+also left out. `bench/test_load_measure.py` (ctest) tests the bookkeeping with fake solvers.
 
 ## fidelity.py and overhead.py
 

@@ -1,0 +1,12 @@
+DW-sat-08-22-1.qcir
+DW-unsat-09-22-1.qcir
+jctc10-fail.qcir
+DW-sat-09-26-1.qcir
+chess_solving_mate_in_3_2003_UKR-CH_04.qcir
+9.2.qcir
+chess_solving_mate_in_3_2012_GRE-CH-11_02.qcir
+chess_solving_mate_in_3_1991_WCSC-15_05.qcir
+4.1.qcir
+5.2-1.qcir
+hadw11-12.qcir
+ltl2dba_beta6.tlsf.qcir

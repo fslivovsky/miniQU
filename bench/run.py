@@ -193,20 +193,24 @@ def printed_verdict(path):
     return verdict
 
 
-def parse_stats(path):
-    """Counters printed at -verb=1: "c stat NAME VALUE" lines of the new solver,
-    else the baseline's "name : value" lines.  Empty when the run was killed."""
-    try:
-        with open(path, errors="replace") as f:
-            text = f.read()
-    except OSError:
-        return {}
+def parse_stats_text(text):
+    """Counters in the output of a solver run at -verb=1: "c stat NAME VALUE" lines of the
+    new solver, else the baseline's "name : value" lines."""
     stats = {m.group(1): int(m.group(2))
              for m in re.finditer(r"^c stat (\S+) (\d+)$", text, re.M)}
     if not stats:
         stats = {m.group(1): int(m.group(2))
                  for m in re.finditer(r"^(%s)\s*:\s*(\d+)" % "|".join(BASELINE_STATS), text, re.M)}
     return stats
+
+
+def parse_stats(path):
+    """Counters printed to the output file at -verb=1; empty when the run was killed."""
+    try:
+        with open(path, errors="replace") as f:
+            return parse_stats_text(f.read())
+    except OSError:
+        return {}
 
 
 def classify(r, printed):
