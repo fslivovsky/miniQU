@@ -4,7 +4,7 @@
 #include "database.hpp"
 #include "test.hpp"
 
-#include <map>
+#include <optional>
 #include <set>
 #include <tuple>
 #include <vector>
@@ -13,21 +13,28 @@ using namespace miniqu;
 
 static constexpr Kind Clause = Kind::Clause, Cube = Kind::Cube;
 
-// Everything observable about the live constraints, independent of where
-// they are: id -> (kind, redundant, glue, literals).
-using Contents =
-    std::map<uint64_t, std::tuple<Kind, bool, uint32_t, std::vector<Lit>>>;
+// Everything observable about a constraint, independent of where it is:
+// kind, redundant, glue, literals, and the id if one is stored.
+using Content = std::tuple<Kind, bool, uint32_t, std::vector<Lit>,
+                           std::optional<uint64_t>>;
+
+static Content content (const Internal &internal, Ref ref) {
+  const Constraint &c = deref (internal.arena, ref);
+  CHECK (!c.garbage () && !c.moved ());
+  return {c.kind (), c.redundant (), c.glue (),
+          std::vector<Lit> (c.begin (), c.end ()),
+          c.has_id () ? std::optional (c.id ()) : std::nullopt};
+}
+
+// The live constraints in list order, which garbage collection keeps.
+using Contents = std::vector<Content>;
 
 static Contents contents (const Internal &internal) {
   Contents result;
   for (Kind kind : {Clause, Cube})
     for (const auto *lists : {&internal.irredundant, &internal.redundant})
-      for (Ref ref : (*lists)[index (kind)]) {
-        const Constraint &c = deref (internal.arena, ref);
-        CHECK (!c.garbage () && !c.moved ());
-        result[c.id ()] = {c.kind (), c.redundant (), c.glue (),
-                           std::vector<Lit> (c.begin (), c.end ())};
-      }
+      for (Ref ref : (*lists)[index (kind)])
+        result.push_back (content (internal, ref));
   return result;
 }
 
@@ -65,8 +72,9 @@ static void check_watch_order (const Internal &internal) {
           }
   // Every constraint of this database is watched, so only the model buffer
   // follows.
-  CHECK_EQ (next, internal.arena.size () -
-                      Constraint::words (internal.prefix.size ()));
+  CHECK_EQ (next, static_cast<uint32_t> (internal.model_cube));
+  CHECK_EQ (next + deref (internal.arena, internal.model_cube).words (),
+            internal.arena.size ());
 }
 
 static void test_due () {
@@ -86,27 +94,38 @@ static void test_due () {
   CHECK (internal.collecting ());
 }
 
-static void test_collect_nothing_wasted () {
-  Database db;
+// The id of the model buffer, which is kept across collections, if ids are
+// stored.
+static std::optional<uint64_t> model_cube_id (const Internal &internal) {
+  const Constraint &c = deref (internal.arena, internal.model_cube);
+  CHECK_EQ (c.has_id (), internal.proof != nullptr);
+  return c.has_id () ? std::optional (c.id ()) : std::nullopt;
+}
+
+// Traced databases store ids, the others do not; both layouts are
+// collected.
+static void test_collect_nothing_wasted (bool traced) {
+  Database db (traced);
   Internal &internal = db.internal;
   internal.opts.gcfrac = 0;
   db.propagate_reasons ();
   const Contents before = contents (internal);
   const uint32_t size = internal.arena.size ();
-  const uint64_t cube_id =
-      deref (internal.arena, internal.model_cube).id ();
+  if (traced)
+    deref (internal.arena, internal.model_cube).set_id (1234);
+  const std::optional<uint64_t> cube_id = model_cube_id (internal);
   CHECK (internal.collecting ());
   internal.garbage_collect ();
   CHECK_EQ (internal.stats.collections, 1);
   CHECK_EQ (internal.stats.relocated, (int64_t) before.size ());
   CHECK_EQ (internal.arena.size (), size);
   CHECK (contents (internal) == before);
-  CHECK_EQ (deref (internal.arena, internal.model_cube).id (), cube_id);
+  CHECK (model_cube_id (internal) == cube_id);
   internal.check_invariants ();
 }
 
-static void test_collect_deleted () {
-  Database db;
+static void test_collect_deleted (bool traced) {
+  Database db (traced);
   Internal &internal = db.internal;
   db.propagate_reasons ();
   // Delete constraints that are watched and one of each list, then collect.
@@ -119,15 +138,16 @@ static void test_collect_deleted () {
   }
   const Contents before = contents (internal);
   const uint32_t live = internal.arena.size () - internal.arena.wasted ();
-  const uint64_t id_r = db.id (db.R), id_q = db.id (db.Q);
+  const Content reason_r = content (internal, db.R);
+  const Content reason_q = content (internal, db.Q);
   internal.garbage_collect ();
   CHECK_EQ (internal.arena.size (), live);
   CHECK_EQ (internal.arena.wasted (), 0u);
   CHECK (contents (internal) == before);
   CHECK_EQ (internal.stats.relocated, (int64_t) before.size ());
   // The reasons are the copies of the same constraints.
-  CHECK_EQ (db.id (internal.reason (4)), id_r);
-  CHECK_EQ (db.id (internal.reason (3)), id_q);
+  CHECK (content (internal, internal.reason (4)) == reason_r);
+  CHECK (content (internal, internal.reason (3)) == reason_q);
   check_watch_order (internal);
   internal.check_invariants ();
 
@@ -160,8 +180,10 @@ static void test_units () {
 
 int main () {
   test_due ();
-  test_collect_nothing_wasted ();
-  test_collect_deleted ();
+  for (bool traced : {false, true}) {
+    test_collect_nothing_wasted (traced);
+    test_collect_deleted (traced);
+  }
   test_units ();
   return test_result ();
 }

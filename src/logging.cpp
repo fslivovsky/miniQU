@@ -49,11 +49,12 @@ void Internal::log (Ref ref, const char *fmt, ...) const {
   vlog ("c LOG ", decision_level (), fmt, ap);
   va_end (ap);
   const Constraint &c = deref (arena, ref);
-  printf (" %s%s %s[%" PRIu64 "] glue %u size %u:",
-          c.redundant () ? "redundant" : "irredundant",
+  printf (" %s%s %s", c.redundant () ? "redundant" : "irredundant",
           c.garbage () ? " garbage" : "",
-          c.kind () == Kind::Clause ? "clause" : "cube", c.id (), c.glue (),
-          c.size ());
+          c.kind () == Kind::Clause ? "clause" : "cube");
+  if (c.has_id ())
+    printf ("[%" PRIu64 "]", c.id ());
+  printf (" glue %u size %u:", c.glue (), c.size ());
   for (Lit l : c) {
     const Var v = var (l);
     printf (" %c%s%u", prefix.quant (v) == Quant::Exists ? 'e' : 'a',

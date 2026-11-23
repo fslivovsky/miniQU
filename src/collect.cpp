@@ -50,10 +50,7 @@ public:
     Constraint &c = deref (from, old);
     if (c.moved ())
       return c.forwarded ();
-    assert (!c.garbage () && !c.reason ());
-    const Ref ref = alloc_constraint (to, c.lits (), c.kind (),
-                                      c.redundant (), c.id ());
-    deref (to, ref).set_glue (c.glue ());
+    const Ref ref = copy_constraint (to, c);
     c.forward (ref);
     copied++;
     return ref;

@@ -18,6 +18,7 @@
 #include <array>
 #include <atomic>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <utility>
 #include <vector>
@@ -179,6 +180,11 @@ struct Internal {
   void attach (Ref);
   void detach (Ref);
   void found_empty (Kind);
+  // What a new constraint stores of its id: nothing unless a tracer is
+  // connected (ARCHITECTURE 5.2).
+  std::optional<uint64_t> stored_id (uint64_t id) const {
+    return proof ? std::optional (id) : std::nullopt;
+  }
 
   // assign.cpp
   void assign (Lit, Ref reason);

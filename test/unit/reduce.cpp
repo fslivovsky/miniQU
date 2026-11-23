@@ -3,12 +3,10 @@
 // of reasons, and the deletion steps.
 
 #include "database.hpp"
-#include "proof.hpp"
-#include "recorder.hpp"
 #include "test.hpp"
 
-#include <algorithm>
-#include <memory>
+#include <string>
+#include <vector>
 
 using namespace miniqu;
 
@@ -74,30 +72,30 @@ static void test_triggers () {
 }
 
 // Runs 'reduce' with reasons on the trail; 'deleted' are the constraints
-// that have to go, in the order of the deletion steps.
-static void test_reduce (int tier1glue,
+// that have to go, in the order of the deletion steps (checked if traced).
+// Without ids the order of equal glue and size is the same: creation order.
+static void test_reduce (bool traced, int tier1glue,
                          std::vector<Ref Database::*> deleted, int clauses,
                          int cubes) {
-  Database db;
+  Database db (traced);
   Internal &internal = db.internal;
   internal.opts.tier1glue = tier1glue;
   // Keep the arena in place so that the references of 'db' stay valid.
   internal.opts.gcfrac = 100;
-  Proof proof (&internal);
-  auto owned = std::make_unique<Recorder> ();
-  const Recorder &recorder = *owned;
-  proof.connect (std::move (owned));
-  internal.proof = &proof;
   db.propagate_reasons ();
+  if (traced)
+    db.recorder->steps.clear ();
 
   internal.reduce ();
 
   std::vector<std::string> expected;
   for (Ref Database::*member : deleted) {
     CHECK (db.garbage (db.*member));
-    expected.push_back ("d " + std::to_string (db.id (db.*member)));
+    if (traced)
+      expected.push_back ("d " + std::to_string (db.id (db.*member)));
   }
-  CHECK (recorder.steps == expected);
+  if (traced)
+    CHECK (db.recorder->steps == expected);
   CHECK_EQ (internal.stats.reductions, 1);
   CHECK_EQ (internal.stats.reduced[0], clauses);
   CHECK_EQ (internal.stats.reduced[1], cubes);
@@ -133,8 +131,8 @@ static void test_everything_protected () {
 }
 
 // The collection after a reduction is due by 'gcfrac'.
-static void test_collection_after_reduce () {
-  Database db;
+static void test_collection_after_reduce (bool traced) {
+  Database db (traced);
   Internal &internal = db.internal;
   internal.opts.gcfrac = 1;
   db.propagate_reasons ();
@@ -147,18 +145,21 @@ static void test_collection_after_reduce () {
 int main () {
   test_schedule ();
   test_triggers ();
-  // Default tier-1 limit 2: clauses G, E, I (glue 5, 4, 4 by size) and
-  // cubes U4, U5 (equal glue and size, so by id).
-  test_reduce (2,
-               {&Database::G, &Database::E, &Database::I, &Database::U4,
-                &Database::U5},
-               3, 2);
-  // No protected tier: also C of the three clauses of glue 3 and size 3.
-  test_reduce (0,
-               {&Database::G, &Database::E, &Database::I, &Database::C,
-                &Database::U4, &Database::U5},
-               4, 2);
+  for (bool traced : {false, true}) {
+    // Default tier-1 limit 2: clauses G, E, I (glue 5, 4, 4 by size) and
+    // cubes U4, U5 (equal glue and size, so in creation order).
+    test_reduce (traced, 2,
+                 {&Database::G, &Database::E, &Database::I, &Database::U4,
+                  &Database::U5},
+                 3, 2);
+    // No protected tier: also C, the first of the three clauses of glue 3
+    // and size 3.
+    test_reduce (traced, 0,
+                 {&Database::G, &Database::E, &Database::I, &Database::C,
+                  &Database::U4, &Database::U5},
+                 4, 2);
+    test_collection_after_reduce (traced);
+  }
   test_everything_protected ();
-  test_collection_after_reduce ();
   return test_result ();
 }

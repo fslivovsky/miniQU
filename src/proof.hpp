@@ -21,9 +21,10 @@ class Constraint;
 // tracer in the order they were connected.
 //
 // Ids are allocated by 'Internal' ('next_id') whether or not a proof is
-// written; the functions that take an explicit id are for steps whose
-// constraint is not (or not yet) stored: originals before reduction, their
-// reductions, and empty constraints.
+// written (constraints store them only while one is); the functions that
+// take an explicit id are for steps whose constraint is not (or not yet)
+// stored: originals before reduction, their reductions, and empty
+// constraints.
 class Proof {
   Internal *internal;
   std::vector<std::unique_ptr<Tracer>> tracers;

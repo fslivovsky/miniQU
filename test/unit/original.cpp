@@ -2,7 +2,11 @@
 // decided at input (constraint.cpp, prefix.cpp).
 
 #include "internal_test.hpp"
+#include "proof.hpp"
+#include "recorder.hpp"
 #include "test.hpp"
+
+#include <memory>
 
 using namespace miniqu;
 
@@ -48,8 +52,12 @@ static void test_prefix () {
   internal.check_invariants ();
 }
 
+// With a tracer, so that the constraints store their ids.
 static void test_normalisation () {
   Internal internal;
+  Proof proof{&internal};
+  proof.connect (std::make_unique<Recorder> ());
+  internal.proof = &proof;
   declare (internal, "eeae");
   // Duplicates are removed and the literals sorted.
   const Ref r = add (internal, Clause, {4, 1, -2, 1, 4});
@@ -81,6 +89,7 @@ static void test_normalisation () {
   CHECK (stored (internal, unsimplified) == lits ({-2, 4}));
   CHECK (internal.status == Status::Unknown);
   internal.check_invariants ();
+  internal.proof = nullptr;
 }
 
 static void test_units () {
@@ -98,6 +107,8 @@ static void test_units () {
   CHECK (internal.trail == lits ({-1, -2}));
   CHECK (internal.watches (Clause, L (1)).empty ());
   CHECK (internal.watches (Cube, L (2)).empty ());
+  // Without a tracer no id is stored.
+  CHECK (!deref (internal.arena, clause).has_id ());
   // A clause reduced to a unit is assigned too, and the same unit twice
   // is stored twice and decides nothing.
   const Ref reduced = add (internal, Clause, {3, 4});

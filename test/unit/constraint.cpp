@@ -12,81 +12,166 @@ static std::vector<Lit> lits_of (std::initializer_list<int> dimacs) {
   return result;
 }
 
-int main () {
-  static_assert (sizeof (Constraint) == 12);
-  static_assert (Constraint::words (3) == 6);
+static bool same_lits (const Constraint &c, const std::vector<Lit> &ls) {
+  return std::vector<Lit> (c.begin (), c.end ()) == ls;
+}
+
+// One header word; a glue word only if redundant, two id words only with
+// an id.
+static void test_words () {
+  static_assert (sizeof (Constraint) == 4);
+  static_assert (Constraint::words (3, false, false) == 4);
+  static_assert (Constraint::words (3, true, false) == 5);
+  static_assert (Constraint::words (3, false, true) == 6);
+  static_assert (Constraint::words (3, true, true) == 7);
 
   Arena arena (16);
   const std::vector<Lit> ls = lits_of ({1, -2, 3});
-  const uint64_t big = 0xabc89abcdefull;
-  const Ref r = alloc_constraint (arena, ls, Kind::Cube, true, big);
-  CHECK_EQ (arena.size (), 6u);
+  uint32_t expected = 0;
+  for (bool redundant : {false, true})
+    for (bool has_id : {false, true}) {
+      const Ref r = alloc_constraint (arena, ls, Kind::Clause, redundant,
+                                      has_id ? std::optional<uint64_t> (7)
+                                             : std::nullopt);
+      const Constraint &c = deref (arena, r);
+      expected += Constraint::words (3, redundant, has_id);
+      CHECK_EQ (arena.size (), expected);
+      CHECK_EQ (c.words (), Constraint::words (3, redundant, has_id));
+      CHECK_EQ (c.redundant (), redundant);
+      CHECK_EQ (c.has_id (), has_id);
+      CHECK_EQ (c.glue (), 0u);
+      CHECK (same_lits (c, ls));
+      if (has_id)
+        CHECK_EQ (c.id (), 7u);
+    }
+}
 
+// A redundant cube with id: flags, glue and id are independent, and glue
+// and id survive shrinking.
+static void test_redundant_with_id () {
+  Arena arena (16);
+  const std::vector<Lit> ls = lits_of ({1, -2, 3, -4});
+  const uint64_t big = 0xfedcba9876543210ull;
+  const Ref r = alloc_constraint (arena, ls, Kind::Cube, true, big);
   Constraint &c = deref (arena, r);
-  CHECK_EQ (c.size (), 3u);
+  CHECK_EQ (c.size (), 4u);
   CHECK (c.kind () == Kind::Cube);
-  CHECK (c.redundant ());
-  CHECK (!c.garbage ());
-  CHECK (!c.moved ());
-  CHECK (!c.reason ());
+  CHECK (c.redundant () && c.has_id ());
+  CHECK (!c.garbage () && !c.moved () && !c.reason ());
   CHECK_EQ (c.glue (), 0u);
   CHECK_EQ (c.id (), big);
-  CHECK_EQ (c.lits ().size (), 3u);
-  for (uint32_t i = 0; i < 3; i++)
-    CHECK (c[i] == ls[i]);
-  CHECK_EQ (c.end () - c.begin (), 3);
+  CHECK_EQ (c.lits ().size (), 4u);
+  CHECK_EQ (c.end () - c.begin (), 4);
 
-  // Every flag is independent of the others and of the glue.
   c.set_glue (77);
   c.set_garbage (true);
   c.set_reason (true);
-  CHECK (c.garbage () && c.reason () && c.redundant ());
+  CHECK (c.garbage () && c.reason () && c.redundant () && c.has_id ());
   CHECK (c.kind () == Kind::Cube);
   CHECK_EQ (c.glue (), 77u);
+  CHECK_EQ (c.id (), big);
   c.set_garbage (false);
-  c.set_redundant (false);
-  CHECK (!c.garbage () && c.reason () && !c.redundant ());
-  CHECK_EQ (c.glue (), 77u);
+  c.set_reason (false);
 
-  // Glue saturates, and neither it nor the id disturbs the other.
+  // Glue saturates, and neither glue nor id disturbs the other.
   c.set_glue (Constraint::glue_max + 1);
   CHECK_EQ (c.glue (), Constraint::glue_max);
   c.set_glue (UINT32_MAX);
   CHECK_EQ (c.glue (), Constraint::glue_max);
   CHECK_EQ (c.id (), big);
-  c.set_id (Constraint::id_max);
+  c.set_id (UINT64_MAX);
   CHECK_EQ (c.glue (), Constraint::glue_max);
-  c.set_id (big);
-  CHECK (c.reason () && c.kind () == Kind::Cube);
+  CHECK_EQ (c.id (), UINT64_MAX);
   c.set_glue (0);
+  CHECK_EQ (c.id (), UINT64_MAX);
+  c.set_id (big);
+  c.set_glue (12);
+
+  // Shrinking moves glue and id behind the new last literal.
+  CHECK_EQ (c.shrink (2), 2u);
+  CHECK_EQ (c.size (), 2u);
+  CHECK_EQ (c.words (), Constraint::words (2, true, true));
+  CHECK (same_lits (c, lits_of ({1, -2})));
+  CHECK_EQ (c.glue (), 12u);
+  CHECK_EQ (c.id (), big);
+  CHECK (c.redundant () && c.has_id () && c.kind () == Kind::Cube);
+}
+
+static void test_irredundant_without_id () {
+  Arena arena (16);
+  const std::vector<Lit> ls = lits_of ({2, 5, -6});
+  const Ref r = alloc_constraint (arena, ls, Kind::Clause, false, {});
+  Constraint &c = deref (arena, r);
+  CHECK (!c.redundant () && !c.has_id ());
   CHECK_EQ (c.glue (), 0u);
+  CHECK_EQ (c.words (), 1u + 3u);
+  CHECK_EQ (c.shrink (1), 2u);
+  CHECK_EQ (c.words (), 2u);
+  CHECK (same_lits (c, lits_of ({2})));
+}
 
-  // Ids use the whole word and the low bits of the next.
-  const Ref r2 = alloc_constraint (arena, lits_of ({-4}), Kind::Clause,
-                                   false, Constraint::id_max);
-  CHECK_EQ (deref (arena, r2).id (), Constraint::id_max);
-  CHECK (deref (arena, r2).kind () == Kind::Clause);
-  CHECK_EQ (deref (arena, r).id (), big);
+// The buffer of 'model.cpp': the id stays valid while the size goes down to
+// zero and back up to the allocated size.
+static void test_set_size () {
+  Arena arena (16);
+  const std::vector<Lit> ls = lits_of ({1, 2, 3, 4, 5});
+  const uint64_t id = 0x123456789abull;
+  const Ref r = alloc_constraint (arena, ls, Kind::Cube, false, id);
+  const Ref after = alloc_constraint (arena, ls, Kind::Clause, false, 9);
+  Constraint &c = deref (arena, r);
+  for (uint32_t n : {3u, 0u, 1u, 5u, 4u}) {
+    c.set_size (n);
+    CHECK_EQ (c.size (), n);
+    CHECK_EQ (c.id (), id);
+    for (uint32_t i = 0; i < n; i++)
+      c[i] = ls[4 - i];
+    CHECK_EQ (c.id (), id);
+  }
+  c.set_size (5);
+  c.set_id (id + 1);
+  CHECK_EQ (c.id (), id + 1);
+  // The neighbour is untouched.
+  CHECK (same_lits (deref (arena, after), ls));
+  CHECK_EQ (deref (arena, after).id (), 9u);
+}
 
-  // Shrinking reports the freed words.
-  CHECK_EQ (deref (arena, r).shrink (2), 1u);
-  CHECK_EQ (deref (arena, r).size (), 2u);
+// Garbage collection copies verbatim and forwards the old constraint.
+static void test_copy_and_forward () {
+  Arena arena (16);
+  const std::vector<Lit> ls = lits_of ({-1, 2, 3});
+  const Ref r = alloc_constraint (arena, ls, Kind::Cube, true, 42);
+  const Ref neighbour =
+      alloc_constraint (arena, lits_of ({-4}), Kind::Clause, false, 43);
+  deref (arena, r).set_glue (5);
 
-  // Relocation into a second arena through forwarding.
   Arena to (16);
-  const Ref copy =
-      alloc_constraint (to, deref (arena, r).lits (), Kind::Cube, true,
-                        deref (arena, r).id ());
+  const Ref filler = alloc_constraint (to, ls, Kind::Clause, false, {});
+  const Ref copy = copy_constraint (to, deref (arena, r));
+  CHECK (copy != filler);
+  const Constraint &c = deref (to, copy);
+  CHECK (c.kind () == Kind::Cube);
+  CHECK (c.redundant () && c.has_id ());
+  CHECK (!c.moved () && !c.garbage ());
+  CHECK_EQ (c.size (), 3u);
+  CHECK (same_lits (c, ls));
+  CHECK_EQ (c.glue (), 5u);
+  CHECK_EQ (c.id (), 42u);
+  CHECK_EQ (to.size (), Constraint::words (3, false, false) +
+                            Constraint::words (3, true, true));
+
   deref (arena, r).forward (copy);
   CHECK (deref (arena, r).moved ());
   CHECK (deref (arena, r).forwarded () == copy);
-  CHECK_EQ (deref (to, copy).size (), 2u);
-  CHECK (deref (to, copy)[0] == ls[0] && deref (to, copy)[1] == ls[1]);
-  CHECK_EQ (deref (to, copy).id (), big);
-  CHECK (!deref (to, copy).moved ());
-
   // Neighbours are untouched by the forwarding.
-  CHECK (deref (arena, r2).lits ()[0] == lits_of ({-4})[0]);
+  CHECK (same_lits (deref (arena, neighbour), lits_of ({-4})));
+  CHECK_EQ (deref (arena, neighbour).id (), 43u);
+}
 
+int main () {
+  test_words ();
+  test_redundant_with_id ();
+  test_irredundant_without_id ();
+  test_set_size ();
+  test_copy_and_forward ();
   return test_result ();
 }

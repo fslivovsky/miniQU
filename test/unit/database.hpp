@@ -19,12 +19,21 @@
 //
 // Deciding 1 and then 3 makes R the reason of 5 and Q that of -4; no
 // other constraint propagates.
+//
+// A traced database has a recorder connected before the first constraint,
+// so that its constraints store ids (ARCHITECTURE 5.2); the others do not.
 
 #include "internal_test.hpp"
+#include "proof.hpp"
+#include "recorder.hpp"
 #include "test.hpp"
+
+#include <memory>
 
 struct Database {
   miniqu::Internal internal;
+  miniqu::Proof proof{&internal};
+  Recorder *recorder = nullptr; // only if traced
   miniqu::Ref A, B, C, D, H, I, E, G, R, U1, U2, U3, U4, U5, Q;
 
   miniqu::Ref learn (miniqu::Kind kind, std::initializer_list<int> dimacs,
@@ -35,8 +44,14 @@ struct Database {
 
   // Originals first (they take the first ids and some arena space), then
   // the learnt constraints in the order of the table.
-  Database () {
+  explicit Database (bool traced = false) {
     using miniqu::Kind;
+    if (traced) {
+      auto owned = std::make_unique<Recorder> ();
+      recorder = owned.get ();
+      proof.connect (std::move (owned));
+      internal.proof = &proof;
+    }
     declare (internal, "eeaaee");
     add (internal, Kind::Clause, {1, 2, 3, 4, 5, 6});
     A = learn (Kind::Clause, {1, 5}, 1);

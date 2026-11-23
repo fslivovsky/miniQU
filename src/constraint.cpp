@@ -16,9 +16,10 @@
 // their kind.  Units of different kinds never meet on one variable: after
 // reduction a unit clause is existential and a unit cube universal.
 //
-// Ids are those of the proof (ARCHITECTURE 8.2) whether or not one is
-// written: the given original gets one, its reduction (if it lost a
-// literal) the next, and the stored constraint carries the last one.
+// Ids are those of the proof (ARCHITECTURE 8.2).  They are counted always
+// and stored in the constraint only while a tracer is connected: the given
+// original gets one, its reduction (if it lost a literal) the next, and the
+// stored constraint carries the last one.
 //
 // Proof steps: 'o' for the original as given; if reduction shortened it,
 // the reduced constraint derived from the original's id alone followed by
@@ -90,10 +91,11 @@ void Internal::add_original (Kind kind, std::vector<Lit> &lits, int gate) {
     // universal, so the earlier unit has the same kind.
     const Constraint &earlier = deref (arena, reason (var (unit)));
     assert (earlier.kind () == kind);
-    const uint64_t premises[] = {id, earlier.id ()};
     const uint64_t empty = next_id++;
-    if (proof)
+    if (proof) {
+      const uint64_t premises[] = {id, earlier.id ()};
       proof->add_derived (empty, kind, {}, premises);
+    }
     found_empty (kind);
   }
 }
@@ -106,8 +108,12 @@ Ref Internal::new_constraint (uint64_t id, Kind kind,
   // 11.1), so they are irredundant whatever produced them.
   if (lits.size () == 1)
     learnt = false;
-  const Ref ref = alloc_constraint (arena, lits, kind, learnt, id);
-  deref (arena, ref).set_glue (glue);
+  const Ref ref =
+      alloc_constraint (arena, lits, kind, learnt, stored_id (id));
+  Constraint &c = deref (arena, ref);
+  assert (c.has_id () == (proof != nullptr));
+  if (learnt)
+    c.set_glue (glue);
   (learnt ? redundant : irredundant)[index (kind)].push_back (ref);
   if (lits.size () > 1)
     attach (ref);

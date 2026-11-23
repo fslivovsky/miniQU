@@ -8,30 +8,31 @@
 #include <algorithm>
 #include <cassert>
 #include <cstdint>
+#include <optional>
 #include <span>
 
 namespace miniqu {
 
-// Layout of a clause or cube in the arena (ARCHITECTURE 5.2), twelve bytes
-// of header followed by the literals:
+// Layout of a clause or cube in the arena (ARCHITECTURE 5.2): one header
+// word, the literals, then optional trailing words.
 //
-//   word 0     bits 0-4: kind, redundant, garbage, moved, reason;
-//              bits 5-31: size
-//   word 1     proof id, bits 0-31
-//   word 2     bits 0-11: proof id, bits 32-43;
-//              bits 12-25: saturating glue; bits 26-31 reserved
-//   word 3..   literals
+//   word 0          bits 0-5: kind, redundant, garbage, moved, reason,
+//                   has_id; bits 6-31: size
+//   words 1..size   literals
+//   if redundant    one word: bits 0-13 saturating glue, 14-31 reserved
+//   if has_id       two words: the 64-bit proof id, low word first
+//
+// This is MiniSat's scheme.  Under benchmark load (eight processes sharing
+// one L3 cache) every header word in front of the literals costs measurable
+// time, so what not every constraint needs trails behind them (STATUS.md,
+// "M1 round 2: diagnosis of B1"; ARCHITECTURE 5.2).
 //
 // 'Constraint' is only ever a view onto arena words and is reached through
-// 'deref'.  This file is the one place that knows the layout (and the only
-// one that does word arithmetic): the sixteen-byte header with a full
-// 32-bit size, a 64-bit id and a 20-bit glue was measured against this one
-// (ROADMAP M1.3) and is in the history of this file.
+// 'deref'.  This file is the one place that knows the layout and the only
+// one that does word arithmetic.
 
 class Constraint {
   uint32_t head; // flags and size
-  uint32_t id_low;
-  uint32_t id_high_glue;
 
   // The arena has no member of this type: the literals follow the header
   // in the arena's words, which is what the flexible array member models.
@@ -45,14 +46,11 @@ class Constraint {
   static constexpr uint32_t garbage_bit = 1u << 2;
   static constexpr uint32_t moved_bit = 1u << 3;
   static constexpr uint32_t reason_bit = 1u << 4;
-  static constexpr unsigned size_shift = 5;
+  static constexpr uint32_t has_id_bit = 1u << 5;
+  static constexpr unsigned size_shift = 6;
   static constexpr uint32_t flags_mask = (1u << size_shift) - 1;
-  static constexpr unsigned id_high_bits = 12;
-  static constexpr uint32_t id_high_mask = (1u << id_high_bits) - 1;
-  static constexpr unsigned glue_shift = id_high_bits;
   static constexpr unsigned glue_bits = 14;
-  static constexpr uint32_t glue_mask = ((1u << glue_bits) - 1)
-                                        << glue_shift;
+  static constexpr uint32_t glue_mask = (1u << glue_bits) - 1;
 
   bool test (uint32_t bit) const { return head & bit; }
   void set (uint32_t bit, bool value) {
@@ -63,8 +61,26 @@ class Constraint {
     head = (head & flags_mask) | n << size_shift;
   }
 
+  uint32_t *word (uint32_t i) {
+    return reinterpret_cast<uint32_t *> (this) + i;
+  }
+  const uint32_t *word (uint32_t i) const {
+    return reinterpret_cast<const uint32_t *> (this) + i;
+  }
+  // The trailing words start right after the last literal.
+  static constexpr uint32_t trailing_words (bool redundant, bool has_id) {
+    return (redundant ? 1u : 0u) + (has_id ? 2u : 0u);
+  }
+  uint32_t trailing_words () const {
+    return trailing_words (redundant (), has_id ());
+  }
+  uint32_t glue_word () const { return 1 + size (); }
+  uint32_t id_word () const {
+    return 1 + size () + (redundant () ? 1u : 0u);
+  }
+
   friend Ref alloc_constraint (Arena &, std::span<const Lit>, Kind, bool,
-                               uint64_t);
+                               std::optional<uint64_t>);
   friend Constraint &deref (Arena &, Ref);
   friend const Constraint &deref (const Arena &, Ref);
 
@@ -73,22 +89,21 @@ public:
   Constraint (const Constraint &) = delete;
   Constraint &operator= (const Constraint &) = delete;
 
-  static constexpr uint32_t header_words = 3;
-  // The limits of the packed header: allocating a larger constraint is a
-  // fatal error, a larger id or glue is an assertion failure and
-  // saturates, respectively.
+  // Allocating a larger constraint is a fatal error; a larger glue
+  // saturates.
   static constexpr uint32_t size_max = (1u << (32 - size_shift)) - 1;
-  static constexpr uint64_t id_max =
-      (uint64_t (1) << (32 + id_high_bits)) - 1;
-  static constexpr uint32_t glue_max = (1u << glue_bits) - 1;
+  static constexpr uint32_t glue_max = glue_mask;
 
-  // Number of arena words of a constraint with that many literals.  A
-  // constraint has at least one literal, which also holds the forwarding
-  // reference during garbage collection.
-  static constexpr uint32_t words (uint32_t size) {
-    return header_words + size;
+  // Number of arena words of a constraint.  A constraint has at least one
+  // literal, which also holds the forwarding reference during garbage
+  // collection.
+  static constexpr uint32_t words (uint32_t size, bool redundant,
+                                   bool has_id) {
+    return 1 + size + trailing_words (redundant, has_id);
   }
-  uint32_t words () const { return words (size ()); }
+  uint32_t words () const {
+    return words (size (), redundant (), has_id ());
+  }
 
   uint32_t size () const { return head >> size_shift; }
   std::span<Lit> lits () { return {lits_, size ()}; }
@@ -100,49 +115,67 @@ public:
   Lit &operator[] (uint32_t i) { return lits_[i]; }
   const Lit &operator[] (uint32_t i) const { return lits_[i]; }
 
-  // Lowers the size in place and returns the number of words that became
-  // waste, which the caller reports to the arena.
+  // Lowers the size in place, moving the trailing words behind the new
+  // last literal, and returns the number of words that became waste,
+  // which the caller reports to the arena.
   uint32_t shrink (uint32_t new_size) {
     assert (new_size >= 1 && new_size <= size ());
     const uint32_t freed = size () - new_size;
+    const uint32_t *trailing = word (1 + size ());
+    std::copy (trailing, trailing + trailing_words (), word (1 + new_size));
     store_size (new_size);
     return freed;
   }
 
-  // Only for the buffer of 'model.cpp', which is allocated with the
-  // largest size it can need and never watched or stored in a list: its
-  // literals are rewritten in place, and the size can grow back up to the
-  // allocated one, or be zero (the empty cube).
-  void set_size (uint32_t n) { store_size (n); }
+  // Only for the buffer of 'model.cpp', which is irredundant, allocated
+  // with the largest size it can need and never watched or stored in a
+  // list: its literals are rewritten in place after this call, and the
+  // size can grow back up to the allocated one, or be zero (the empty
+  // cube).  The id words move with the size and stay inside the
+  // allocation.
+  void set_size (uint32_t n) {
+    assert (!redundant ());
+    if (!has_id ()) {
+      store_size (n);
+      return;
+    }
+    const uint64_t saved = id ();
+    store_size (n);
+    set_id (saved);
+  }
 
   Kind kind () const { return test (kind_bit) ? Kind::Cube : Kind::Clause; }
   bool redundant () const { return test (redundant_bit); }
   bool garbage () const { return test (garbage_bit); }
   bool moved () const { return test (moved_bit); }
   bool reason () const { return test (reason_bit); }
-  void set_redundant (bool v) { set (redundant_bit, v); }
+  bool has_id () const { return test (has_id_bit); }
   void set_garbage (bool v) { set (garbage_bit, v); }
   void set_reason (bool v) { set (reason_bit, v); }
 
+  // Only redundant constraints store a glue.
   uint32_t glue () const {
-    return (id_high_glue & glue_mask) >> glue_shift;
+    return redundant () ? *word (glue_word ()) & glue_mask : 0;
   }
   void set_glue (uint32_t g) {
-    id_high_glue = (id_high_glue & ~glue_mask) |
-                   (std::min (g, glue_max) << glue_shift);
+    assert (redundant ());
+    uint32_t &w = *word (glue_word ());
+    w = (w & ~glue_mask) | std::min (g, glue_max);
   }
 
   uint64_t id () const {
-    return (uint64_t) (id_high_glue & id_high_mask) << 32 | id_low;
+    assert (has_id ());
+    const uint32_t *w = word (id_word ());
+    return (uint64_t) w[1] << 32 | w[0];
   }
   // A constraint changes its id when it is replaced in the proof by a
   // shorter one ('Proof::strengthen'), and so does the reused buffer of
   // 'model.cpp' for every initial cube.
   void set_id (uint64_t id) {
-    assert (id <= id_max);
-    id_low = static_cast<uint32_t> (id);
-    id_high_glue =
-        (id_high_glue & ~id_high_mask) | static_cast<uint32_t> (id >> 32);
+    assert (has_id ());
+    uint32_t *w = word (id_word ());
+    w[0] = static_cast<uint32_t> (id);
+    w[1] = static_cast<uint32_t> (id >> 32);
   }
 
   // Relocation: the copy lives at 'to'; the old constraint keeps its memory
@@ -165,22 +198,46 @@ inline const Constraint &deref (const Arena &arena, Ref r) {
   return *reinterpret_cast<const Constraint *> (arena.words (r));
 }
 
-// Allocates and fills a constraint; glue starts at zero.
+// Allocates and fills a constraint, with id words iff 'id' has a value;
+// glue starts at zero.
 inline Ref alloc_constraint (Arena &arena, std::span<const Lit> lits,
-                             Kind kind, bool redundant, uint64_t id) {
+                             Kind kind, bool redundant,
+                             std::optional<uint64_t> id) {
   assert (!lits.empty ());
   if (lits.size () > Constraint::size_max)
     fatal ("constraint of %zu literals is too large", lits.size ());
   const uint32_t size = static_cast<uint32_t> (lits.size ());
-  const Ref ref = arena.alloc (Constraint::words (size));
+  const Ref ref =
+      arena.alloc (Constraint::words (size, redundant, id.has_value ()));
   Constraint &c = deref (arena, ref);
   c.head = (kind == Kind::Cube ? Constraint::kind_bit : 0u) |
-           (redundant ? Constraint::redundant_bit : 0u);
-  c.id_high_glue = 0;
+           (redundant ? Constraint::redundant_bit : 0u) |
+           (id ? Constraint::has_id_bit : 0u);
   c.store_size (size);
-  c.set_id (id);
   std::copy (lits.begin (), lits.end (), c.lits_);
+  if (redundant)
+    *c.word (c.glue_word ()) = 0;
+  if (id)
+    c.set_id (*id);
   return ref;
+}
+
+// Garbage collection: a word-by-word copy into another arena, flags and
+// trailing words included, of a constraint that is neither garbage, moved
+// nor protected.
+inline Ref copy_constraint (Arena &to, const Constraint &from) {
+  assert (!from.garbage () && !from.moved () && !from.reason ());
+  const uint32_t words = from.words ();
+  const Ref ref = to.alloc (words);
+  const uint32_t *source = reinterpret_cast<const uint32_t *> (&from);
+  std::copy (source, source + words, to.words (ref));
+  return ref;
+}
+
+// The number by which messages name a constraint: its proof id, or 0 when
+// ids are not stored.
+inline uint64_t message_id (const Constraint &c) {
+  return c.has_id () ? c.id () : 0;
 }
 
 } // namespace miniqu

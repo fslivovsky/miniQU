@@ -33,6 +33,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include <optional>
 
 namespace miniqu {
 
@@ -40,7 +41,7 @@ namespace miniqu {
 Ref Internal::alloc_model_cube (Arena &to) const {
   const std::vector<Lit> filler (std::max<size_t> (prefix.size (), 1),
                                  mk_lit (0));
-  return alloc_constraint (to, filler, Kind::Cube, false, 0);
+  return alloc_constraint (to, filler, Kind::Cube, false, stored_id (0));
 }
 
 void Internal::init_model_cube () {
@@ -49,12 +50,15 @@ void Internal::init_model_cube () {
 }
 
 // The buffer is dead between two initial cubes, so garbage collection does
-// not copy it but only keeps its id, which is where the counting of
-// 'initial_cube' stands.
+// not copy it but only keeps its id (if ids are stored), which is where
+// the counting of 'initial_cube' stands.
 void Internal::relocate_model_cube (Arena &to) {
-  const uint64_t id = deref (arena, model_cube).id ();
+  const Constraint &old = deref (arena, model_cube);
+  const std::optional<uint64_t> id =
+      old.has_id () ? std::optional (old.id ()) : std::nullopt;
   model_cube = alloc_model_cube (to);
-  deref (to, model_cube).set_id (id);
+  if (id)
+    deref (to, model_cube).set_id (*id);
 }
 
 // Called while 'seen' marks the variables of the unreduced cube.
@@ -67,7 +71,7 @@ void Internal::check_model_cube () const {
           return seen[var (l)] && val (l) > 0;
         }))
       fatal ("internal error: initial cube misses clause %lu",
-             (unsigned long) c.id ());
+             (unsigned long) message_id (c));
   }
 }
 
@@ -91,7 +95,7 @@ Ref Internal::initial_cube () {
     if (hit == lit_undef)
       fatal ("internal error: clause %lu not satisfied by a complete "
              "assignment",
-             (unsigned long) c.id ());
+             (unsigned long) message_id (c));
     if (!seen[var (hit)]) {
       seen[var (hit)] = 1;
       model.push_back (hit);
@@ -109,10 +113,13 @@ Ref Internal::initial_cube () {
     bump_variable (var (model[i]));
   model.resize (size);
 
+  // The size first: it moves the id words, which the literals may cover.
   Constraint &c = deref (arena, model_cube);
-  std::copy (model.begin (), model.end (), c.begin ());
   c.set_size (static_cast<uint32_t> (size));
-  c.set_id (next_id++);
+  std::copy (model.begin (), model.end (), c.begin ());
+  const uint64_t id = next_id++;
+  if (c.has_id ())
+    c.set_id (id);
   model.clear ();
   if (proof)
     proof->add_model_cube (c);

@@ -111,6 +111,9 @@ void Internal::check_invariants () const {
       for (Ref ref : (*lists)[index (kind)]) {
         const Constraint &c = deref (arena, ref);
         CHECK_INVARIANT (!c.moved (), "list refers to a moved constraint");
+        CHECK_INVARIANT (
+            c.has_id () == (proof != nullptr),
+            "constraint stores an id iff a tracer is connected");
         if (c.garbage ())
           continue;
         CHECK_INVARIANT (c.kind () == kind, "constraint in a wrong list");
@@ -127,24 +130,24 @@ void Internal::check_invariants () const {
           marked[index (l)] = 0;
         CHECK_INVARIANT (prefix.is_primary (kind, rightmost),
                          "constraint %lu not reduced",
-                         (unsigned long) c.id ());
+                         (unsigned long) message_id (c));
         if (c.size () < 2)
           continue;
         CHECK_INVARIANT (watched.contains (ref) && watched.at (ref) == 3,
                          "constraint %lu not watched",
-                         (unsigned long) c.id ());
+                         (unsigned long) message_id (c));
         CHECK_INVARIANT (
             propagated < trail.size () ||
                 (kval (kind, c[0]) >= 0 && kval (kind, c[1]) >= 0) ||
                 std::any_of (c.begin (), c.end (),
                              [&] (Lit l) { return kval (kind, l) > 0; }),
             "constraint %lu watched by a vanished literal",
-            (unsigned long) c.id ());
+            (unsigned long) message_id (c));
         CHECK_INVARIANT (opts.mode != 2 || propagated < trail.size () ||
                              !long_distance_watched (*this, kind, c) ||
                              !long_distance_unit (*this, kind, c),
                          "constraint %lu unit but not propagated",
-                         (unsigned long) c.id ());
+                         (unsigned long) message_id (c));
       }
 
   for (Kind kind : {Kind::Clause, Kind::Cube})

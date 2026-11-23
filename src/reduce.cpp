@@ -19,9 +19,11 @@
 // Per kind, the candidates are the learnt constraints that are not the
 // reason of an assignment and have glue above '--tier1glue'; the worse half
 // is deleted, ordered by glue, then by size, both descending (the old
-// tie-break by activity is replaced by size), then by id so that the result
-// does not depend on how earlier collections ordered the lists.  Reasons
-// are protected by a header bit that is set only inside 'reduce'.
+// tie-break by activity is replaced by size).  The sort is stable and the
+// candidates are taken in the order of the list, which is creation order
+// (garbage collection keeps it), so ties keep creation order: the order of
+// the ids, without reading them, which are not stored without a proof.
+// Reasons are protected by a header bit that is set only inside 'reduce'.
 //
 // The size trigger can stay true after a reduction (protected constraints,
 // the half that is kept), so the search loop decides right after 'reduce',
@@ -93,16 +95,14 @@ void Internal::reduce () {
       if (!c.reason () && c.glue () > (uint32_t) opts.tier1glue)
         candidates.push_back (ref);
     }
-    std::sort (candidates.begin (), candidates.end (),
-               [this] (Ref a, Ref b) {
-                 const Constraint &x = deref (arena, a);
-                 const Constraint &y = deref (arena, b);
-                 if (x.glue () != y.glue ())
-                   return x.glue () > y.glue ();
-                 if (x.size () != y.size ())
-                   return x.size () > y.size ();
-                 return x.id () < y.id ();
-               });
+    std::stable_sort (candidates.begin (), candidates.end (),
+                      [this] (Ref a, Ref b) {
+                        const Constraint &x = deref (arena, a);
+                        const Constraint &y = deref (arena, b);
+                        if (x.glue () != y.glue ())
+                          return x.glue () > y.glue ();
+                        return x.size () > y.size ();
+                      });
     const size_t deleted = candidates.size () / 2;
     for (size_t i = 0; i < deleted; i++)
       mark_garbage (candidates[i]);
