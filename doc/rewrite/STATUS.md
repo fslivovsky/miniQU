@@ -2141,3 +2141,39 @@ cannot trip over it. Until then the workaround of R2-T1 stands.
 
 - **R2-T3** (tooling, docs): busy check by `argv` in `load_measure.py` with a test; `-t 240` for the asan gate in
   `bench/README.md` and `tests/matrix.txt`; confirmation run of the `gc-mode1` row on the asan binary.
+
+## M1-R2-T3 Tooling after the round-2 triage (worker, 2026-11-23)
+
+Changes (no solver source touched):
+- `bench/load_measure.py` (decision E7): `busy_processes()` no longer runs `pgrep -af` with a pattern on whole
+  command lines. It reads `/proc/PID/cmdline` of every process (vanished or unreadable ones skipped, this process
+  and its ancestors skipped) and asks the pure function `is_busy(argv)`: busy iff `basename(argv[0])` is `miniQU`
+  (any build, also the baseline), or `load_measure.py`, or argv[0] ends with `bench/run.py`, or a `python*`
+  interpreter whose first non-option argument is `bench/run.py` or `load_measure.py`. `BUSY_PATTERN` is removed;
+  `--force` and its note in the report are unchanged. The launcher-script-with-sleep workaround mentioned in the
+  R2-T1 section is no longer needed. Tests: `IsBusyTest` in `bench/test_load_measure.py` (all cases of the spec,
+  4 tests in the file pass; ctest `bench-load-measure`).
+- Decision E3 (asan gate `-t 240`): comment lines added to `tests/matrix.txt` (no row, option or limit changed),
+  usage comment of `-t` in `tests/regress.sh` (no behaviour change), and `bench/README.md` now lists both gate lines
+  (release `-s 1:300 -M all`, asan `-s 1:100 -M all -t 240`) after the QDIMACS fuzz commands; the refusal sentence
+  of the load_measure.py section now speaks of argv.
+
+Part A manual check (96 cores): from `bash -c 'echo miniQU load_measure.py; nohup setsid taskset -c 0-47 python3
+bench/load_measure.py ... --rounds 1 --cores 0-47 --timeout 20 --tag r2-t3-busycheck > LOG &'`, without `--force`
+and without a sleeping launcher, the measurement started ("round 1, arm A ...") and ran to completion (5.2-1.qcir
+unfinished at the 20 s timeout, as expected for this short test). While its baseline solvers were running, a second
+invocation refused with rc 1 and listed the first load_measure.py and its miniQU processes. The result directories
+were deleted, not committed.
+
+Part C (asan binary, lower cores):
+- incremental builds of release and asan: up to date; `ctest` in the release tree: 38 of 38 passed.
+- `tests/regress.sh -S -j 16 -s 1:100 -M gc-mode1,gc-ccmin3,gc -t 240 <asan>` (log
+  `/home/ec2-user/miniqu-work/logs/r2-t3/asan.log`): "REGRESSION TESTS PASSED (0 warnings)" (launched detached, so
+  the rc was not captured; the script prints that line only on rc 0).
+  - gc-mode1: 0 timeouts of 50 search instances, 98 proofs checked, 2 proof checks timed out (checker, warning
+    only), 0 proof runs unfinished.
+  - gc-ccmin3: 0 timeouts, 100 proofs checked, 0 checker timeouts, 0 unfinished.
+  - gc: 0 timeouts, 100 proofs checked, 0 checker timeouts, 0 unfinished.
+  - no wrong verdict, rejected proof or sanitizer report.
+
+Deviations: none. The rc of the regress run is inferred from its final line, not measured directly.
