@@ -51,6 +51,13 @@ public:
   // the output or when there is none.
   void add_original (Kind, std::span<const int> lits, int proof_gate = 0);
 
+  // Declares that the constraints to come carry the complete dual encoding
+  // of a circuit (ARCHITECTURE 4.5, INV-COMPLETE): every complete
+  // assignment then falsifies a clause or satisfies a cube, and the solver
+  // never builds an initial cube.  Only before the first 'add_original';
+  // QDIMACS input does not call it.
+  void declare_complete_encoding ();
+
   // Protects a variable from elimination.  Until elimination exists (M3) it
   // only checks that the variable was declared and has no other effect.
   void freeze (int var);

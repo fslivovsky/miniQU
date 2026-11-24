@@ -31,6 +31,9 @@ void verbose (int level, const char *fmt, ...) MINIQU_PRINTF (2, 3);
 void phase (const char *name, long count, const char *fmt, ...)
     MINIQU_PRINTF (3, 4);
 
+// Error message on stderr; the run goes on.  Printed at every verbosity.
+void error (const char *fmt, ...) MINIQU_PRINTF (1, 2);
+
 // Error message on stderr, then exit (1).  The solver uses no exceptions.
 [[noreturn]] void fatal (const char *fmt, ...) MINIQU_PRINTF (1, 2);
 

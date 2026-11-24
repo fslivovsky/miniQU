@@ -87,6 +87,10 @@ void Solver::add_original (Kind kind, std::span<const int> lits,
   record (std::move (call));
 }
 
+void Solver::declare_complete_encoding () {
+  record (FakeCall{FakeCall::Type::DeclareComplete});
+}
+
 void Solver::freeze (int var) {
   FakeCall call{FakeCall::Type::Freeze};
   call.var = var;

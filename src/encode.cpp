@@ -146,6 +146,7 @@ public:
 } // namespace
 
 void encode (const Circuit &circuit, Solver &solver, bool early_tseitin) {
+  solver.declare_complete_encoding ();
   Encoder (circuit, solver).encode (early_tseitin);
 }
 

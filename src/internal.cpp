@@ -85,8 +85,13 @@ void Internal::search () {
         retier ();
       if (reducing ())
         reduce ();
-      if (!decide ())
+      if (!decide ()) {
+        if (complete) {
+          report_missing_cube ();
+          break;
+        }
         analyze (initial_cube ());
+      }
     }
   }
 }

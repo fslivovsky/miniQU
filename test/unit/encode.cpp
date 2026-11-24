@@ -133,6 +133,36 @@ static void test_qdimacs () {
                 "c 0: -1 2"}));
 }
 
+// Only circuit input declares the complete dual encoding (ARCHITECTURE
+// 4.5), and before the first constraint.
+static void test_declares_complete () {
+  fake_reset ();
+  const Circuit circuit = parse_qcir (write_file ("c.qcir", plain));
+  Solver solver;
+  encode (circuit, solver, false);
+  size_t declared = 0, declared_before_original = 0;
+  bool seen_original = false;
+  for (size_t i = 0; i < fake_calls ().size (); i++) {
+    const FakeCall::Type type = fake_calls ()[i].type;
+    if (type == FakeCall::Type::DeclareComplete)
+      declared++;
+    else if (type == FakeCall::Type::AddOriginal && !seen_original) {
+      seen_original = true;
+      declared_before_original = declared;
+    }
+  }
+  CHECK_EQ (declared, 1u);
+  CHECK_EQ (declared_before_original, 1u);
+
+  fake_reset ();
+  Solver other;
+  encode_qdimacs (
+      parse_qdimacs (write_file ("a.qdimacs", "p cnf 1 1\ne 1 0\n1 0\n")),
+      other);
+  for (const FakeCall &call : fake_calls ())
+    CHECK (call.type != FakeCall::Type::DeclareComplete);
+}
+
 int main () {
   set_verbosity (0);
   test_early ();
@@ -142,5 +172,6 @@ int main () {
   test_no_variables ();
   test_raw_constraints ();
   test_qdimacs ();
+  test_declares_complete ();
   return test_result ();
 }

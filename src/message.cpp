@@ -48,6 +48,17 @@ void phase (const char *name, long count, const char *fmt, ...) {
   va_end (ap);
 }
 
+void error (const char *fmt, ...) {
+  fflush (stdout);
+  fputs ("miniqu: error: ", stderr);
+  va_list ap;
+  va_start (ap, fmt);
+  vfprintf (stderr, fmt, ap);
+  va_end (ap);
+  fputc ('\n', stderr);
+  fflush (stderr);
+}
+
 void fatal (const char *fmt, ...) {
   fflush (stdout);
   fputs ("miniQU: error: ", stderr);

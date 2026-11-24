@@ -473,16 +473,19 @@ Rules that later techniques rely on:
 - such a cube is not derivable in QLRUP (no proof for QDIMACS, as in the old
   solver). Tracers receive it through `add_model_cube` (8.1); the `-trace`
   format records it as a step without premises;
-- for QCIR input, INV-COMPLETE says this code is never reached. In M1 it is
-  kept as the old solver has it: a fallback when no proof is written (for the
-  untouched encoding the hitting-set cube is valid), a fatal internal error
-  when a proof is written. From the first package that changes irredundant
-  constraints (ROADMAP M2.1) there is no argument that such a cube is still
-  valid next to the cube encoding (section 11.1 argues QDIMACS only), so from
-  then on reaching this code on QCIR input ends the run with the answer
-  "unknown" and an error message, proof or not. Every occurrence is counted
-  in `stats.modelcubes`, and a nonzero count on a QCIR run is reported in
-  `STATUS.md` as a bug in whatever broke the invariant.
+- for QCIR input, INV-COMPLETE says this code is never reached. The circuit
+  encoder calls `Solver::declare_complete_encoding ()` (state `Internal::complete`;
+  QDIMACS leaves it false, it is not inferred from the presence of cubes). If
+  the search nevertheless ends a decision phase without conflict on such
+  input (built in M2-T9), `report_missing_cube ()` counts it in
+  `stats.modelcubes`, prints an error on stderr (a complete assignment
+  satisfied no cube and falsified no clause, INV-COMPLETE violated, result
+  unknown) and the search ends with status Unknown, with or without a proof:
+  no conclusion step is written, statistics are printed and the proof is
+  flushed. The result is the one of any indeterminate run (`s UNKNOWN`-style
+  line of the app, exit code 0). A nonzero `modelcubes` on a QCIR run is
+  reported in `STATUS.md` as a bug in whatever broke the invariant. The
+  `QlrupTracer::add_model_cube` fatal error stays as an assertion.
 
 ### 4.6 Reduction
 
@@ -1001,7 +1004,7 @@ the proof ids do not reproduce) and writes no deletions
 | two complementary unit originals | same | empty constraint from the two ids |
 | learnt constraint | `learn.cpp`, `minimize.cpp` | derived, chain = conflict id, then reason ids in resolution order, then the reasons of the variables minimisation resolves away (including same-kind root units) in reverse trail order |
 | final empty constraint | `learn.cpp` | derived with empty literal list |
-| initial cube from a model | `model.cpp` | `add_model_cube`: fatal error if a QLRUP tracer is connected; `TraceTracer` writes a step without premises |
+| initial cube from a model | `model.cpp` | `add_model_cube` (QDIMACS only; never reached with a QLRUP tracer, whose fatal error is an assertion); `TraceTracer` writes a step without premises |
 | root unit materialised (M2.1) | `simplify.cpp` | derived unit, chain = the non-unit reason id, then the same-kind unit ids of its other literals (in the order of the reason's literals); a secondary unit (mode 1) is the empty constraint |
 | learnt constraint deleted | `reduce.cpp` -> `mark_garbage` | `d id` |
 | satisfied constraint removed at root | `simplify.cpp` -> `mark_garbage` | `d id` (only under a literal with a unit of either kind) |

@@ -3408,3 +3408,30 @@ after this section: only the tasks below; J3 names where its result is decided.
 3. **M2-T8** tooling: `tier2*` rows at 2 / 6 (J2), guard in `fuzz_qdimacs.sh` (J5), `minimized` in `m1_equiv.sh`
    (J10.4); full gate on the final binary; benchmark binary `bench-M2-r1` refreshed.
 4. **M2-T11** diagnosis of the `jctc` `-dl` gap (J3); measurement and report only.
+
+## M2-T9 (worker, 2026-11-24): initial cube on QCIR input ends the run with "unknown" (J8)
+
+Built:
+- `Internal::complete` (comment cites ARCH 4.5 / INV-COMPLETE), set through the new public call
+  `Solver::declare_complete_encoding ()` (only before the first `add_original`). The call is made by
+  `encode ()` in `src/encode.cpp`, i.e. by the QCIR path only; `encode_qdimacs` does not call it, and the flag is
+  not inferred from the presence of cubes.
+- Search loop: when `decide ()` returns false and `complete` is set, `Internal::report_missing_cube ()` (`model.cpp`)
+  counts `stats.modelcubes`, prints an error and the loop breaks with status Unknown (no conclusion step, no
+  model-cube step; `app` prints the result line and exit code of any indeterminate run). QDIMACS is unchanged.
+- New non-fatal `error ()` in `message.hpp/.cpp` (stderr, printed at every verbosity; the only existing facility
+  with that property was `fatal`, which exits).
+- `QlrupTracer::add_model_cube` keeps its fatal error: QLRUP exists for QCIR input only, where `complete` is set,
+  so it is now an assertion; comments in `model.cpp` and ARCH 4.5 / 8.1 table updated.
+- Tests: `unit-search` `test_missing_cube` (flag on: Unknown, `modelcubes` 1, no cube, recorder sees only `o`
+  steps; flag off: solved True through the initial cube, `m` and `e` steps); `unit-encode` `test_declares_complete`
+  (QCIR declares once before the first constraint, QDIMACS never; the fake solver records the call).
+
+Gates (logs in `/home/ec2-user/miniqu-work/m2-t9/`): all four presets build without warnings; `ctest` release and
+debug 43/43; `tests/m1_equiv.sh` EQUIVALENCE PASSED; `regress.sh -S -s 1:100 -M all` (release) passed (4 timeout
+warnings, as before); asan `-s 1:60 -t 240 -M default,dl,mode1,root,root-gc,min-root-mode1` passed; `fuzz_qdimacs`
+1..200 with '' and `-dl`: 0 failures; `run_regressions.sh`: 0 failures. Smoke (33 instances, '' and `-dl`) against
+`bench-M2-r1/miniQU`: conflicts/decisions/propagations/ticks identical on 32 of 33 in both configurations.
+Open point: `jctc9-pass` times out on both binaries (known, see earlier entries; the baseline solves it in 1.2 s),
+so its counters at the kill depend on speed and were not comparable (new 714103 vs old 687199 conflicts at the same
+280 s, both `modelcubes 0`); `modelcubes` was 0 on every smoke row.

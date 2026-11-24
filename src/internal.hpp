@@ -181,6 +181,9 @@ struct Internal {
   std::vector<Lit> certificate; // values of the certificate block
 
   Proof *proof = nullptr;
+  // The input carries both encodings (QCIR, ARCHITECTURE 4.5): reaching
+  // a complete assignment without conflict is then an internal error.
+  bool complete = false;
   std::atomic<bool> terminated = false;
   Status status = Status::Unknown;
 
@@ -318,6 +321,7 @@ struct Internal {
   [[nodiscard]] Ref alloc_model_cube (Arena &) const;
   void relocate_model_cube (Arena &);
   [[nodiscard]] Ref initial_cube ();
+  void report_missing_cube ();
   void check_model_cube () const;
 
   // certificate.cpp

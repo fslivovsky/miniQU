@@ -16,6 +16,7 @@ struct FakeCall {
     Set,
     AddVar,
     AddOriginal,
+    DeclareComplete,
     Freeze,
     ConnectTracer,
     Solve,

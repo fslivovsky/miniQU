@@ -4,8 +4,12 @@
 #include "internal_test.hpp"
 #include "miniqu.hpp"
 #include "random.hpp"
+#include "recorder.hpp"
 #include "test.hpp"
 
+#include <algorithm>
+#include <memory>
+#include <string>
 #include <vector>
 
 using namespace miniqu;
@@ -217,6 +221,36 @@ static void test_initial_cube () {
   CHECK (internal.val (L (-1)) > 0 && internal.decision_level () == 0);
 }
 
+// With 'complete' set, a complete assignment without conflict ends the
+// search with status Unknown: no cube, no model-cube step, no conclusion.
+// Without it the same formula is solved through the initial cube.
+static void test_missing_cube (bool complete) {
+  Solver solver;
+  solver.add_var (1, Quant::Exists);
+  solver.add_var (2, Quant::Exists);
+  auto owned = std::make_unique<Recorder> ();
+  const Recorder *recorder = owned.get ();
+  solver.connect_tracer (std::move (owned));
+  if (complete)
+    solver.declare_complete_encoding ();
+  solver.add_original (Clause, std::vector<int>{1, 2});
+  const int result = solver.solve ();
+  const Internal &internal = internal_of (solver);
+  CHECK_EQ (internal.stats.modelcubes, 1);
+  if (complete) {
+    CHECK_EQ (result, 0);
+    CHECK (internal.status == Status::Unknown);
+    CHECK (internal.irredundant[1].empty ());
+    for (const std::string &step : recorder->steps)
+      CHECK (step[0] == 'o');
+  } else {
+    CHECK_EQ (result, 10);
+    CHECK (recorder->steps.back ()[0] == 'e');
+    CHECK (std::any_of (recorder->steps.begin (), recorder->steps.end (),
+                        [] (const std::string &s) { return s[0] == 'm'; }));
+  }
+}
+
 // Formulas over 'Solver': 'Qx Qy. (x | y) & (-x | -y)'.
 static int solve_xor (Quant outer, Quant inner, std::vector<int> &cert) {
   Solver solver;
@@ -254,6 +288,8 @@ int main () {
   test_decide ();
   test_seed ();
   test_initial_cube ();
+  test_missing_cube (false);
+  test_missing_cube (true);
   test_solver ();
   return test_result ();
 }

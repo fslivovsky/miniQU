@@ -120,6 +120,12 @@ void Solver::add_original (Kind kind, std::span<const int> lits,
   impl->internal.add_original (kind, impl->lits, proof_gate);
 }
 
+void Solver::declare_complete_encoding () {
+  REQUIRE (impl->stage <= Stage::Variables,
+           "declare_complete_encoding after add_original");
+  impl->internal.complete = true;
+}
+
 void Solver::freeze (int var) {
   REQUIRE (impl->declared (var), "freeze of an undeclared variable");
 }

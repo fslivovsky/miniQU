@@ -15,17 +15,19 @@
 // INV-SANDWICH (ARCHITECTURE 11.1).  'check_model_cube' verifies the
 // hitting-set property in debug builds and with '--check', the one QDIMACS
 // failure no proof checker sees.  For QCIR input INV-COMPLETE makes this
-// code unreachable; 'stats.modelcubes' counts every visit so that a visit
-// on QCIR input shows up (in M1 it is allowed without a proof, as in the
-// old solver).
+// code unreachable; if it happens anyway ('Internal::complete', set by the
+// circuit encoder), 'report_missing_cube' counts the visit, prints an
+// error and the search ends with status Unknown, with or without a proof
+// (the hitting-set argument covers QDIMACS only).
 //
 // The cube is written into a buffer constraint allocated once with room for
 // every variable, so that it has a 'Ref' and analysis can start from it
 // without storing it.  Each cube gets a fresh id, under which the analysis
 // chain refers to it.  It is not derived, so no QLRUP step exists for it:
-// tracers receive it through 'add_model_cube' (ARCHITECTURE 8.1), which is
-// a fatal error for the QLRUP writer and a premise-free step for the
-// others.
+// tracers receive it through 'add_model_cube' (ARCHITECTURE 8.1), a
+// premise-free step for the Checker and the trace writer.  The QLRUP
+// writer (QCIR input only, so 'complete' is set) never gets one; its
+// fatal error there is an assertion.
 
 #include "contract.hpp"
 #include "internal.hpp"
@@ -74,6 +76,14 @@ void Internal::check_model_cube () const {
       fatal ("internal error: initial cube misses clause %" PRIu64,
              message_id (c));
   }
+}
+
+// The search ends with status Unknown and without a conclusion step.
+void Internal::report_missing_cube () {
+  stats.modelcubes++;
+  error ("a complete assignment satisfied no cube and falsified no clause "
+         "on QCIR input: internal error (INV-COMPLETE violated); the "
+         "result is unknown");
 }
 
 Ref Internal::initial_cube () {
