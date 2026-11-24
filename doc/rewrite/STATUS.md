@@ -3539,3 +3539,22 @@ arrives; no conflict limit option exists, so a deterministic comparison of that 
 M2-T7 screening results are valid for the new binary, except that this one instance is unverified in the default configuration.
 
 **Open points.** `jctc9-pass` default as above (T10 changed counters only; the 32 other instances and the corpus equivalence gates show no search change).
+
+## Owner decision: lighter gates from M3 (owner, 2026-11-24)
+
+To save cost, the owner decided the following for M3 and every later milestone (M2 finishes under the old rules;
+OPT and Final are unchanged):
+
+1. **Cores for correctness tests.** Correctness work (`tests/regress.sh`, fuzzing, unit tests, Lean proof checks,
+   builds) may use all cores, up to `nproc-8` parallel jobs. Only timing measurements (compared `bench/run.py`
+   runs, `bench/gate.py`) keep the pinned benchmark cores, with nothing else running.
+2. **Light gate per implementation task.** A task ends with warning-free release and sanitizer builds, the unit
+   tests, the rows of `tests/matrix.txt` that the change touches on the release build with fuzz seeds 1:50 and
+   Lean-checked proofs, and `tests/m1_equiv.sh` where the off-switch search can be affected. No full matrix, no
+   full smoke set in a task.
+3. **Sanitizer fuzz run once per milestone round**, in the independent verification; tasks only build the
+   sanitizer tree and run the unit tests on it.
+4. **The full gate** (whole matrix, release 1:300, sanitizer 1:100, QDIMACS 1:300, smoke set with proofs) runs
+   once per milestone round, in the independent verification.
+5. **Less rework.** At most 2 review rounds per milestone and at most 2 follow-up tasks per triage; further open
+   points are deferred to ROADMAP.md with a reason.
