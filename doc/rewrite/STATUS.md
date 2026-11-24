@@ -3257,3 +3257,154 @@ logs in `/home/ec2-user/miniqu-work/m2-t7/`, summaries in `bench/results/M2-T7-g
 2. The screening resolves effects of about 2 s PAR2 at best with one seed; the benchmark stage (seeds 1-3) is the better place to see them.
 3. `ccminmode=3` solved fewer instances in the default configuration (149 vs 155) while PAR2 moved by only +1.3 s; the paired report
    lists the instances lost in a majority of seeds (single seed here, so all single-seed differences), among them klieber2017q-066-16-eq.
+
+## Coordinator decisions after M2 round 1 (coordinator, 2026-11-24)
+
+Every open point of M2-T2 .. M2-T7 is settled here. Four worker tasks follow (M2-T8 .. M2-T11). Measurements of
+this section: `/home/ec2-user/miniqu-work/m2-triage/` (`jobs.sh`, `joblist`, `out.txt`, `tier.matrix`, `tier.log`),
+release binary of HEAD `9f5a074` (sha256 as `bench-M2-r1`), `taskset -c 0-23`, 16 jobs.
+
+### J1. Smoke of `gc-ccmin3`, `jctc9-pass` proof run (T2 problem 1, T3 point 1, T4 point 1): closed, no task
+
+The failure existed only while the proof run searched differently from the timed run (minimisation off under a
+tracer). Since M2-T5 (`b48a709`) minimisation produces proofs, the proof run is the same search, `jctc9-pass`
+solves in 2.4 s with the row's options and its proof is accepted. `tests/regress.sh -j 16 -s 1:300 -M all` on the
+release binary is **PASSED** in the gates of M2-T5 and M2-T7 (final binary). The row and the harness are unchanged.
+The entries "Problem 1 (open)" of M2-T2/T3/T4 are history.
+
+### J2. `promoted.cube` at 13-17% in `tier2` / `tier2-dl` (T2 point 2): rows change to the limits 2 / 6 (task M2-T8)
+
+A required counter that sits 3-7 points above the 10% line breaks with the next change of the search (it already
+moved from 13% to 17% when trail reuse came). Measured on search seeds 151-300 (`-n -S -s 1:300`, release, 0
+timeouts of 150 in every variant):
+
+| options (plus `--reduceint=2 --gcfrac=0`, or `--reduceint=30 --gcfrac=0 -dl`) | `promoted.clause` | `promoted.cube` |
+|---|---:|---:|
+| `--tier1glue=1 --tier2glue=3` (the row today) | 93% | 17% |
+| `--tier1glue=2 --tier2glue=6` | 87% | **25%** |
+| `--tier1glue=3 --tier2glue=8` | 89% | 23% |
+| `--tier1glue=4 --tier2glue=12` | 90% | 21% |
+| `-dl`, 2 / 6 | 85% | **24%** |
+| `-dl`, 3 / 8 | 87% | 25% |
+| `-dl`, 4 / 12 | 89% | 29% |
+
+Decision: both rows use `--tier1glue=2 --tier2glue=6`. What the rows protect (glue updates that cross a tier
+limit while every reduction deletes and collects; `used` marks 2 and 1; both kinds) is kept and the cube side is
+better covered; the limits 0 / 0 stay covered by `tier0*`, moving limits by `retier*`. The row limits stay 2%.
+The counter stays required for both kinds.
+
+### J3. The default search is not the M1 search (T2 point 3, T6 points 3 and 4): accepted; one parity gap gets a diagnosis (task M2-T11)
+
+That the defaults differ from M1 is the purpose of M2; H5 only asks that the off-switches reproduce M1, and
+`tests/m1_equiv.sh` passes with `--no-reusetrail` in its string. Accepted. The reuse criterion (candidates
+unassigned at restart time, as CaDiCaL) is accepted as a heuristic; it cannot be unsound.
+
+Parity check on the solved sets (screening reference runs `M2-screen-ref-{default,dl}-s4` against the three
+seeds of `baseline-c96-*-t60` and `M1-r3-*`; verdicts only, the machines differ): default 155 solved against 133
+/ 131 solved in all three old seeds, lost only `klieber2017q-076-19-t1` and `-108-27-t1` (baseline 13-55 s, M1 did
+not solve them in all seeds either: timeout-edge noise, no task). **`-dl`: 154 solved, but `jctc8-pass`,
+`jctc16-vals-0,2-pass` and `jctc18-vals-0,2-pass`, which baseline and M1 solve in 0.1-8 s in all three seeds,
+time out.** Follow-up measurement, `-dl`, 60 s, seeds 1-6, the 8 `jctc*-pass` instances (time-outs of 48 runs):
+
+| arm | time-outs | of which `jctc8-pass` | `jctc2-pass` |
+|---|---:|---:|---:|
+| M1 binary (`bench-M1-r3`) | 6 | 0 | 0 |
+| M2, EQUIV string | 5 | 0 | 0 |
+| M2 default | 10 | 3 | 3 |
+| M2 `--no-reusetrail` | 7 | 2 | 0 |
+| M2 `--no-rootsimp` | 8 | 3 | 2 |
+| M2 M1 reduce policy (`--no-tiers --no-glueupdate --reducetarget=50 --reducesize --reduceint=0`) | 5 | 1 | 0 |
+
+The family is heavy-tailed for every binary (D2, H1), so six seeds do not prove a regression, but `jctc8-pass`
+and `jctc2-pass` go from 0 of 6 to 3 of 6 time-outs, and no single switch removes all of it. This is a parity gap
+in the sense of the project rules ("the baseline solves it quickly, the new solver does not"), so it is measured
+properly before the benchmark stage: task M2-T11 (20 seeds, one switch per arm). M2-T11 changes no default; if it
+attributes the loss to one adopt item with the criterion given in its spec, the default of that item under `-dl`
+is decided in M2 round 2 together with the benchmark-stage result on the `jctc` family against `M1-r3-c48-dl-*`.
+
+### J4. Heavy tail of `jctc8-pass` with `--recomputetier --reduceint=50` (T3 point 2): deferred with the option (J11)
+
+Same family and same phenomenon as J3; the option is off by default. No task.
+
+### J5. `tests/fuzz_qdimacs.sh` takes solver options as separate arguments (T3 point 3): guard in the script (task M2-T8)
+
+A quoted option string must be an error, not a silent run with wrong options.
+
+### J6. Root simplification, step 2 can give a unit, a conflict or the empty constraint (T4 point 2): accepted as built; the spec was wrong
+
+The worker's examples are right (propagation of modes 0/1 ignores the prefix, `qreduce` does not). The handling
+(no assertion; empty, one literal, size >= 2 with re-chosen watches and a rewound propagation head) is the design
+from now on; ARCH 7.5 already describes it.
+
+### J7. The step-2 unit and the root conflict through it are reached by unit tests only (T4 point 3): task M2-T10
+
+The internal `Checker` replays these steps in the unit tests, but no proof with such a step has been through the
+Lean checker, which is the project's standard for a proof-producing path. M2-T10 adds two counters, searches the
+corpus for instances that reach each path and adds them to `tests/regressions/` (Lean-checked there). If a path
+cannot be reached from QCIR input within the search effort given in the spec, the task records the numbers and the
+path stays covered by the unit tests; that outcome is accepted in advance.
+
+### J8. Initial cube on QCIR input (ARCH 4.5; T4 point 4): built now (task M2-T9)
+
+Root simplification changes the irredundant constraints, and ARCH 11.1 argues the validity of a hitting-set cube
+for QDIMACS only. `modelcubes` is 0 on every QCIR row, so the rule costs nothing: from M2-T9 on, reaching
+`initial_cube` on QCIR input ends the run with "unknown" and an error message, with or without a proof.
+
+### J9. Commit trailers (T4 point 5): accepted, as E4
+
+History is not rewritten; workers use the trailer lines of their task text from now on.
+
+### J10. Minimisation (T5)
+
+1. **`tests/m1_equiv.sh` has no `-mode=1` minimisation set against the M1 binary: accepted.** The M1 binary is
+   wrong there (crashes, 6 wrong verdicts; the bug fixed in `b48a709`), so it cannot be a reference. What the set
+   would protect is covered otherwise: verdicts of `mode1-ccmin2/3` and `min-root-mode1` against the frozen
+   baseline (which has the old, correct reduction), Lean on all their proofs, and the proof pass of the same script
+   (same search with and without a proof).
+2. **The mode-1 fallback "learn unminimised" (`Minimize::keeps_asserting`): accepted.** It fires on 0.15% of the
+   learnt constraints where it fires at all. The finer rule is deferred to M5+ and only if a mode-1 minimisation
+   configuration becomes a default candidate.
+3. Core numbers (`taskset -c 0-23`) follow the machine note; the solve times of the Lean table are informational,
+   as the entry says. Accepted.
+4. `minimized` joins the compared counters of `tests/m1_equiv.sh` (task M2-T8); a difference there with equal
+   conflicts would be a bookkeeping bug worth seeing.
+
+### J11. Restarts and trail reuse (T6 points 1, 2)
+
+1. **`ema-stress-dl` limit 4%: confirmed.** H7 is met: the same options with `--no-reusetrail` time out on 6 of
+   150, with reuse on 4 of 150, and `restart-dl` (limit 8) has 6 of 150; the row keeps its required counters
+   (`restarts` 94%, `reused` 90%, `depresets` 94%).
+2. **`--no-reusetrail` in `restart`, `restart-dl`, `restart-mode1-dl`: confirmed.** These rows exist to be at
+   level 0 after every conflict (dependency resets, root simplification); partial backtracks under the same
+   pressure are the `ema-stress*` rows.
+
+### J12. Screening (T7 points 1-3): defaults confirmed; unscreened items deferred to M5+ (tuning)
+
+`ccminmode=0`, `restartmode=0`, `recomputetier=0` ship: nothing passed the 2.0 s rule, and an experiment item
+without evidence stays off (H6). `--recomputetier` (default, `-dl`), `--ccminmode=2` and `--restartmode=1 -dl`
+were never screened; they are not owner requirements as defaults (the owner asks for tiers and LBD-based cleaning,
+which are on), and one seed at 60 s would not resolve them anyway. They move to the tuning budget of M5+ (ROADMAP
+M5+, with the commands of M2-T7 open point 1). The benchmark stage of this round runs no extra screening
+configurations. The `+dirty` in three `meta.json` files is explained by the identical solver sha256; accepted.
+
+### J13. Warnings of the final gate (T7 point 4): within recorded decisions
+
+`noearly` 34 of 150 (normal row; the baseline times out at the same rate, D4 and M1-T11), `mode1-dl` 3 and
+`mode2-dl` 2 (normal rows), checker time-limit hits `mode1-dl` 18 and `noearly` 2 (warnings since M1, G6; every
+proof whose check finished was accepted). No task.
+
+### Gates of M2 round 1 after these decisions
+
+Green on the final binary of M2-T7 (`9f5a074`): builds without warnings, `ctest` 43/43, `tests/m1_equiv.sh`,
+`tests/regress.sh` release 1:300 with smoke and asan 1:100 at `-t 240`, `tests/fuzz_qdimacs.sh`,
+`tests/run_regressions.sh`; 0 wrong verdicts, 0 rejected proofs. M2-T9 and M2-T10 touch solver sources without
+changing the search, so M2-T8 (last code task) repeats the full gate and refreshes the benchmark binary. Open
+after this section: only the tasks below; J3 names where its result is decided.
+
+### Worker tasks (in this order; specs in the workflow)
+
+1. **M2-T9** `initial_cube` on QCIR input ends with "unknown" (J8).
+2. **M2-T10** counters and Lean-checked regression instances for the step-2 unit and root-conflict paths (J7).
+3. **M2-T8** tooling: `tier2*` rows at 2 / 6 (J2), guard in `fuzz_qdimacs.sh` (J5), `minimized` in `m1_equiv.sh`
+   (J10.4); full gate on the final binary; benchmark binary `bench-M2-r1` refreshed.
+4. **M2-T11** diagnosis of the `jctc` `-dl` gap (J3); measurement and report only.
