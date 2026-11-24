@@ -825,6 +825,83 @@ no unexplained drop against M1, and the proof-overhead table is reported.
 
 ## M3. Inprocessing framework and bounded variable elimination
 
+### M3 execution plan (coordinator, 2026-11-24; supersedes M3.0, M3.1, M3.5 and the acceptance paragraph below)
+
+Written under the owner's wrap-up decision (STATUS.md, "Owner decision: wrap up in 24 hours"): an initial
+version, off by default, little testing. M3.2-M3.4 stay the reference for the side conditions and the proof
+steps. What is built, in four tasks executed in order:
+
+| task | model | content |
+|---|---|---|
+| M3-T1 | opus | `elim.cpp`, `elim.hpp`, `flags.hpp`: elimination before the search, both kinds through one code path over `Kind`, proof steps, options, counters |
+| M3-T2 | opus | inprocessing rounds on a conflict schedule (backtrack to level 0), learnt constraints, dependency learning, stress rows |
+| M3-T3 | sonnet | `check_invariants` for eliminated variables, matrix rows of all option combinations, `-cert` run, sanity run on a few benchmark files, ARCHITECTURE as built |
+| M3-T4 | opus | companions that fit: resolvents subsumed by a stored irredundant constraint are not added (`--elimsubsume`), growing bound (`--elimboundmax`) |
+
+**Design of the initial version** (deviations from ARCHITECTURE 10 are deliberate and listed below).
+
+- *Where it runs.* One predicate `eliminating ()` and one pass `eliminate ()` in the search loop, after the
+  `simplifying ()` branch, like root simplification: level 0, propagation complete, returns a root conflict or
+  `Ref::none`. The round before the first decision is the preprocessing (`--elimpre`); later rounds fire at
+  `stats.conflicts >= lim.elim` (`--eliminp`, interval `--elimint` growing arithmetically); when a round is due
+  above level 0 the loop backtracks to level 0 first, as CaDiCaL does.
+- *Applies to* QCIR input (`complete`) in modes 0 and 1. For QDIMACS input and for mode 2 `--elim` prints a
+  notice and does nothing (M3.6 and ARCH 11.1; mode 2 has its own watch invariants and no proofs).
+- *Candidates (E1).* Variables that are not decision variables (gate variables), unassigned, not eliminated, and
+  without a unit resolvent pending in this round. Decision variables are never eliminated in this version: no
+  heap, block counter, dependency or certificate bookkeeping is needed, and `-cert` output cannot change. For
+  QCIR input this loses nothing, since every used input occurs in both databases (E2).
+- *Kind.* An existential candidate is eliminated by clause resolution (`--elimclause`), a universal one by cube
+  resolution (`--elimcube`); `K` is the kind in which the variable is primary, `K'` the other.
+- *E2.* No live constraint of kind `K'`, original or learnt, contains the variable.
+- *E3 (rightmost), as the owner stated it on 2026-11-24:* in **every** live `K`-constraint containing the
+  variable, **learnt ones included**, no other variable has a greater block depth. (M3.2 tested the irredundant
+  ones only; the stricter form is the owner's wording. Learnt `K`-constraints with the variable are deleted
+  when it is eliminated.)
+- *E4.* Per polarity at most `--elimocclim` irredundant occurrences; every resolvent (non-tautological, after
+  `qreduce`) has at most `--elimclslim` literals; their number is at most the number of irredundant parents
+  plus the bound (`--elimbound`).
+- *Occurrence lists without occurrence mode.* A round builds occurrence lists (both kinds, irredundant and
+  learnt, only for literals of candidates) and drops them at its end; the **watches stay**. Parents are deleted
+  with `mark_garbage` (lazy watch removal as everywhere), resolvents are stored with `new_constraint` after their
+  literals were ordered for watching under the root assignment (the ranking of `watch_root_simplified`, with the
+  same rewind of the propagation head). No arena collection inside a round.
+- *Root-assigned literals* are ordinary literals: parents that are root-disabled without a unit take part
+  (M3.3), resolvents inherit their literals, nothing is removed without a unit (INV-DERIVED).
+- *Results.* Empty resolvent: logged, `found_empty`, the round ends. Unit resolvent: logged, stored and assigned
+  after the round through `simplifier.units` / `add_root_units ()` (a root conflict goes back to the loop). The
+  variable of a pending unit is no candidate in the same round.
+- *Order.* Passes over the candidates from the innermost variable outwards, repeated while a pass eliminated
+  something and the round's budget (`--elimticks`, literal visits) lasts. No schedule marks, no heap by cost.
+- *Proofs (M3.4).* Each resolvent is one derived step with chain = the ids of its two parents (one clash, then
+  reduction, which is the checker's rule); deletions are `d` steps from `mark_garbage`. Ids are consumed with
+  and without a proof alike. Nothing is refused: `--elim` works with `--proof`, `--check` and `-cert`.
+- *Dependency learning.* Gate variables are never the secondary variable of a dependency (they are primary
+  wherever they occur), so no dependency should mention an eliminated variable; a round that finds one all the
+  same resets the dependencies.
+
+**Options** (M3-T1 unless marked): `elim` (0), `elimclause` (1), `elimcube` (1), `elimpre` (1), `eliminp` (1,
+T2), `elimint` (2000, T2), `elimbound` (0), `elimocclim` (100), `elimclslim` (100), `elimticks` (100000000),
+`elimsubsume` (1, T4), `elimboundmax` (16, T4). **Counters:** `elimrounds`, `elimtried`, `elimblockedother`
+(E2), `elimblockedright` (E3), `elimblockedbound` (E4), `elimunits`, per kind `eliminated`, `resolvents`,
+`elimdeleted`; T2: `eliminprounds`, per kind `elimlearnt` (learnt constraints deleted with their variable);
+T4: `elimsubsumed`.
+
+**Left for later** (goes to `doc/rewrite/HANDOFF.md`; none of it is started on this machine):
+
+1. Yield measurement M3.0 (`bench/elim_yield.py`) and every benchmark of elimination; the ablation of both
+   gate placements; tuning of all limits and of the schedule.
+2. Relaxation of the rightmost condition (M5 item 3; dropped by the owner's wrap-up decision), and the weaker
+   form of E3 that ignores learnt constraints (M3.2), which needs the owner's word.
+3. Gate-aware elimination (M3.5 item 5); backward subsumption and strengthening with resolvents
+   (`subsume.cpp`, M3.1); `--elimdropother`.
+4. Occurrence mode proper (ARCH 10.2: watches cleared and rebuilt, `propagate_occs`), effort budgets relative
+   to search ticks, schedule marks per variable, candidate order by cost (ARCH 10.1, 10.3).
+5. Elimination of decision variables and everything it needs (`mark_eliminated` with heaps and block counters,
+   frozen variables through `Solver::freeze`), QDIMACS input (M3.6: extension stack, (HI) argument), mode 2.
+6. Tests not run: full matrix, sanitizer fuzz, 1:3000 seeds, smoke set, `modelcubes == 0` on the benchmark
+   set (INV-COMPLETE after elimination is argued in M3.3 but only fuzzed briefly).
+
 ### M3.0 Measure the yield first (P0.3; review 00, S1)
 
 Which variables elimination may touch at the start is a static property of

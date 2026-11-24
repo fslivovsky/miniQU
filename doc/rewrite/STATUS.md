@@ -3646,3 +3646,33 @@ decision: lighter gates from M3":
    plan.
 7. Timing measurements (run times, time-out counts) use the benchmark cores with nproc/2 jobs; correctness tests
    may use all cores.
+
+## M3 plan and decision on M2-T11 (coordinator, 2026-11-24)
+
+**Decision on the default that M2-T11 concerns (J3; `-dl` time-outs on the `jctc` family): no default
+changes.** M2-T11 shows no regression at 20 seeds (M2 default 70 time-outs of 240 against 66 for M1, discordant
+17 / 13, p = 0.58), and no single switch stands out: `--no-reusetrail` 67, `--no-rootsimp` 68, both off 66, all
+within the noise of this heavy-tailed family; switching tiers and glue updates off is the worst arm (80).
+`reusetrail`, `rootsimp`, `tiers` and `glueupdate` therefore stay on, with and without `-dl`. J3 is closed.
+Carried to the cluster benchmarks (HANDOFF): the side observation that `jctc10-fail` and
+`jctc14-unrolled-fail` time out more often with trail reuse in the control configuration (17-19 of 20 against
+6 for M1), against the gain on the pass instances (10 / 27, p = 0.008); a paired `--reusetrail` on/off run on
+the whole benchmark set decides that, not twelve instances. Nothing else of M2 is reopened.
+
+**M3 plan.** `ROADMAP.md`, "M3 execution plan": four tasks (M3-T1 elimination before the search for both
+kinds with proofs; M3-T2 inprocessing rounds; M3-T3 invariants, matrix rows, docs as built; M3-T4 the
+companions that fit). Decisions taken there, binding for the tasks:
+
+1. Elimination is off by default (`--elim`), with `--elimclause` / `--elimcube` and `--elimpre` / `--eliminp`
+   as the four switches the owner asked for.
+2. E3 is checked against every live constraint of the variable's kind, learnt ones included (the owner's wording
+   of 2026-11-24), which is stricter than ROADMAP M3.2.
+3. Only non-decision (gate) variables are candidates; QDIMACS input and mode 2 are excluded with a printed
+   notice. Hence no change to `-cert` output, heaps or block counters.
+4. Occurrence lists are built per round next to the watches; ARCH 10.2 (occurrence mode) is not built.
+5. Proofs need no extension (derived steps with two antecedents, deletions); no combination is refused.
+
+Open for the owner (also listed in ROADMAP under "Left for later"): whether E3 may ignore learnt constraints
+as M3.2 proposed; the yield measurement M3.0 and all benchmarks of elimination; gate-aware elimination,
+backward subsumption, the relaxation of the rightmost condition; elimination of decision variables and for
+QDIMACS input; the full test gates of ROADMAP M3.5.
