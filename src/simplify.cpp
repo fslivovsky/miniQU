@@ -298,8 +298,7 @@ Ref Internal::add_root_units () {
     else if (val (l) < 0) {
       stats.rootconflicts++;
       conflict = ref;
-    }
-    else if (!root_unit (l))
+    } else if (!root_unit (l))
       replace_reason (var (l), ref);
   }
   simplifier.units.clear ();
