@@ -2966,3 +2966,134 @@ built, before any simplification.
 3. Steps 1 and 2 consider only root literals new since the last run; a variable that gets a unit later through a step-2 unit
    (reason replaced) does not make earlier skipped reasons materialisable in later runs. Harmless (fewer units), as specified.
 4. Problem 1 of M2-T2 (`gc-ccmin3` smoke, `jctc9-pass`) still makes `regress.sh` exit 1.
+
+## M2-T5 (worker, 2026-11-24): proof-producing minimisation (chain extension), `Checker` rule removed
+
+Commits on `rewrite/cadical-style`: `b48a709` (solver, unit tests, regression instance), then the matrix, `tests/m1_equiv.sh`,
+ARCHITECTURE 7.5/8.1/8.2/9.2 and this entry. The default `ccminmode` stays 0 (M2-T7 decides).
+
+**What was built.**
+- `Internal::minimizing ()` is `opts.ccminmode != 0`; the M1 warning in `solve ()` and the rule that the default `Checker`
+  (debug/asan) is not connected when `ccminmode > 0` are gone (`internal.cpp`, `solver.cpp`; `app.cpp` had no such code). Mode 2
+  unchanged (long-distance resolvents are never minimised).
+- `minimize.cpp`: `basic`/`deep`/`bounded` now return the kept count with the kept literals at the front in their old order and
+  the removed ones behind (swap instead of overwrite; `bounded` writes all keys back), so the search is the M1 search. With a
+  proof, `Minimize::extend_chain` runs after the decision: start set = removed literals (ccminmode 3: only primary ones; a removed
+  secondary literal is reduction), then a work-list pass over their reasons adds every literal that is neither `in_learnt` nor
+  already `chained` nor (ccminmode 3) secondary; sorted by descending `vtab[].trail`; reason ids appended to `chain`. Same-kind root
+  units are reasons like any other (`free_root`), so their ids are appended too. An assertion checks that every added literal was
+  shown removable by the mode's decision (mode 1: free root; mode 2: `removable` or free root; mode 3: `cached` with bound != 0),
+  and `same_kind_reason` asserts the kind. Scratch: `Minimizer::resolved` (internal.hpp, commented); new `seen` flag `chained`;
+  `seen` all zero on return as before. New counter `minimizedchain` (ids appended; counted only with a proof, one add per
+  constraint).
+- The argument (header of `minimize.cpp`, replacing the M1 paragraph): every literal of the resolvent and of these reasons is
+  vanished except each reason's propagated literal (and, after a kind switch in `analyze_qu`, the flipped literal, which is always
+  the asserting literal and later on the trail than anything minimisation touches), so each appended reason clashes exactly on its
+  pivot; reverse trail order means a resolved variable is never reintroduced; the final set is the kept literals plus (mode 3)
+  secondary literals right of every kept primary one, which the final reduction removes. Mode 1 / `--legacyanalyze`: R after the
+  analysis part (variant "reduce after every step") is exactly the resolvent `analyze_qu` kept; kept literals are never pivots and
+  never reduced if primary, a mode-1 secondary pivot that an intermediate reduction removed only makes its reason clash nowhere,
+  and the final set is again a subset of kept literals and right-of-every-kept-primary secondaries, so the combined step holds in
+  whichever variant the analysis part holds. Literals the analysis reduced along the way that a minimisation reason reintroduces
+  are either resolved away by the chain (modes 1, 2: they must be removable to be passed over) or secondary right of every kept
+  primary (mode 3). I checked this against `analyze_qu.cpp` and found no case where neither variant accepts; the Checker and the
+  Lean checker accepted every proof below.
+
+**Restriction found (a pre-existing bug of M1, not proof related).** In mode 1 the asserting literal can be secondary; the
+analysis then leaves a primary literal right of it. Minimisation (any of the three modes) could remove all of those, and
+`qreduce` then dropped the asserting literal: `learn` failed its assertion `it != derived.end ()` in debug builds and ran on with
+an out-of-range `iter_swap` in release builds. The old solver kept position 0 through its reduction (an unreduced but valid
+literal); the M1 port lost it. Found by the new rows `mode1-ccmin2/3` and `min-root-mode1` in a first debug fuzz run (60 crashes
+over seeds 1-60 of the three rows, nothing in the other minimisation rows). Fix, identical with and without a proof since it is
+decided before the chain is built: if the chosen mode would leave no primary literal right of a secondary asserting literal, the
+constraint is learnt unminimised (`Minimize::keeps_asserting`). Unit test `test_secondary_asserting` (fails with the check
+disabled) and `tests/regressions/mode1-minimize-asserting.sat.qcir` (tiny seed 16; to be run with `-mode=1 -ccminmode=2`).
+How often: with a counting build, 0 times on `9.3` and `jctc4-fail` (`-mode=1 -ccminmode=2/3`), 91 of 56434 / 110 of 72536
+learnt constraints on `test_5_5_tippy.pg-7`.
+
+**Tests.**
+- `test/unit/minimize.cpp` rewritten around a fixture that writes each case for clauses and derives the cube version (quantifiers
+  swapped, literals negated, same decisions, same chain), with `Recorder` and `Checker` connected when traced. For ccminmode 1, 2,
+  3, both kinds, traced and untraced, mode-0 analysis and `--legacyanalyze`: removal through one reason (chain `3 2 1`), through a
+  chain of reasons (`4 3 2 1`; mode 1 keeps the literal, `4 3`), through a root unit (`3 2 1`, learnt unit), a chain ending in a
+  root unit (`5 4 3 2 1`), mode 3 with an introduced universal that the final reduction removes (`3 2 1`; modes 1/2 keep it and
+  add nothing), and a failed exploration next to a successful one where a sub-literal was shown removable (`5 4 2`: neither the
+  reason of the kept literal nor that of its removable sub-literal is appended). Every traced learnt step is replayed by the
+  `Checker` (`stats.checked`). Plus the mode-1 secondary-asserting case and "untraced counts no chain ids". Verified that a wrong
+  expected order makes the test fail.
+- `tests/matrix.txt`: `ccmin3`, `dl-ccmin3`, `gc-ccmin3` now check minimised proofs (comment on `gc-ccmin3` fixed); new normal
+  rows `ccmin2`, `dl-ccmin2`, `mode1-ccmin3`, `mode1-ccmin2`, `legacy-ccmin3`; stress rows `min-gc` and `min-root-mode1` (options as
+  specified; required `minimized` plus the usual counters; `min-root-mode1` also `rootunits`). All proofs yes.
+- `tests/m1_equiv.sh`: `--ccminmode=0` appended to EQUIV; job lines now "label|pass|new options|other options|instance"; set names
+  are taken from the job file. Second pass: EQUIV `--ccminmode=K` vs M1 `-ccminmode=K`, K = 2, 3, in '' and `-dl` (smoke + 40
+  generated, plain and stressed). **Not in `-mode=1`**, against the task text: there the M1 binary runs into the bug above
+  (see the measurement below), so no equality is possible; the reason is written in the script header. Third pass: default
+  options plus `--ccminmode=K` (K = 0..3) in '', `-dl`, `-mode=1`, smoke + 40 generated (plain and stressed), without and with
+  `-proof=FILE -proof-binary` on the same binary: conflicts, decisions, propagations, ticks, restarts, learned.*, reduced.*,
+  reductions and the exit code must be equal.
+- `tests/regress.sh` needed no change. Its timed search-tier runs are without a proof (`minimizedchain` 0 there, `minimized`
+  93-98% nonzero on the minimisation rows); its proof runs make the same search (third pass above), and the Lean table below
+  shows `minimized` > 0 with `-proof`.
+
+**Gate results** (logs `/home/ec2-user/miniqu-work/m2-t5/`; heavy commands `taskset -c 0-23`, 16 jobs, as the 48-core machine
+note says instead of the 0-47 of the task text; script `gate.sh`).
+- Builds release, debug, asan, release-clang without warnings; `ctest --preset release` and `--preset debug`: 42/42 (the debug
+  default `Checker` now replays minimised steps in every unit and fuzz run).
+- `tests/m1_equiv.sh build/release/miniQU` (final script): **M1 EQUIVALENCE PASSED**, 60 sets, 0 differences (smoke
+  33/32/32/32 in the four modes; ccmin2/ccmin3 smoke 31-32 per mode, generated 40 plain and 40 stressed each; proof pass
+  ccmin0-3 x 3 modes: smoke 32-33, generated 40/40 each, all identical).
+- The first run of the script still had the `-mode=1` minimisation sets: 137 differing pairs, all in `ccmin2/3 ... -mode=1`, and
+  every other set identical. Classified with a build that prints a line whenever `keeps_asserting` forces the unminimised
+  constraint (`instr-build`, `cls/classify.txt`): in all 137 pairs it fired (1 to 54135 times); in 107 the M1 binary ended with an
+  internal error (exit 1, "decision ... in the way of reducing ... without dependency learning"), a segfault (139) or **a wrong
+  verdict** (6 pairs: `bt2nd-2x4_8.ig` UNSAT instead of SAT in ccmin2 and ccmin3; generated search seeds 10, 28, 35, 40 with stress
+  SAT instead of UNSAT; the new binary agrees with the frozen baseline on all six); in 30 it finished with the right verdict
+  after diverging. So `-mode=1 -ccminmode>0` of the M1 binary is not a valid reference.
+- `tests/regress.sh -j 16 -s 1:300 -M all build/release/miniQU`: **REGRESSION TESTS PASSED** (warnings only: solver timeouts
+  `mode1-dl` 4, `mode2-dl` 3, `noearly` 30, `restart-dl` 6, `restart-mode1-dl` 20, all normal rows or within limits). Every row
+  with proofs: 300 proofs checked by Lean, 0 rejected, 0 checker timeouts. New rows: 0 search timeouts each; `minimized`
+  nonzero on 93-98% of the search tier. **Problem 1 of M2-T2 is gone**: smoke of `gc-ccmin3` passes, `jctc9-pass` solves in
+  2.4 s and its proof (same search now) is accepted.
+- `tests/regress.sh -S -j 16 -s 1:100 -t 240 -M all build/asan/miniQU`: REGRESSION TESTS PASSED (3 warnings: solver timeouts
+  `mode1-dl` 1, `noearly` 10, `restart-mode1-dl` 4), no sanitizer report, no Checker abort.
+- `tests/fuzz_qdimacs.sh build/release/miniQU 1 300 OPT` for OPT in '', `-dl`, `-mode=1`, `-mode=2`, each alone and with
+  `-ccminmode=3` and `-ccminmode=2`: 12 x 600 instances, 0 failures, 0 timeouts.
+- `tests/run_regressions.sh build/release/miniQU [OPTS]` with '', `-ccminmode=3`, `-mode=1 -ccminmode=2`, `-mode=1 -ccminmode=3`,
+  `-legacyanalyze -ccminmode=2`: 8 instances each, 0 failures (proofs Lean-checked).
+- Before the fix, a debug-build run of the minimisation rows (`-S -s 1:60 -t 120`) failed only in `mode1-ccmin2`, `mode1-ccmin3`,
+  `min-root-mode1` (60 crashes, all the assertion above); the mode-0, `-dl`, legacy and gc minimisation rows had no failure and no
+  Checker abort.
+
+**Lean on benchmark runs** (release, default options plus the column, `-proof=FILE -proof-binary`, 9 runs at a time on cores
+24-32, proofs in `/home/ec2-user/miniqu-work/proofs/m2-t5`, deleted after the check; scripts `lean_solve.sh`, `lean_check.sh`).
+All 36 proofs `s VERIFIED` (FALSE for the UNSAT ones, TRUE for `tippy`). Four families of `bench/smoke.txt`: `9.3`, `hadw6-7`,
+`jctc4-fail`, `test_5_5_tippy.pg-7`; the six required configurations are ccminmode 2 and 3 in '', `-dl`, `-mode=1`, ccminmode 0
+is shown for comparison. Solve time is wall time with proof writing, informational only (one run, 9 parallel); size in bytes.
+
+| instance | options | conflicts | minimized | chain ids | solve s | proof bytes |
+|---|---|---:|---:|---:|---:|---:|
+| 9.3 | ccmin0 / 2 / 3 | 981 / 993 / 717 | 0 / 11980 / 8674 | 0 / 127658 / 90899 | 2.29 / 2.16 / 2.20 | 10547599 / 10543699 / 10300689 |
+| 9.3 | -dl, ccmin0 / 2 / 3 | 1174 / 1814 / 1449 | 0 / 20157 / 16389 | 0 / 283893 / 202156 | 3.63 / 3.41 / 3.69 | 10742744 / 11436229 / 11094315 |
+| 9.3 | -mode=1, ccmin0 / 2 / 3 | 1116 / 770 / 931 | 0 / 8585 / 13666 | 0 / 100711 / 140358 | 2.30 / 2.35 / 1.54 | 10375618 / 10651561 / 10590293 |
+| hadw6-7 | ccmin0 / 2 / 3 | 820 / 1217 / 1297 | 0 / 19800 / 17996 | 0 / 41745 / 38631 | 0.05 / 0.08 / 0.08 | 864750 / 1089357 / 1175042 |
+| hadw6-7 | -dl | 1607 / 1261 / 1376 | 0 / 18597 / 24783 | 0 / 47067 / 54316 | 0.10 / 0.09 / 0.10 | 1223449 / 1143259 / 1244274 |
+| hadw6-7 | -mode=1 | 927 / 639 / 1322 | 0 / 5723 / 16975 | 0 / 13175 / 36930 | 0.06 / 0.05 / 0.09 | 918587 / 830635 / 1194189 |
+| jctc4-fail | ccmin0 / 2 / 3 | 1432 / 653 / 574 | 0 / 8993 / 5142 | 0 / 10566 / 7378 | 0.13 / 0.09 / 0.08 | 1660440 / 1224890 / 1158202 |
+| jctc4-fail | -dl | 2348 / 2609 / 2256 | 0 / 67786 / 47495 | 0 / 70476 / 54121 | 0.13 / 0.19 / 0.17 | 1533256 / 2089152 / 1895786 |
+| jctc4-fail | -mode=1 | 5370 / 5031 / 4432 | 0 / 398181 / 213461 | 0 / 415157 / 222411 | 0.99 / 1.27 / 0.73 | 13256175 / 16699030 / 8605361 |
+| test_5_5_tippy.pg-7 | ccmin0 / 2 / 3 | 50615 / 76156 / 45545 | 0 / 289107 / 178074 | 0 / 464144 / 278615 | 1.08 / 1.56 / 0.84 | 6829310 / 7863580 / 4470768 |
+| test_5_5_tippy.pg-7 | -dl | 50892 / 31091 / 41830 | 0 / 134724 / 119868 | 0 / 231944 / 212807 | 1.04 / 0.63 / 0.89 | 5642410 / 3522044 / 4618268 |
+| test_5_5_tippy.pg-7 | -mode=1 | 68411 / 56435 / 72537 | 0 / 213800 / 302745 | 0 / 338831 / 448230 | 1.43 / 1.16 / 1.65 | 8695457 / 6024908 / 7921709 |
+
+Lean check times 0.2-4.5 s per proof. The chain grows by 1.0-14 reason ids per removed literal (most in `9.3`, where removed
+literals sit on long implication chains), but proof size moves with the search (conflicts) more than with the chains; no
+benchmark claim, M2-T7 decides the default.
+
+**Open points.**
+1. The second pass of `m1_equiv.sh` omits `-mode=1` (above). Mode-1 minimisation is covered by the proof pass of the same
+   script (with and without proof identical), the matrix rows and the Lean runs, but not by an M1 reference. Coordinator to
+   confirm.
+2. The fallback in mode 1 keeps the whole constraint unminimised. A finer rule (keep only the rightmost removed primary literal
+   right of the asserting one) would need its own argument for mode 3 (the kept literal raises the bound limit); not done.
+3. `minimized` is not in the STATS list of `m1_equiv.sh`; the pass compares conflicts/decisions/propagations/ticks etc., which
+   already pin the search.

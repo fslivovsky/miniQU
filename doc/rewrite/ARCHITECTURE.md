@@ -882,17 +882,26 @@ glue, proof step, allocation, watches, backjump, assignment, score decay.
 called minimisation only from the other two analyses), so `--ccminmode` has
 no effect in mode 2.
 The old code disabled minimisation when writing proofs because the chain did
-not cover the removed literals; M2 fixes that (ROADMAP). (As built in M1-T09:
-the old code disabled only `ccmin-mode=3` under a proof or trace and ran
-modes 1 and 2 regardless; the port disables all three while any tracer is
-connected.) `stats.minimized` counts the literals minimisation removes
+not cover the removed literals. As built in M2-T5, minimisation runs alike
+with and without a proof: with one, `minimize.cpp` appends to the chain of
+the analysis the reasons of every variable it resolves away (the removed
+literals and, transitively, the literals of their reasons that are neither
+in the learnt constraint nor, with `ccminmode=3`, secondary), in reverse
+trail order, found by a marking pass from the removed literals after the
+decision (the argument that this is one QLRUP step, in either variant of
+the format, is in the header of `minimize.cpp`). In mode 1, if minimisation
+would remove every primary literal right of a secondary asserting literal,
+the constraint is learnt unminimised (the reduction would drop the
+asserting literal; the M1 port failed there, the old code kept the literal
+unreduced). `stats.minimized` counts the literals minimisation removes
 beyond those the following `qreduce` removes anyway, which is what the old
-`conflict literals ... deleted` line measures.
+`conflict literals ... deleted` line measures; `stats.minimizedchain`
+counts the reason ids appended.
 
 Root-level literals are kept in learnt constraints in M1 as in the old code.
-M2 may resolve them away when their reason has the same kind (adding the unit
-ids to the chain); a root literal whose reason has the other kind must stay
-(INV-DERIVED). As built in M2-T4, `simplify.cpp` removes root literals with
+With `ccminmode >= 1` minimisation resolves them away when their reason is a
+unit of the same kind (the unit id is appended like any reason); a root
+literal whose reason has the other kind must stay (INV-DERIVED). As built in M2-T4, `simplify.cpp` removes root literals with
 a same-kind unit from stored constraints at the next root simplification;
 it replaces the reason of a root variable by the unit derived for it
 (`replace_reason` in `assign.cpp`), which the analyses read like any other
@@ -956,10 +965,8 @@ by default in `debug`/`asan` builds whenever the caller connected no tracer
 tell tracers apart; `--check` adds it to any), so that every fuzz run
 exercises proof generation, and is available as `--check` in all builds.
 `Solver` connects it with the first original, when the prefix is complete;
-it counts replayed steps in `stats.checked`. M1 only: minimisation is switched off while a tracer is
-connected (7.5), so the default-on `Checker` is *not* connected when
-`ccminmode > 0` (otherwise debug/asan builds would never minimise); an
-explicit `--check` wins and disables minimisation. M2.3 removes both rules. Its scope by input and mode:
+it counts replayed steps in `stats.checked`. Since M2-T5 it is connected
+whatever `ccminmode` is, and minimisation does not depend on it (7.5). Its scope by input and mode:
 
 | | modes 0 and 1 | mode 2 |
 |---|---|---|
@@ -980,7 +987,7 @@ the proof ids do not reproduce) and writes no deletions
 | original constraint added | `constraint.cpp` via `Solver::add_original` | `o id kind gate lits` exactly as given by the encoder (duplicates removed); tautological clauses / contradictory cubes are skipped without a step |
 | reduction of an original | same | derived from the original's id alone; original deleted |
 | two complementary unit originals | same | empty constraint from the two ids |
-| learnt constraint | `learn.cpp` | derived, chain = conflict id, then reason ids in resolution order (plus, from M2, the reasons used by minimisation) |
+| learnt constraint | `learn.cpp`, `minimize.cpp` | derived, chain = conflict id, then reason ids in resolution order, then the reasons of the variables minimisation resolves away (including same-kind root units) in reverse trail order |
 | final empty constraint | `learn.cpp` | derived with empty literal list |
 | initial cube from a model | `model.cpp` | `add_model_cube`: fatal error if a QLRUP tracer is connected; `TraceTracer` writes a step without premises |
 | root unit materialised (M2.1) | `simplify.cpp` | derived unit, chain = the non-unit reason id, then the same-kind unit ids of its other literals (in the order of the reason's literals); a secondary unit (mode 1) is the empty constraint |
@@ -1091,7 +1098,7 @@ benchmarked.
 
 `struct Stats` contains plain `int64_t` counters grouped by technique
 (`conflicts`, `decisions`, `propagations`, `ticks`, `restarts`,
-`learned[kind]`, `learnedlits[kind]`, `minimized`, `dependencies`,
+`learned[kind]`, `learnedlits[kind]`, `minimized`, `minimizedchain`, `dependencies`,
 `reductions`, `reduced[kind]`, `used[kind]`, `glueupdates[kind]`,
 `promoted[kind]`, `rootsimps`, `rootunits`, `rootstrengthened`,
 `rootlits`, `rootdeleted`, `collections`, `modelcubes`, and per pass:

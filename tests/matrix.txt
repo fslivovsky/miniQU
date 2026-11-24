@@ -22,6 +22,11 @@ mode2        | -mode=2                          | no  | conflicts restarts learn
 mode2-dl     | -mode=2 -dl                      | no  | conflicts restarts learned.clause learned.cube dependencies | normal
 ccmin3       | -ccminmode=3                     | yes | conflicts restarts learned.clause learned.cube minimized | normal
 dl-ccmin3    | -dl -ccminmode=3                 | yes | conflicts restarts learned.clause learned.cube dependencies minimized | normal
+ccmin2       | -ccminmode=2                     | yes | conflicts restarts learned.clause learned.cube minimized | normal
+dl-ccmin2    | -dl -ccminmode=2                 | yes | conflicts restarts learned.clause learned.cube dependencies minimized | normal
+mode1-ccmin3 | -mode=1 -ccminmode=3             | yes | conflicts restarts learned.clause learned.cube minimized | normal
+mode1-ccmin2 | -mode=1 -ccminmode=2             | yes | conflicts restarts learned.clause learned.cube minimized | normal
+legacy-ccmin3 | -legacyanalyze -ccminmode=3     | yes | conflicts restarts learned.clause learned.cube minimized | normal
 noearly      | -no-earlytseitin                 | yes | conflicts restarts learned.clause learned.cube | normal
 legacy       | -legacyanalyze                   | yes | conflicts restarts learned.clause learned.cube | normal
 m1reduce     | --no-tiers --no-glueupdate --reducetarget=50 --reducesize --reduceint=0 | yes | conflicts restarts learned.clause learned.cube | normal
@@ -30,9 +35,9 @@ norootsimp   | --no-rootsimp                    | yes | conflicts restarts learn
 # on any waste; restart every conflict and reset dependencies often. The
 # options and limits are those of STATUS.md, "Coordinator decisions after M1
 # round 1", D1 (the extreme --reduceint=2 of the dl and mode rows is run by
-# tests/fuzz_qdimacs.sh instead). gc-ccmin3: debug and asan builds connect no
-# default Checker with minimisation, so it runs reduce, shrink and collect on
-# constraints without ids under the sanitizers (STATUS.md, M1-R2-T2).
+# tests/fuzz_qdimacs.sh instead). gc-ccmin3 runs reduce, shrink and collect
+# on minimised constraints; debug and asan builds replay their steps in the
+# default Checker (M2-T5).
 # The gate runs the asan binary with -t 240 (STATUS.md, "Coordinator decisions
 # after M1 round 2", E3: owner decision on sanitizer-build timeouts) and the
 # release binary with the default 20 s; the limits below apply to both.
@@ -64,3 +69,8 @@ root         | --rootsimpdelay=0                | yes | conflicts restarts learn
 root-dl      | --rootsimpdelay=0 -dl            | yes | conflicts restarts learned.clause learned.cube dependencies rootunits rootstrengthened rootdeleted | stress | 2
 root-mode1   | --rootsimpdelay=0 -mode=1        | yes | conflicts restarts learned.clause learned.cube rootunits rootstrengthened rootdeleted | stress | 2
 root-gc      | --rootsimpdelay=0 --reduceint=2 --tier1glue=0 --tier2glue=0 --gcfrac=0 | yes | conflicts restarts learned.clause learned.cube reductions reduced.clause reduced.cube collections relocated rootunits rootstrengthened rootdeleted | stress | 2
+# Minimisation with proofs (M2-T5): every reduction deletes minimised
+# constraints and collects; root literals are resolved away by their units
+# under the 'reduce after every step' analysis of mode 1.
+min-gc       | --ccminmode=2 --reduceint=2 --tier1glue=0 --gcfrac=0 --rootsimpdelay=0 | yes | conflicts restarts learned.clause learned.cube minimized reductions reduced.clause reduced.cube collections relocated | stress | 2
+min-root-mode1 | --ccminmode=3 -mode=1 --rootsimpdelay=0 | yes | conflicts restarts learned.clause learned.cube minimized rootunits | stress | 2
