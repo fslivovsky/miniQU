@@ -1136,6 +1136,7 @@ benchmarked.
 `learned[kind]`, `learnedlits[kind]`, `minimized`, `minimizedchain`, `dependencies`,
 `reductions`, `reduced[kind]`, `used[kind]`, `glueupdates[kind]`,
 `promoted[kind]`, `rootsimps`, `rootunits`, `rootstrengthened`,
+`rootstrunits` (step-2 results with one literal), `rootconflicts` (root conflicts found when the step-2 units are assigned),
 `rootlits`, `rootdeleted`, `collections`, `modelcubes`, and per pass:
 rounds, tried, successful, removed literals...). They are incremented
 directly (`stats.conflicts++`) and printed in one place (`stats.cpp`) at

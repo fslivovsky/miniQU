@@ -242,6 +242,7 @@ void Internal::strengthen_root (Ref ref) {
       found_empty (kind);
       return;
     }
+    stats.rootstrunits++;
     mark_garbage (ref);
     simplifier.units.push_back ({id, kind, lits[0]});
     return;
@@ -294,8 +295,10 @@ Ref Internal::add_root_units () {
     const Lit l = forced (u.kind, u.lit);
     if (!val (l))
       assign (l, ref);
-    else if (val (l) < 0)
+    else if (val (l) < 0) {
+      stats.rootconflicts++;
       conflict = ref;
+    }
     else if (!root_unit (l))
       replace_reason (var (l), ref);
   }

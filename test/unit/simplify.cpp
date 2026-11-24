@@ -194,6 +194,8 @@ static void test_strengthen_unit () {
   CHECK (f.simplify () == Ref::none);
   CHECK (f.garbage (c));
   CHECK (f.internal.val (L (1)) > 0 && f.unit_reason (1));
+  CHECK_EQ (f.internal.stats.rootstrunits, 1);
+  CHECK_EQ (f.internal.stats.rootconflicts, 0);
   const std::vector<std::string> expected = {"a 3 c: 1 : 2 1", "d 2"};
   CHECK (f.steps (2) == expected);
   CHECK (f.internal.propagate () == Ref::none);
@@ -226,11 +228,29 @@ static void test_root_conflict () {
   const Ref conflict = f.simplify ();
   CHECK (conflict != Ref::none);
   CHECK (stored (f.internal, conflict) == lits ({2}));
+  CHECK_EQ (f.internal.stats.rootstrunits, 1);
+  CHECK_EQ (f.internal.stats.rootconflicts, 1);
   f.internal.analyze (conflict);
   CHECK (f.internal.status == Status::False);
   const std::vector<std::string> expected = {"a 5 c: 2 : 4 3", "d 4",
                                              "a 6 c: : 5 2", "e c 6"};
   CHECK (f.steps (4) == expected);
+}
+
+// 'forall 1 exists 2 forall 3 exists 4': the cube (1) assigns -1 and (1 2)
+// forces 2 without a clause unit; (-4) assigns -4.  (2 3 4) is reduced to
+// (2), which is already true: the new unit replaces the reason of 2.
+static void test_unit_becomes_reason () {
+  Fixture f ("aeae", true);
+  f.add (Cube, {1});
+  const Ref old = f.add (Clause, {1, 2});
+  f.add (Clause, {-4});
+  f.add (Clause, {2, 3, 4});
+  CHECK (f.simplify () == Ref::none);
+  CHECK (f.internal.reason (2) != old && f.unit_reason (2));
+  CHECK_EQ (f.internal.stats.rootstrunits, 1);
+  CHECK_EQ (f.internal.stats.rootconflicts, 0);
+  f.internal.check_invariants ();
 }
 
 // The same, with 3 existential: (2 3 5) under (-5) becomes (2 3), whose
@@ -326,6 +346,7 @@ int main () {
     test_strengthen_clause (traced);
   }
   test_units_cubes ();
+  test_unit_becomes_reason ();
   test_other_kind ();
   test_secondary_unit ();
   test_strengthen_cube ();

@@ -40,6 +40,8 @@ void Stats::print (FILE *file, double seconds) const {
   row ("promoted:", total (promoted));
   row ("root units:", rootunits);
   row ("strengthened:", rootstrengthened);
+  row ("strength. units:", rootstrunits);
+  row ("root conflicts:", rootconflicts);
   row ("root deleted:", rootdeleted);
   fprintf (file, "c %-16s %12.2f seconds\n", "time:", seconds);
 }

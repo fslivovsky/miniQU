@@ -36,6 +36,8 @@ namespace miniqu {
   COUNTER (rootsimps) \
   COUNTER (rootunits) \
   COUNTER (rootstrengthened) \
+  COUNTER (rootstrunits) \
+  COUNTER (rootconflicts) \
   COUNTER (rootlits) \
   COUNTER (rootdeleted) \
   COUNTER (collections) \
