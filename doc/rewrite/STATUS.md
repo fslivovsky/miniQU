@@ -2656,3 +2656,88 @@ budgets stay as decided before (benchmark stage about 2 hours per milestone roun
 - The L3 reproducers and `load_measure.py` groups were chosen for the 96-core layout (12 L3 groups); with
   6 groups, the benchmark cores 24-47 are L3 groups 3-5. Re-derive the windows from the machine before
   using these tools, and do not compare their numbers with the M1 ones.
+
+## M2-T2 (worker, 2026-11-24): `used` marks, glue update in analysis, tiers, conflict schedule, `tests/m1_equiv.sh`
+
+Commits on `rewrite/cadical-style`: `eae8785` (solver, unit tests, `tests/m1_equiv.sh`, ARCHITECTURE 3.2/5.2/7.1/9.1/9.2),
+then the matrix rows, ROADMAP 0.1 and this entry.
+
+**What was built.**
+- `constraint.hpp`: `used ()` / `set_used (v <= 2)` on bits 14-15 of the glue word (0 for irredundant constraints);
+  `set_glue` keeps them; shrink and copy already moved the word. Unit test in `test/unit/constraint.cpp`.
+- Options (ARCH 9.1 in the same commit): `tiers` 1, `glueupdate` 1, `tier2glue` 6, `reducetarget` 75 (10..100), `reducesize` 0,
+  `reduceint` now 300 with the new description; `tier1glue` stays 2. Stats `used`, `glueupdates`, `promoted` per kind, and
+  five new rows in the human-readable table.
+- `learn.cpp`: `compute_glue` counts with a per-level stamp table (`glue_stamps`, `glue_stamp`, grown lazily to the decision
+  level; `glue_levels` removed) and takes an optional `bound` at which it stops counting.
+- New `src/tier.cpp` (class: heuristic only): `bump_constraint (Constraint &)` and `mark_used (Constraint &)`. A redundant
+  constraint is counted in `stats.used[kind]`; with `--glueupdate` and glue above `tier1glue` the glue is recomputed over the
+  currently assigned literals, bounded by the stored glue, and stored only if smaller (`glueupdates`; `promoted` when the new
+  glue enters tier 1, or tier 2 from above); then `used` is set to 2 (glue <= `tier2glue`) or 1 with `--tiers`.
+  **Where it is called** (the same rule in all three analyses, stated in the header of `tier.cpp` and of each analysis):
+  when the literals of a constraint enter the resolvent, i.e. for the conflict and for every reason that is resolved with, in
+  `analyze_q` (the `add` lambda), `analyze_qu` (`LevelAnalyzer::start`, which also covers the constraint a kind switch restarts
+  from, and `resolve`) and `analyze_ldq` (`start`, `resolve`). A reason that an analysis reaches but does not resolve with
+  because it ends in dependency learning is not bumped. `learn_watched` marks a new redundant constraint.
+- `reduce.cpp`: `reducing ()` is `(reduceint && conflicts >= lim.reduce) || (reducesize && size test)`; candidates per kind are
+  non-reason constraints that survive (1) `tiers && used > 0` (decremented, kept), (2) `glue <= tier1glue`; sort and tie-break
+  as in M1; the first `candidates * reducetarget / 100` go through `mark_garbage` only. File header rewritten.
+- `tests/m1_equiv.sh` (documented header, one `EQUIV` variable, `STRESS` string, 4 modes, smoke + 40 generated instances, each
+  generated one also with the stress options appended on both sides, `-verb=1`, 60 s, 16 jobs). The lower half of the cores
+  is computed from `nproc` (0-23 here), not the fixed 0-47 of the task text (machine note). Exits 1 on any difference or if a
+  mode has no compared pair.
+- Unit tests: `test/unit/tier.cpp` (marks on learning by tier and with `--no-tiers`; bump lowers glue, promotes into tier 1 and
+  tier 2 and counts per kind; never raises; `--no-glueupdate`, `--no-tiers`; irredundant constraints untouched; analyses of
+  mode 0, 1 and 2 bump the conflict and the reasons); `test/unit/reduce.cpp` (the two triggers, the M1 policy through
+  `--no-tiers --reducetarget=50` with marks set, the tier policy in (glue, size, creation) order with reasons, tier 1, used > 0
+  and decrements, for clauses and cubes, with a traced database seeing exactly one `d` per deleted constraint, marks wearing
+  off, `reducetarget` rounding).
+
+**Gate results.**
+- Builds: release, debug, asan, release-clang without warnings; `ctest` release and debug 41/41 (the `format` test included).
+- `tests/m1_equiv.sh build/release/miniQU` (EQUIV string above): **M1 EQUIVALENCE PASSED**: smoke 33/32/32/32 pairs compared
+  (default, `-dl`, `-mode=1`, `-mode=2`; 3 skipped on timeouts), generated 40/40/40/40 plain and 40/40/39/40 with the stress
+  options (1 skipped), 0 differences. A manual job with the M1 binary on the other side and the stress options shows the script
+  does report differences (conflicts 58 vs 56 on `3.2.qcir`).
+- Cost of the call in analysis: `-profile=3`, same search (`EQUIV` string vs `bench-M1-r3`, one core each, 3 runs): analyze
+  0.11 s vs 0.11 s on `9.3.qcir` (1.35 s total both), 0.02 s vs 0.02 s on `3.2.qcir`; propagate 1.10-1.13 vs 1.10 s. No
+  measurable cost. (Binaries without LTO, `-DCMAKE_BUILD_TYPE=Release`, as `bench-M1-r3`; the preset `release` has LTO.)
+- Smoke sanity (not a benchmark claim): `python3 bench/run.py` with default options, release preset: 33/33 solved, verdicts
+  equal to `bench/smoke-expected.csv`; summed CPU 22.6 s versus 32.3 s for `bench-M1-r3` on the same machine, one run each.
+  The default search is not the M1 search any more (reduce on the 300-conflict schedule, tiers): e.g. `9.3.qcir` takes
+  2.2 s instead of 1.35 s, `tippy.pg-7` 0.8 s instead of 3.5 s. M2-T7 and the benchmark stage judge this.
+- Lean (release, default options, `-proof-binary`, proofs deleted afterwards): `DW-unsat-09-22-1` `s VERIFIED FALSE`
+  (6882 conflicts, 7 reductions, 4276+36 deleted, 4428 glue updates, 14 promotions); `jctc8-pass` `s VERIFIED TRUE` (787
+  conflicts, 2 reductions); `hadw10-11 -dl` `s VERIFIED FALSE` (114713 conflicts, 28 reductions, 94417 cubes deleted).
+
+**Matrix (H7).** New rows: `tier0`, `tier0-dl` (the `gc` options with `--tier2glue=0`, so the marks decrement all the time),
+`tier2`, `tier2-dl` (`--tier1glue=1 --tier2glue=3`, schedules 2 and 30 as in `gc`/`gc-dl`), all stress with limit 2%; normal row
+`m1reduce` (the M1-equivalent string, size trigger only). Required counters: those of the `gc` rows plus `used.clause`,
+`used.cube`, `glueupdates.clause`, and `promoted.clause promoted.cube` in the `tier2` rows. Measured on search seeds 151-300
+(release, proofs checked): `reduced.clause` 92/83%, `reduced.cube` 91/82%, `used.clause` 98/91%, `used.cube` 86/88%,
+`glueupdates.clause` 98/91% (tier0, tier0-dl); `tier2`: `promoted.clause` 83%, `promoted.cube` **13%** (`tier2-dl`: 77%, 15%),
+so the cube counter is required but close to the 10% line (deterministic search, so it does not flake; a different seed range
+would need a check). In the `tier0` rows nothing can be promoted (both limits 0), so `promoted.*` is not required there.
+`glueupdates.cube` is not required (81-88%, but not asked for). Timeouts of the search tier: tier0 0/150, tier0-dl 1/150, tier2
+0/150, tier2-dl 0/150 (asan 1:100: 0/50 each), so every new row keeps the default limit of 2%, no measurement needed. The
+existing `gc*` rows reach their counters (`reduced.*` 82-99%, `collections`, `relocated`) and keep their limits with the new
+defaults: 0 timeouts each; `restart-dl` 5/150 (limit 8), `restart-mode1-dl` 19/150 (limit 25) as the limits were set.
+
+**Fuzz gate.** `tests/regress.sh -j 16 -s 1:300 -M all build/release/miniQU` (logs `/home/ec2-user/miniqu-work/t2/`): all
+rows pass their counters, row limits and proofs (every proof checked is accepted; 0 wrong verdicts; checker timeouts only as
+before in `mode1-dl`, `noearly`, `restart-mode1-dl`), **except one smoke failure, see problem 1**. `tests/regress.sh -S -j 16
+-s 1:100 -t 240 -M all build/asan/miniQU`: REGRESSION TESTS PASSED (3 warnings: solver timeouts of `mode1-dl`, `noearly`,
+`restart-mode1-dl`). `tests/fuzz_qdimacs.sh release 1 300 OPT` for OPT in `''`, `-dl`, `-mode=1`, `-mode=2`, each also with
+`--reduceint=2 --tier1glue=0 --tier2glue=0 --gcfrac=0`: 8 runs, 0 failures. `tests/run_regressions.sh release`: exit 0.
+
+**Problem 1 (open, needs a coordinator decision): smoke of the row `gc-ccmin3` fails on `jctc9-pass.qcir`.** The release gate
+prints `FAIL [gc-ccmin3] smoke: proof of jctc9-pass.qcir: solve_timeout` (repro: `python3 bench/run.py --solver
+build/release/miniQU --args "--reduceint=2 --tier1glue=0 --gcfrac=0 -ccminmode=3" --tag t --instances bench/smoke.txt
+--proof-check`). Cause, as far as measured: `jctc9-pass` is heavy-tailed. The timed run (minimisation on) now finishes in 1.9 s
+(7275 conflicts), so the harness goes on to the proof run, in which minimisation is off while a tracer is connected (ARCH 8.1)
+and the search is a different one; that run does not finish within 110 s (261477 conflicts, 511 reductions). The accepted M1
+binary with the same options and a proof is equally stuck (274591 conflicts at 110 s) and its timed run times out at 60 s, so
+with M1 the proof run is never attempted and the row passed by not solving the instance. Not caused by the tier code (the same
+search is produced by the M1-equivalent options, `tests/m1_equiv.sh`), but I did not change the row or the harness. Options
+for the coordinator: accept the instance as a known heavy-tailed gap of this row, drop `jctc9-pass` from the proof part for
+stress rows, or give that row a different `-ccminmode`.

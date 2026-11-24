@@ -24,6 +24,7 @@ ccmin3       | -ccminmode=3                     | yes | conflicts restarts learn
 dl-ccmin3    | -dl -ccminmode=3                 | yes | conflicts restarts learned.clause learned.cube dependencies minimized | normal
 noearly      | -no-earlytseitin                 | yes | conflicts restarts learned.clause learned.cube | normal
 legacy       | -legacyanalyze                   | yes | conflicts restarts learned.clause learned.cube | normal
+m1reduce     | --no-tiers --no-glueupdate --reducetarget=50 --reducesize --reduceint=0 | yes | conflicts restarts learned.clause learned.cube | normal
 # Stress configurations: reduce often with no protected tier, garbage collect
 # on any waste; restart every conflict and reset dependencies often. The
 # options and limits are those of STATUS.md, "Coordinator decisions after M1
@@ -42,3 +43,11 @@ gc-mode2     | --reduceint=10 --tier1glue=0 --gcfrac=0 -mode=2 | no | conflicts 
 restart      | --no-luby --rfirst=1 --rinc=100 --depreset=1 | yes | conflicts restarts learned.clause learned.cube | stress | 2
 restart-dl   | --no-luby --rfirst=1 --rinc=100 --depreset=1 -dl | yes | conflicts restarts learned.clause learned.cube dependencies depresets | stress | 8
 restart-mode1-dl | --rfirst=1 --depreset=1 -mode=1 -dl | yes | conflicts restarts learned.clause learned.cube dependencies depresets | stress | 25
+# Tiers (M2-T2): tier0 has no protected glue and one reduction of grace for
+# every learnt constraint, so marks wear off and are decremented all the
+# time; tier2 puts the tier limits where glue updates cross them
+# (promoted.*).
+tier0        | --tier1glue=0 --tier2glue=0 --reduceint=2 --gcfrac=0 | yes | conflicts restarts learned.clause learned.cube reductions reduced.clause reduced.cube collections relocated used.clause used.cube glueupdates.clause | stress | 2
+tier0-dl     | --tier1glue=0 --tier2glue=0 --reduceint=30 --gcfrac=0 -dl | yes | conflicts restarts learned.clause learned.cube dependencies reductions reduced.clause reduced.cube collections relocated used.clause used.cube glueupdates.clause | stress | 2
+tier2        | --tier1glue=1 --tier2glue=3 --reduceint=2 --gcfrac=0 | yes | conflicts restarts learned.clause learned.cube reductions reduced.clause reduced.cube collections relocated used.clause used.cube glueupdates.clause promoted.clause promoted.cube | stress | 2
+tier2-dl     | --tier1glue=1 --tier2glue=3 --reduceint=30 --gcfrac=0 -dl | yes | conflicts restarts learned.clause learned.cube dependencies reductions reduced.clause reduced.cube collections relocated used.clause used.cube glueupdates.clause promoted.clause promoted.cube | stress | 2

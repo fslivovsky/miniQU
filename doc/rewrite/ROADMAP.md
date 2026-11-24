@@ -86,7 +86,7 @@ specified in ARCH 9.1; each milestone adds its own:
 |---|---|---|---|---|
 | M1 | `gc` | `--reduceint=N --tier1glue=0 --gcfrac=0`; N = 2 (default), 30 (`-dl`), 100 (`-mode=1`), 10 (`-mode=2`), see the note below | default, `-dl`, `-mode=1`, `-mode=2` | `reductions`, `reduced`, `collections`, `relocated` |
 | M1 | `restart` | `--no-luby --rfirst=1 --rinc=100 --depreset=1`; with `-mode=1 -dl`: `--rfirst=1 --depreset=1` (Luby) | default, `-dl`, `-mode=1 -dl` | `restarts`; with `-dl` also `dependencies`, `depresets` |
-| M2 | `tier` | `--tier1glue=0 --tier2glue=0` and `--tier2glue=1`, each with `--reduceint=2 --gcfrac=0` | default, `-dl` | as `gc`, plus `promoted`, `used` |
+| M2 | `tier0`, `tier0-dl`, `tier2`, `tier2-dl`, `m1reduce` | `tier0`: `--tier1glue=0 --tier2glue=0 --reduceint=2 --gcfrac=0` (`--reduceint=30 -dl` in `tier0-dl`); `tier2`: `--tier1glue=1 --tier2glue=3` with the same schedule (`tier2-dl`: `--reduceint=30 -dl`); `m1reduce` (normal): the M1-equivalent string `--no-tiers --no-glueupdate --reducetarget=50 --reducesize --reduceint=0` | default, `-dl` | as `gc`, plus `used.*`, `glueupdates.clause`; `tier2*`: `promoted.clause`, `promoted.cube` |
 | M2 | `root` | root simplification with every throttle at its minimum | default, `-dl`, `-mode=1` | `rootunits`, `rootstrengthened`, `rootdeleted` |
 | M2 | `min` | `--ccminmode=2`, `--ccminmode=3` (now with proofs) | default, `-dl`, `-mode=1` | `minimized` |
 | M2 | `ema`, `stable`, `rephase` | `--restartint=1`; mode switching and rephasing at their smallest intervals | default, `-dl` | `restarts`, `stabilized`, `rephased` |
