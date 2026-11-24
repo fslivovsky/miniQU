@@ -3179,3 +3179,81 @@ the usual EMA behaviour; whether it pays is M2-T7's measurement.
    equivalence gate runs with `--no-reusetrail`).
 2. The reuse criterion compares against the candidates unassigned at restart time, not after the backtrack (CaDiCaL does the
    same); in prefix order it is therefore only an approximation of "the search would redo this decision".
+
+## M2-T7 (worker, 2026-11-24): screening, final M2 defaults, docs as built, gate on the final binary
+
+No source file changed: **every shipped default stays as built** (the screening found no candidate that passes the rule). Commits: this
+entry with the doc edits (README, ARCHITECTURE 3.2/7.1/9.1, ROADMAP 0.1 and M2 plan) and the result files.
+
+**Binaries.** Screening binary `/home/ec2-user/miniqu-work/build/bench-M2-screen/miniQU`, git `49df19e`, sha256
+`0c2f34956a22724168a9b6a2386b63bbb9f16eb900182ad4e23bdb2a4f84bc70`. After a forced full rebuild (gate) the release build has the same sha256,
+so the **benchmark-stage binary** is `/home/ec2-user/miniqu-work/build/bench-M2-r1/miniQU`, git `49df19e` (sources unchanged by this task),
+sha256 `0c2f34956a22724168a9b6a2386b63bbb9f16eb900182ad4e23bdb2a4f84bc70`.
+
+**Screening** (rule of ROADMAP "M2 execution plan"). `python3 bench/run.py --solver <screen binary> --tag M2-screen-<name>-<cfg>-s4 --timeout 60
+--seed 4 [--args="..."]` with run.py's defaults on this machine (cores 24-47, 24 jobs, 8 GB), 376 instances, one run at a time, back to back,
+about 650 s each; driver `/home/ec2-user/miniqu-work/screen.sh` (launches a run only if it can finish inside 3600 s). Seed 4 only. Reports:
+`bench/results/M2-screen-reports/` (`compare.py --paired`, A = reference, B = candidate, same seed); runs `bench/results/M2-screen-*-s4/`.
+Total used 3269 s of the 3600 s cap.
+
+| candidate | cfg | solved ref / cand | PAR2 ref | PAR2 cand | delta (cand - ref) | decision |
+|---|---|---|---|---|---|---|
+| `--ccminmode=3` | default | 155 / 149 | 75.19 | 76.44 (compare.py: +1.26, CI [-0.22, +2.84]) | +1.26 | not better in default |
+| `--ccminmode=3` | `-dl` | 154 / 153 | 74.89 | 75.29 (+0.40, CI [-1.21, +2.10]) | +0.40 | not better in `-dl` |
+| `--restartmode=1` | default | 155 / 153 | 75.19 | 76.02 (+0.84, CI [-0.35, +2.06]) | +0.84 | not better; `-dl` arm not run |
+| `--restartmode=1` | `-dl` | | | | | **dropped for time** |
+| `--recomputetier` | default, `-dl` | | | | | **dropped for time** |
+| `--ccminmode=2` | default | | | | | **dropped for time** |
+
+(PAR2 in s, penalty 120; solved = SAT + UNSAT of 376; each arm also has 1-2 MEMOUT instances.) Decision: none of the candidates is lower than the
+reference by more than 2.0 s in any configuration, so none becomes default: `ccminmode=0`, `restartmode=0` (Luby) and `recomputetier=0` ship.
+Reported as "no measurable difference" (all three compare.py verdicts say so; for `ccminmode=3` and `restartmode=1` the point estimates are
+slightly worse, +0.4 to +1.3 s, inside the interval). `--recomputetier` and `--ccminmode=2` and `--restartmode=1 -dl` have **no screening
+evidence at all**; seed 5 repeats were not run. One seed at 60 s resolves only large effects (the seed spread measured in M1 is about 2 s of
+PAR2), so "no measurable difference" means "not shown to help", not "shown equal". Discrepancy check: all 63 `results.csv` files in
+`bench/results/` with a verdict column (screening runs, M1-r1..r3, baseline-c96, `baseline-t180`, `baseline-dl-t180`, `baseline-t900`, ...)
+were scanned for instances solved SAT in one and UNSAT in another: 0 discrepancies, 0 ERROR, 0 MISMATCH in the five screening runs.
+(The five runs' `meta.json` records `49df19e+dirty` for the three candidate runs only because README.md was edited in the work tree
+meanwhile; the sha256 of the solver is identical in all five.)
+
+**Defaults as shipped:** `mode=0 dl=0 ccminmode=0 tiers=1 glueupdate=1 tier1glue=2 tier2glue=6 reduceint=300 reducetarget=75 reducesize=0
+recomputetier=0 rootsimp=1 rootsimpdelay=1 restartmode=0 reusetrail=1` (`miniQU --help` was read: all 45 options listed with the correct
+default, range and description). `tests/matrix.txt` unchanged (no default flipped; it already has `ccmin2`, `ccmin3`, `ema`, `noreuse`,
+`retier`, ... so both values of every option stay tested). `bench/smoke-expected.csv` unchanged.
+**M1-equivalent option string, as in `tests/m1_equiv.sh`:** `EQUIV="--no-tiers --no-glueupdate --reducetarget=50 --reducesize --reduceint=0
+--no-recomputetier --no-rootsimp --ccminmode=0 --restartmode=0 --no-reusetrail"` (script unchanged; it already passes every off-switch).
+
+**Docs as built.** ARCHITECTURE: 9.1 gets the `ccminmode` row, the paragraph "Defaults as shipped after M2-T7" and the complete
+M1-equivalent string; 3.2 and 7.1 mark `rephase.cpp`/`mode.cpp` and rephasing/switching as deferred to M5+ (the rest of 3.2, 5.2/5.3,
+7.1, 8.1/8.2 had been brought up to date by M2-T2..T6 and was re-read, not changed). ROADMAP: table "As built (M2-T7)" in the M2 plan
+(built / deferred with deviations), 0.1 stress table rewritten to equal `tests/matrix.txt`. README: the option table said minimisation is
+off while a proof or trace is written (untrue since M2-T5); fixed.
+
+**Gate on the final binary** (builds under `/home/ec2-user/miniqu-work/build/<preset>`, heavy commands `taskset -c 0-23`, 16 jobs;
+logs in `/home/ec2-user/miniqu-work/m2-t7/`, summaries in `bench/results/M2-T7-gate/`).
+1. `cmake --preset P` + full rebuild for release, debug, asan, release-clang: 0 warnings each. `ctest` release and debug: 43/43 passed.
+2. `tests/m1_equiv.sh <release>/miniQU`: M1 EQUIVALENCE PASSED (smoke default 33 of 33 identical, all passes without difference).
+3. `tests/regress.sh -j 16 -s 1:300 -M all <release>/miniQU` (with smoke): REGRESSION TESTS PASSED (6 warnings: solver timeouts of normal
+   rows `mode1-dl` 3, `mode2-dl` 2, `noearly` 34; stress rows within their limits: `restart-dl` 6 of 150 (limit 8), `restart-mode1-dl` 19
+   (limit 25), `ema-stress-dl` 4 (limit 4)). 0 wrong verdicts, 0 proofs rejected (all proof checks that finished were accepted; some
+   proof checks hit the checker time limit: `mode1-dl` 18, `noearly` 2, warnings as in M2-T6).
+   `tests/regress.sh -S -j 16 -s 1:100 -t 240 -M all <asan>/miniQU`: PASSED (3 warnings: `mode1-dl` 3, `noearly` 12,
+   `restart-mode1-dl` 4 solver timeouts), 0 sanitizer reports, 0 Checker aborts. Per row: `bench/results/M2-T7-gate/rows-release.md` and
+   `rows-asan.md` (timeouts against the limit; sums and percentages of the required counters; every required counter at or above the 10% threshold;
+   the lowest are `promoted.cube` in `tier2`/`tier2-dl` 12-17%, `restarts`/`reused` in `ema` 36-43%).
+   `tests/fuzz_qdimacs.sh <release>/miniQU 1 300 OPT` for OPT '', `-dl`, `-mode=1`, `-mode=2`, each alone and with `--reduceint=2
+   --tier1glue=0 --tier2glue=0 --gcfrac=0 --rootsimpdelay=0`: 8 x 600 instances agreed, 0 failures, 0 timeouts.
+   `tests/run_regressions.sh <release>/miniQU`: 8 instances, 0 failures.
+4. Conflict histogram of the search tier (`tests/corpus_stats.py --tier search --first 1 --last 400`, release, 20 s,
+   `bench/results/M2-T7-gate/hist.txt`), buckets 0-9 / 10-99 / 100-999 / 1000-9999 / >= 10^4, all five sets together (400 instances):
+   default 29 / 6 / 67 / 273 / 25, 0 timeouts, **85%** in [100, 10^4); `-dl` 17 / 28 / 91 / 236 / 28, 0 timeouts, **82%**. Above the 70%
+   requirement: no retuning of the corpus needed (set `reach-44` is lowest with 75-76%).
+
+**Open points.**
+1. Three experiment items have no screening evidence (`--recomputetier`, `--ccminmode=2`, `--restartmode=1` with `-dl`): the 60-minute
+   cap on this machine (650 s per run) holds five runs. If the coordinator wants them decided, the runs are
+   `--args=--recomputetier` (default and `-dl`), `--args=--ccminmode=2` (default), `--args="-dl --restartmode=1"` at seed 4 with the
+   binary `build/bench-M2-screen/miniQU`, about 11 minutes each, compared with `compare.py --paired` against the existing reference runs.
+2. The screening resolves effects of about 2 s PAR2 at best with one seed; the benchmark stage (seeds 1-3) is the better place to see them.
+3. `ccminmode=3` solved fewer instances in the default configuration (149 vs 155) while PAR2 moved by only +1.3 s; the paired report
+   lists the instances lost in a majority of seeds (single seed here, so all single-seed differences), among them klieber2017q-066-16-eq.

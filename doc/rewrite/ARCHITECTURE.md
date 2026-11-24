@@ -191,7 +191,7 @@ and deleted only through `constraint.cpp`, assignments only through
 | `restart.cpp` | Luby and (M2) EMA restarts, trail reuse |
 | `reduce.cpp` | learnt-database reduction (the *database* sense of "reduce"): conflict and size triggers, tier-aware candidate selection |
 | `tier.cpp` | `used` marks and glue update of learnt constraints bumped by an analysis (M2-T2); usage histogram and tier limit recomputation (M2-T3) |
-| `rephase.cpp`, `mode.cpp` | (M2) rephasing; stable/focused switching |
+| `rephase.cpp`, `mode.cpp` | not built; rephasing and stable/focused switching are deferred to M5+ (ROADMAP M2 execution plan) |
 | `simplify.cpp` | root-level simplification of the databases (M2-T4, ROADMAP M2.1): units materialised, root-vanished literals removed, root-disabled constraints deleted, modes 0 and 1 |
 | `collect.cpp` | arena garbage collection (5.3) |
 | `report.cpp` | progress lines |
@@ -744,7 +744,7 @@ solve ():
                                                                 // return a root conflict
                                                                 // (then analyze); an
                                                                 // iteration of its own
-    else if (M2) rephasing () / switching ()  rephase () / switch_mode ()
+    else if (M5+) rephasing () / switching () rephase () / switch_mode ()  // deferred
     else
         if retiering ()                       retier ()      // M2.2: tier limits per kind
         if reducing ()                        reduce ()      // then go on:
@@ -1100,9 +1100,23 @@ added. From M1:
 | `rootsimp` | 1 | 0..1 | - | M2-T4: root-level simplification (`simplify.cpp`) when root literals are new; modes 0 and 1 only (off in mode 2 whatever the option says) |
 | `rootsimpdelay` | 1 | 0..1 | 0 | wait until `propagations >= lim.simplify`, where each run sets `lim.simplify = propagations + literals in all stored constraints` (MiniSat's `simpDB_props`); 0 = simplify after every complete propagation that brought new root literals |
 
+| `ccminmode` | 0 | 0..3 | 3 | M2-T5: learnt-constraint minimisation (0 none, 1 basic, 2 deep, 3 deep with reduction); with a proof the removed literals are resolved away by a chain of reason ids (7.5, 8.2) |
+
+**Defaults as shipped after M2-T7.** The adopt items are on (`tiers`,
+`glueupdate`, `reduceint=300`, `reducetarget=75`, `rootsimp`, `reusetrail`);
+the experiment items are off (`recomputetier=0`, `ccminmode=0`,
+`restartmode=0`). The screening of M2-T7 (60 s, seed 4, one run per arm; STATUS
+"M2-T7") found no measurable difference for `--ccminmode=3` in either
+configuration (PAR2 +1.26 s default, +0.40 s `-dl`) and for `--restartmode=1`
+in the default configuration (+0.84 s); `--restartmode=1` with `-dl`,
+`--recomputetier` and `--ccminmode=2` were not run (time cap), so they keep
+their shipped values. One seed at 60 s resolves only large effects: "off" here
+means "not shown to help", not "shown not to help".
+
 The M1-equivalent configuration is `--no-tiers --no-glueupdate
 --reducetarget=50 --reducesize --reduceint=0 --no-recomputetier
---no-rootsimp --restartmode=0 --no-reusetrail` (`tests/m1_equiv.sh`).
+--no-rootsimp --ccminmode=0 --restartmode=0 --no-reusetrail`
+(`tests/m1_equiv.sh`).
 
 The arithmetic growth of the `reduceint` schedule is deliberate: a fixed tiny
 interval would keep the learnt database at constant size, and together with

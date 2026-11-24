@@ -1,0 +1,18 @@
+
+== default: conflicts of the solver (instances per bucket) ==
+set                 0-9      10-99    100-999  1000-9999    >=10000  timeout in range   max sec
+qcnf-mixed            0          0          2         72          6        0      92%       0.2
+qcnf-sat              0          0          0         78          2        0      98%       0.1
+qcnf-unsat            0          1          9         53         17        0      78%       0.3
+reach-44             18          1         28         33          0        0      76%       0.1
+reach-48             11          4         28         37          0        0      81%       0.2
+all                  29          6         67        273         25        0      85%       0.3
+
+== dl: conflicts of the solver (instances per bucket) ==
+set                 0-9      10-99    100-999  1000-9999    >=10000  timeout in range   max sec
+qcnf-mixed            0          0          6         66          8        0      90%       0.1
+qcnf-sat              0         11         42         27          0        0      86%       0.1
+qcnf-unsat            0          0         10         52         18        0      78%       0.5
+reach-44             10         10         17         43          0        0      75%       0.7
+reach-48              7          7         16         48          2        0      80%       3.6
+all                  17         28         91        236         28        0      82%       3.6

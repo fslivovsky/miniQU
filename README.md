@@ -56,13 +56,13 @@ option with its default and range. The most important ones:
 |---|---|---|
 | `--dl` | off | Dependency learning: decisions may be made in any order, and dependencies between variables are learnt from conflicts. |
 | `--mode=<0,1,2>` | 0 | Propagation and learning with Q-resolution (0), QU-resolution (1), or long-distance Q-resolution (2). |
-| `--ccminmode=<0..3>` | 0 | Minimization of learnt clauses and terms: none (0), local (1) and recursive (2) minimization, or recursive minimization that takes reduction into account (3). Off while a proof or trace is written. |
+| `--ccminmode=<0..3>` | 0 | Minimization of learnt clauses and terms: none (0), local (1) and recursive (2) minimization, or recursive minimization that takes reduction into account (3). Proofs and traces cover minimization (chain extension, `doc/proof-format.md`). |
 | `--earlytseitin` / `--no-earlytseitin` | on | QCIR only: quantify the variables that represent gates right after the innermost variable the gate depends on (see below). |
 | `--legacyanalyze` | off | Use the analysis of the previous solver (`analyze_qu`) in mode 0. |
 | `--cert` | off | Print the assignment of the decision variables of the outermost block (`V` line). |
-| `--proof=<file>` | | Write a proof in the QLRUP format (QCIR input, modes 0 and 1); see `doc/proof-format.md`. Disables minimization. |
+| `--proof=<file>` | | Write a proof in the QLRUP format (QCIR input, modes 0 and 1); see `doc/proof-format.md`. |
 | `--proofbinary` | off | Write the proof in the binary format. |
-| `--trace=<file>` | | Write a trace in the older format (modes 0 and 1). Disables minimization. |
+| `--trace=<file>` | | Write a trace in the older format (modes 0 and 1). |
 | `--cpulim=<s>`, `--memlim=<MB>` | none | Resource limits. |
 | `--seed=<n>` | 0 | Randomise the initial variable scores (0 = deterministic). |
 | `--verb=<0..3>` | 1 | Verbosity; `--verb=1` also prints the `c stat` counters. |

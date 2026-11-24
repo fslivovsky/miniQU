@@ -1,0 +1,13 @@
+m1_equiv rc=0: M1 EQUIVALENCE PASSED
+release rc=0
+asan rc=0
+fuzz [ ] rc=0: 0 failures, 0 timeouts, 600 instances agreed
+fuzz [ --reduceint=2 --tier1glue=0 --tier2glue=0 --gcfrac=0 --rootsimpdelay=0] rc=0: 0 failures, 0 timeouts, 600 instances agreed
+fuzz [-dl ] rc=0: 0 failures, 0 timeouts, 600 instances agreed
+fuzz [-dl --reduceint=2 --tier1glue=0 --tier2glue=0 --gcfrac=0 --rootsimpdelay=0] rc=0: 0 failures, 0 timeouts, 600 instances agreed
+fuzz [-mode=1 ] rc=0: 0 failures, 0 timeouts, 600 instances agreed
+fuzz [-mode=1 --reduceint=2 --tier1glue=0 --tier2glue=0 --gcfrac=0 --rootsimpdelay=0] rc=0: 0 failures, 0 timeouts, 600 instances agreed
+fuzz [-mode=2 ] rc=0: 0 failures, 0 timeouts, 600 instances agreed
+fuzz [-mode=2 --reduceint=2 --tier1glue=0 --tier2glue=0 --gcfrac=0 --rootsimpdelay=0] rc=0: 0 failures, 0 timeouts, 600 instances agreed
+run_regressions rc=0: 8 instances, 0 failures
+done

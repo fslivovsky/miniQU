@@ -86,11 +86,13 @@ specified in ARCH 9.1; each milestone adds its own:
 |---|---|---|---|---|
 | M1 | `gc` | `--reduceint=N --tier1glue=0 --gcfrac=0`; N = 2 (default), 30 (`-dl`), 100 (`-mode=1`), 10 (`-mode=2`), see the note below | default, `-dl`, `-mode=1`, `-mode=2` | `reductions`, `reduced`, `collections`, `relocated` |
 | M1 | `restart` | `--no-luby --rfirst=1 --rinc=100 --depreset=1`; with `-mode=1 -dl`: `--rfirst=1 --depreset=1` (Luby) | default, `-dl`, `-mode=1 -dl` | `restarts`; with `-dl` also `dependencies`, `depresets` |
-| M2 | `tier0`, `tier0-dl`, `tier2`, `tier2-dl`, `m1reduce` | `tier0`: `--tier1glue=0 --tier2glue=0 --reduceint=2 --gcfrac=0` (`--reduceint=30 -dl` in `tier0-dl`); `tier2`: `--tier1glue=1 --tier2glue=3` with the same schedule (`tier2-dl`: `--reduceint=30 -dl`); `m1reduce` (normal): the M1-equivalent string `--no-tiers --no-glueupdate --reducetarget=50 --reducesize --reduceint=0` | default, `-dl` | as `gc`, plus `used.*`, `glueupdates.clause`; `tier2*`: `promoted.clause`, `promoted.cube` |
-| M2 | `root` | root simplification with every throttle at its minimum | default, `-dl`, `-mode=1` | `rootunits`, `rootstrengthened`, `rootdeleted` |
-| M2 | `min` | `--ccminmode=2`, `--ccminmode=3` (now with proofs) | default, `-dl`, `-mode=1` | `minimized` |
-| M2 | `ema`, `stable`, `rephase` | `--restartint=1`; mode switching and rephasing at their smallest intervals | default, `-dl` | `restarts`, `stabilized`, `rephased` |
-| M2 | `arena` | `--arenaorder=1 --gcfrac=0 --reduceint=2` | default | `collections`, `relocated` |
+| M2 | `tier0`, `tier0-dl`, `tier2`, `tier2-dl` | `tier0`: `--tier1glue=0 --tier2glue=0 --reduceint=2 --gcfrac=0` (`--reduceint=30 -dl` in `tier0-dl`); `tier2`: `--tier1glue=1 --tier2glue=3 --reduceint=2 --gcfrac=0` (`tier2-dl`: `--reduceint=30 -dl`) | default, `-dl` | as `gc`, plus `used.clause`, `used.cube`, `glueupdates.clause`; `tier2*`: `promoted.clause`, `promoted.cube` |
+| M2 | `retier`, `retier-dl` | `--recomputetier --reduceint=2 --gcfrac=0` (`--reduceint=30 -dl`) | default, `-dl` | as `gc`, plus `retiered`, `used.*` |
+| M2 | `m1reduce` (normal), `norootsimp`, `noreuse` | the off switches `--no-tiers --no-glueupdate --reducetarget=50 --reducesize --reduceint=0`; `--no-rootsimp`; `--no-reusetrail` | default | `conflicts`, `restarts`, `learned.*` |
+| M2 | `root`, `root-dl`, `root-mode1`, `root-gc` | `--rootsimpdelay=0`; `root-gc` adds `--reduceint=2 --tier1glue=0 --tier2glue=0 --gcfrac=0` | default, `-dl`, `-mode=1` | `rootunits`, `rootstrengthened`, `rootdeleted` (`root-gc`: also `reductions`, `collections`, `relocated`) |
+| M2 | `min-gc`, `min-root-mode1`; normal `ccmin2`, `ccmin3`, `dl-ccmin*`, `mode1-ccmin*`, `legacy-ccmin3`, `gc-ccmin3` | `--ccminmode=2` / `3` with proofs; `min-gc`: `--ccminmode=2 --reduceint=2 --tier1glue=0 --gcfrac=0 --rootsimpdelay=0`; `min-root-mode1`: `--ccminmode=3 -mode=1 --rootsimpdelay=0` | default, `-dl`, `-mode=1`, `-legacyanalyze` | `minimized` |
+| M2 | `ema`, `ema-dl` (normal), `ema-stress`, `ema-stress-dl`, `ema-stress-mode1` | `--restartmode=1`; stress: `--restartmode=1 --restartint=1 --restartmargin=0 --emagluefast=1 --emaglueslow=2 --depresetint=1` (with `-dl`, `-mode=1`); the M1 `restart` rows run with `--no-reusetrail` | default, `-dl`, `-mode=1` | `restarts`, `reused`; with `-dl` also `dependencies`, `depresets` |
+| M2 (deferred to M5+) | `stable`, `rephase`, `arena` | mode switching, rephasing, `--arenaorder` | - | not built, no rows |
 | M3 | `elim` | `--inprocessint=3 --elimeffort=<max> --subsumeeffort=<max> --elimbound=16 --gcfrac=0` | default, `-dl`, `-mode=1`, `-no-earlytseitin`, `-mode=2` | `inprocessings`, `eliminated.clause`, `eliminated.cube`, `resolvents`, `subsumed`, `strengthened` |
 | M4 | `vivify` | `--inprocessint=3 --vivifyeffort=<max> --gcfrac=0` | default, `-dl`, `-mode=1`, with and without `--elim` | `vivifychecked`, `vivified.clause`, `vivified.cube` |
 
@@ -570,6 +572,18 @@ four techniques and no more. In this order, one worker task each unless noted:
 | M2-T5 | M2.3: minimisation with proofs (chain extension), `Checker` rule removed | `ccminmode=0`, decided by M2-T7 |
 | M2-T6 | M2.4 + M2.5: glue-EMA restarts per kind (`--restartmode=1`), trail reuse (`--reusetrail`) | Luby, reuse on; decided by M2-T7 |
 | M2-T7 | Screening of the experiment items (at most one hour on the benchmark cores), defaults, matrix and docs as built, full fuzz gate | - |
+
+**As built (M2-T7).**
+
+| package | state | deviations from the package text |
+|---|---|---|
+| M2.1 root simplification | built (M2-T4), on | modes 0 and 1 only (mode 2 off); throttle `rootsimpdelay` |
+| M2.2 tiers, `used`, glue update, conflict schedule | built (M2-T2), on | `reducesize` keeps the size trigger behind a switch (off); `--gluemode` deferred |
+| M2.2 second step, `recomputetier` | built (M2-T3), off | not screened for time (see STATUS "M2-T7") |
+| M2.3 minimisation with proofs | built (M2-T5), `ccminmode=0` | screening: no measurable difference of `--ccminmode=3` (`--ccminmode=2` not run); mode 2 never minimises |
+| M2.4 EMA restarts | built (M2-T6), `restartmode=0` | screening in the default configuration only: no measurable difference |
+| M2.5 trail reuse | built (M2-T6), on | ties count as "not lower" |
+| M2.6 stable/focused, M2.7 rephasing, M2.8 arena order, M2.9 reason-side bumping | deferred to M5+ | no code, no option |
 
 Decisions that differ from the package texts below:
 
