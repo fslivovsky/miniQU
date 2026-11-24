@@ -9,7 +9,8 @@
 # /home/ec2-user/miniqu-work/build/bench-M1-r3/miniQU): the same verdict and
 # the same counters of the 'c stat' block (conflicts, decisions,
 # propagations, ticks, restarts, learned.*, reduced.*, reductions, minimized;
-# the M1 binary prints 'c stat minimized' too).  Every task that adds a feature with an off switch appends that switch to EQUIV
+# the M1 binary prints 'c stat minimized' too).  Every
+# task that adds a feature with an off switch appends that switch to EQUIV
 # and reruns this script; a difference is a bug in the new code, never a
 # reason to edit the script.  Do not weaken it.
 #
