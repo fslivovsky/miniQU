@@ -68,12 +68,14 @@ ema-stress-dl | --restartmode=1 --restartint=1 --restartmargin=0 --emagluefast=1
 ema-stress-mode1 | --restartmode=1 --restartint=1 --restartmargin=0 --emagluefast=1 --emaglueslow=2 --depresetint=1 -mode=1 | yes | conflicts restarts reused learned.clause learned.cube | stress | 2
 # Tiers (M2-T2): tier0 has no protected glue and one reduction of grace for
 # every learnt constraint, so marks wear off and are decremented all the
-# time; tier2 puts the tier limits where glue updates cross them
-# (promoted.*).
+# time; tier2 puts the tier limits (2 and 6) where glue updates cross them
+# (promoted.*).  The limits 1 / 3 promoted cubes on only 16-17% of the
+# search instances, close to the 10% line of required counters; 2 / 6 gives
+# 24-25% (STATUS.md, "Coordinator decisions after M2 round 1", J2).
 tier0        | --tier1glue=0 --tier2glue=0 --reduceint=2 --gcfrac=0 | yes | conflicts restarts learned.clause learned.cube reductions reduced.clause reduced.cube collections relocated used.clause used.cube glueupdates.clause | stress | 2
 tier0-dl     | --tier1glue=0 --tier2glue=0 --reduceint=30 --gcfrac=0 -dl | yes | conflicts restarts learned.clause learned.cube dependencies reductions reduced.clause reduced.cube collections relocated used.clause used.cube glueupdates.clause | stress | 2
-tier2        | --tier1glue=1 --tier2glue=3 --reduceint=2 --gcfrac=0 | yes | conflicts restarts learned.clause learned.cube reductions reduced.clause reduced.cube collections relocated used.clause used.cube glueupdates.clause promoted.clause promoted.cube | stress | 2
-tier2-dl     | --tier1glue=1 --tier2glue=3 --reduceint=30 --gcfrac=0 -dl | yes | conflicts restarts learned.clause learned.cube dependencies reductions reduced.clause reduced.cube collections relocated used.clause used.cube glueupdates.clause promoted.clause promoted.cube | stress | 2
+tier2        | --tier1glue=2 --tier2glue=6 --reduceint=2 --gcfrac=0 | yes | conflicts restarts learned.clause learned.cube reductions reduced.clause reduced.cube collections relocated used.clause used.cube glueupdates.clause promoted.clause promoted.cube | stress | 2
+tier2-dl     | --tier1glue=2 --tier2glue=6 --reduceint=30 --gcfrac=0 -dl | yes | conflicts restarts learned.clause learned.cube dependencies reductions reduced.clause reduced.cube collections relocated used.clause used.cube glueupdates.clause promoted.clause promoted.cube | stress | 2
 # Tier limits from the usage histogram (M2-T3): the limits move on the
 # conflict schedule 2, 4, 8, ..., so the stress schedules of reduce see
 # several limit changes on small instances.

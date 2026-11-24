@@ -43,7 +43,7 @@
 #
 # Exit status is 1 on any wrong verdict, rejected proof, crash (exit code other
 # than 10/20), failed assertion; reproducing commands are printed.
-# Heavy jobs run on the lower half of the cores (0-47 on 96 cores) as per the
+# Heavy jobs run on the lower half of the cores (nproc/2 of them) as per the
 # project convention; the timed benchmarks of bench/run.py use the upper half.
 
 HERE=$(cd "$(dirname "$0")" && pwd)

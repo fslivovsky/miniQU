@@ -3,6 +3,10 @@
 #
 # Usage: tests/fuzz_qdimacs.sh SOLVER FIRST_SEED LAST_SEED [solver options...]
 #
+# Solver options are separate arguments (... -dl --reduceint=2); an argument
+# with whitespace is a quoted option string, which would reach the solver as
+# one unknown option, so the script rejects it with exit status 2.
+#
 # Per seed there are two instances:
 #   tiny   few enough variables for the brute-force evaluator (tests/qcir_eval.py)
 #   large  prenex 4-CNF that needs roughly 10^2 to 10^4 conflicts of the baseline
@@ -16,6 +20,13 @@
 # KEEP_DIR (directory in which failing instances are saved).
 
 SOLVER=$1; FIRST=$2; LAST=$3; shift 3
+for option in "$@"; do
+    case $option in
+        *[[:space:]]*)
+            echo "fuzz_qdimacs.sh: option '$option' contains whitespace; pass options as separate arguments, e.g. $0 SOLVER 1 10 -dl --reduceint=2, not \"-dl --reduceint=2\"" >&2
+            exit 2 ;;
+    esac
+done
 DIR=$(dirname "$0")
 BASELINE=${BASELINE:-/home/ec2-user/miniqu-work/baseline/miniQU}
 TMP=$(mktemp -d)
