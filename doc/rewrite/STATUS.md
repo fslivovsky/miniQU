@@ -3623,3 +3623,26 @@ Commands (work dir `/home/ec2-user/miniqu-work/m2-t11/`; `job.sh OUTDIR ARM CONF
     python3 bench/results/M2-T11-jctc/analyze.py bench/results/M2-T11-jctc/runs.csv
 
 The default decision is the coordinator's in M2 round 2 (J3).
+
+## Owner decision: wrap up in 24 hours (owner, 2026-11-24, about 22:00 UTC)
+
+The owner ends the work on this machine on 2026-11-25 at about 21:00 UTC and continues on a local machine, with
+a cluster for extensive benchmarking. This replaces the plan from M2's close onward and the section "Owner
+decision: lighter gates from M3":
+
+1. **M2 ends after M2-T11**, without independent verification, benchmark stage and review.
+2. **Initial versions of all remaining features, little testing.** Testing and benchmarking happen afterwards,
+   elsewhere. Tasks are time-boxed and end with a build without warnings, the unit tests and a fuzz run of a
+   few minutes on the rows of the new feature.
+3. **Bounded variable elimination** runs as preprocessing and as inprocessing, for existential variables by
+   clause resolution and for universal variables by cube resolution, with a separate switch per kind. The side
+   conditions stand (rightmost variable; existential variables not in cubes, universal variables not in clauses)
+   and hold at every round against the constraints present then.
+4. **Vivification** runs as inprocessing, for clauses and for cubes, with a separate switch per kind.
+5. New techniques are off by default until they are validated. Proof logging is extended where the QLRUP format
+   expresses the steps; an unsupported combination is refused, never answered with an underived proof.
+6. **Dropped on this machine**: the extras, the optimisation milestone, 900 s runs, the relaxation of the
+   rightmost condition. They go into `doc/rewrite/HANDOFF.md` with the postponed tests and the cluster benchmark
+   plan.
+7. Timing measurements (run times, time-out counts) use the benchmark cores with nproc/2 jobs; correctness tests
+   may use all cores.
