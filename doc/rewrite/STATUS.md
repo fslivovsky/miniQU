@@ -3558,3 +3558,68 @@ OPT and Final are unchanged):
    once per milestone round, in the independent verification.
 5. **Less rework.** At most 2 review rounds per milestone and at most 2 follow-up tasks per triage; further open
    points are deferred to ROADMAP.md with a reason.
+
+## M2-T11 (worker, 2026-11-24): jctc gap under -dl, 20 seeds, one switch per arm (measurement only)
+
+No solver source, default, test or harness change. Files: `bench/results/M2-T11-jctc/` (`runs.csv`: arm, config,
+instance, seed, exit, wall, conflicts; `report.md` with all tables incl. time-outs per instance and arm, paired
+tests and the 8-pass-instance subset; `analyze.py`, `collect.sh`). 5280 runs (12 instances: the 8 `jctc*-pass` plus
+`jctc4/10/13/14-unrolled-fail`, solved by some arm in the first pass; `jctc5-fail` by none), seeds 1-20, 60 s,
+`taskset -c 0-23`, 16 parallel jobs, arms interleaved, machine otherwise idle. No error exit, no verdict
+difference. Binaries: M2 sha256 04531dfa..., M1 00622117..., baseline 10ff614c... (full hashes in report.md).
+
+Summary, `-dl` (240 runs per arm; PAR2 penalty 120 s; median over solved runs):
+
+| arm | binary / options | time-outs | solved | PAR2 (s) | median wall of solved (s) |
+|---:|---|---:|---:|---:|---:|
+| 1 | M1 binary | 66 of 240 | 174 | 8710 | 0.61 |
+| 2 | baseline | 61 of 240 | 179 | 8281 | 0.74 |
+| 3 | M2 default | 70 of 240 | 170 | 9331 | 0.35 |
+| 4 | M2 EQUIV string | 64 of 240 | 176 | 8469 | 0.54 |
+| 5 | M2 --no-reusetrail | 67 of 240 | 173 | 8827 | 0.42 |
+| 6 | M2 --no-rootsimp | 68 of 240 | 172 | 8932 | 0.58 |
+| 7 | M2 --no-tiers --no-glueupdate | 80 of 240 | 160 | 10501 | 0.38 |
+| 8 | M2 M1 trigger+target (tiers kept) | 72 of 240 | 168 | 9490 | 0.41 |
+| 9 | M2 M1 reduce policy | 72 of 240 | 168 | 9501 | 0.40 |
+| 10 | M2 --no-glueupdate | 70 of 240 | 170 | 9351 | 0.46 |
+| 11 | M2 --no-reusetrail --no-rootsimp | 66 of 240 | 174 | 8819 | 0.50 |
+
+Summary, control (no option):
+
+| arm | binary / options | time-outs | solved | PAR2 (s) | median wall of solved (s) |
+|---:|---|---:|---:|---:|---:|
+| 1 | M1 binary | 140 of 240 | 100 | 17551 | 0.24 |
+| 2 | baseline | 139 of 240 | 101 | 17584 | 0.28 |
+| 3 | M2 default | 140 of 240 | 100 | 17231 | 0.21 |
+| 4 | M2 EQUIV string | 137 of 240 | 103 | 17169 | 0.25 |
+| 5 | M2 --no-reusetrail | 143 of 240 | 97 | 17792 | 0.31 |
+| 6 | M2 --no-rootsimp | 141 of 240 | 99 | 17287 | 0.20 |
+| 7 | M2 --no-tiers --no-glueupdate | 141 of 240 | 99 | 17417 | 0.27 |
+| 8 | M2 M1 trigger+target (tiers kept) | 136 of 240 | 104 | 16753 | 0.26 |
+| 9 | M2 M1 reduce policy | 137 of 240 | 103 | 16818 | 0.25 |
+| 10 | M2 --no-glueupdate | 136 of 240 | 104 | 16795 | 0.23 |
+| 11 | M2 --no-reusetrail --no-rootsimp | 145 of 240 | 95 | 18010 | 0.20 |
+
+## Attribution (`-dl`, all instances)
+
+Arm 3 time-outs 70, arm 1 time-outs 66, excess 4; arm 3 vs arm 1 discordant 17 / 13, p = 0.5847.
+
+**Outcome: no regression shown at 20 seeds** (arm 3 is not worse than arm 1 with p < 0.05).
+
+Reading (details in report.md): the six-seed result of J3 is reproduced for arm 3 (seeds 1-6: `jctc8-pass` 3,
+`jctc2-pass` 3 time-outs), seeds 7-20 add 3 and 1; over 20 seeds `jctc8-pass` is 6 against 3 for M1 and `jctc2-pass`
+4 against 0 (discordant 5 / 2 and 4 / 0, not significant). The six-seed gap was mostly small-sample luck on a
+heavy-tailed family. Side observations, not attributed: arm 7 is the worst `-dl` arm (80 time-outs, p = 0.054 against
+M1 over all instances); in the control, M2 default is better than M1 on the pass instances (10 / 27, p = 0.008, gone
+with `--no-reusetrail`) but `jctc10-fail` and `jctc14-unrolled-fail` time out more with trail reuse on (`jctc10-fail`
+17-19 of 20 in the reuse-on arms against 6 for M1 and 5 for the baseline, 11 in arms 5 and 11). Time-outs at 60 s are counts, not speed-ups.
+
+Commands (work dir `/home/ec2-user/miniqu-work/m2-t11/`; `job.sh OUTDIR ARM CONFIG INSTANCE SEED` runs
+`timeout 60 BIN [-dl] ARMOPTS SEEDOPT -verb=1 INSTANCE` and stores arm, config, instance, seed, exit, wall, conflicts;
+`arms.sh` holds the 11 option strings):
+
+    cat jobs | taskset -c 0-23 xargs -P16 -L1 ./job.sh        # jobs: "res ARM CONFIG INSTANCE SEED", config-major, arms innermost
+    bench/results/M2-T11-jctc/collect.sh res > bench/results/M2-T11-jctc/runs.csv
+    python3 bench/results/M2-T11-jctc/analyze.py bench/results/M2-T11-jctc/runs.csv
+
+The default decision is the coordinator's in M2 round 2 (J3).
