@@ -3501,3 +3501,41 @@ PASSED; smoke with '' and `-dl`: conflicts/decisions/propagations/ticks identica
 `jctc9-pass.qcir` with '', which times out at 60 s in both (known, see M2-T4/T11; the comparison is time-bound there);
 `tests/regress.sh -S -j 16 -s 1:100 -M root,root-dl,root-mode1,root-gc,min-root-mode1`: PASSED (0 warnings).
 Open point: the 'made reason' outcome of `add_root_units` has no corpus counter and is covered by the unit test only.
+
+## M2-T8 (worker, 2026-11-24): test tooling after the M2 triage, gate on the final binary, benchmark binary refreshed
+
+HEAD of the solver sources: `a8c45e7` (M2-T9/T10 included); this task changed only tests/, doc/rewrite/ and bench/results/M2-T8-gate/.
+
+**Changes.**
+1. `tests/matrix.txt`: rows `tier2`, `tier2-dl` use `--tier1glue=2 --tier2glue=6` (J2; comment updated; everything else in the rows
+   unchanged). ROADMAP 0.1 table updated.
+2. `tests/fuzz_qdimacs.sh`: an option argument with whitespace is rejected with an explanatory message and exit 2 before anything runs; rule in
+   the usage comment. Checked: `... 1 2 "-dl --reduceint=2"` exits 2, `... 1 2 -dl --reduceint=2` runs (4 instances agreed).
+3. `tests/m1_equiv.sh`: `minimized` added to STATS. The M1 binary prints `c stat minimized`, so it is compared in **every** pass (no
+   restriction to the third pass was needed); all passes identical.
+4. `tests/regress.sh` header: "lower half of the cores (nproc/2 of them)".
+
+**Gate** (builds `/home/ec2-user/miniqu-work/build/<preset>`, `taskset -c 0-23`, 16 jobs; logs `/home/ec2-user/miniqu-work/m2-t8/`, summary
+`bench/results/M2-T8-gate/gate.summary`).
+a. Full rebuild (`--clean-first`) of release, debug, asan, release-clang: 0 warnings; `ctest --preset release` and `debug`: 43/43 passed.
+b. `tests/m1_equiv.sh <release>/miniQU`: M1 EQUIVALENCE PASSED.
+c. `tests/regress.sh -j 16 -s 1:300 -M all <release>/miniQU`: REGRESSION TESTS PASSED (6 warnings, solver timeouts: `mode1-dl` 3, `mode2-dl` 2,
+   `noearly` 34, `restart-dl` 6 of 150 (limit 8), `restart-mode1-dl` 20 (limit 25), `ema-stress-dl` 4 (limit 4)). **`promoted.cube`: `tier2`
+   25%, `tier2-dl` 24%** (release; threshold 20%); `promoted.clause` 87% / 85%; `tier2*` 0 of 150 timeouts. Asan run
+   (`-S -s 1:100 -t 240`): PASSED (3 warnings: `mode1-dl` 3, `noearly` 12, `restart-mode1-dl` 4 timeouts), 0 sanitizer reports, `promoted.cube`
+   26% / 24%. Per row: `bench/results/M2-T8-gate/rows-release.md`, `rows-asan.md`.
+d. `tests/fuzz_qdimacs.sh <release>/miniQU 1 300 OPT` for OPT '', `-dl`, `-mode=1`, `-mode=2`, each alone and with `--reduceint=2
+   --tier1glue=0 --tier2glue=0 --gcfrac=0 --rootsimpdelay=0`: 8 x 600 instances agreed, 0 failures, 0 timeouts.
+   `tests/run_regressions.sh <release>/miniQU`: 12 instances, 0 failures.
+e. No wrong verdict, rejected proof, sanitizer report or stress-limit failure.
+
+**Benchmark binary.** The old `bench-M2-r1/miniQU` (sha256 `0c2f3495...4bc70`) is kept as `bench-M2-r1/miniQU.9f5a074`. New
+`/home/ec2-user/miniqu-work/build/bench-M2-r1/miniQU` = copy of the release-preset build (the same preset M2-T7 used) of git `a8c45e7`,
+sha256 `04531dfabcba651cda6181661ea7a9254ba34dfc49bd16e267b3516146887a8c`.
+**Search unchanged against the old file** (`-verb=1`, 60 s, smoke list of 33 instances, '' and `-dl`; lines `conflicts`, `decisions`,
+`propagations`, `ticks`): 65 of 66 runs identical. The one difference, `jctc9-pass.qcir` with the default options, is no real difference: both
+binaries time out at 60 s (and also at 500 s, 1.26-1.28 M conflicts) and print the stat block at the kill, which depends on when the signal
+arrives; no conflict limit option exists, so a deterministic comparison of that instance is not possible. With `-dl` it is identical. So the
+M2-T7 screening results are valid for the new binary, except that this one instance is unverified in the default configuration.
+
+**Open points.** `jctc9-pass` default as above (T10 changed counters only; the 32 other instances and the corpus equivalence gates show no search change).
