@@ -25,6 +25,7 @@ dl-ccmin3    | -dl -ccminmode=3                 | yes | conflicts restarts learn
 noearly      | -no-earlytseitin                 | yes | conflicts restarts learned.clause learned.cube | normal
 legacy       | -legacyanalyze                   | yes | conflicts restarts learned.clause learned.cube | normal
 m1reduce     | --no-tiers --no-glueupdate --reducetarget=50 --reducesize --reduceint=0 | yes | conflicts restarts learned.clause learned.cube | normal
+norootsimp   | --no-rootsimp                    | yes | conflicts restarts learned.clause learned.cube | normal
 # Stress configurations: reduce often with no protected tier, garbage collect
 # on any waste; restart every conflict and reset dependencies often. The
 # options and limits are those of STATUS.md, "Coordinator decisions after M1
@@ -56,3 +57,10 @@ tier2-dl     | --tier1glue=1 --tier2glue=3 --reduceint=30 --gcfrac=0 -dl | yes |
 # several limit changes on small instances.
 retier       | --recomputetier --reduceint=2 --gcfrac=0 | yes | conflicts restarts learned.clause learned.cube reductions reduced.clause reduced.cube collections relocated retiered used.clause used.cube | stress | 2
 retier-dl    | --recomputetier --reduceint=30 --gcfrac=0 -dl | yes | conflicts restarts learned.clause learned.cube dependencies reductions reduced.clause reduced.cube collections relocated retiered used.clause used.cube | stress | 2
+# Root-level simplification (M2-T4) at every new root literal, without the
+# propagation throttle; root-gc also reduces and collects at every chance, so
+# strengthened and deleted constraints meet reduce and relocation.
+root         | --rootsimpdelay=0                | yes | conflicts restarts learned.clause learned.cube rootunits rootstrengthened rootdeleted | stress | 2
+root-dl      | --rootsimpdelay=0 -dl            | yes | conflicts restarts learned.clause learned.cube dependencies rootunits rootstrengthened rootdeleted | stress | 2
+root-mode1   | --rootsimpdelay=0 -mode=1        | yes | conflicts restarts learned.clause learned.cube rootunits rootstrengthened rootdeleted | stress | 2
+root-gc      | --rootsimpdelay=0 --reduceint=2 --tier1glue=0 --tier2glue=0 --gcfrac=0 | yes | conflicts restarts learned.clause learned.cube reductions reduced.clause reduced.cube collections relocated rootunits rootstrengthened rootdeleted | stress | 2

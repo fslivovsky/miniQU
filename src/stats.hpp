@@ -31,6 +31,11 @@ namespace miniqu {
   KIND_COUNTER (glueupdates) \
   KIND_COUNTER (promoted) \
   COUNTER (retiered) \
+  COUNTER (rootsimps) \
+  COUNTER (rootunits) \
+  COUNTER (rootstrengthened) \
+  COUNTER (rootlits) \
+  COUNTER (rootdeleted) \
   COUNTER (collections) \
   COUNTER (relocated) \
   COUNTER (modelcubes) \

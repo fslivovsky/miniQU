@@ -192,7 +192,8 @@ and deleted only through `constraint.cpp`, assignments only through
 | `reduce.cpp` | learnt-database reduction (the *database* sense of "reduce"): conflict and size triggers, tier-aware candidate selection |
 | `tier.cpp` | `used` marks and glue update of learnt constraints bumped by an analysis (M2-T2); usage histogram and tier limit recomputation (M2-T3) |
 | `rephase.cpp`, `mode.cpp` | (M2) rephasing; stable/focused switching |
-| `collect.cpp` | root-level simplification of the databases, arena garbage collection (5.3) |
+| `simplify.cpp` | root-level simplification of the databases (M2-T4, ROADMAP M2.1): units materialised, root-vanished literals removed, root-disabled constraints deleted, modes 0 and 1 |
+| `collect.cpp` | arena garbage collection (5.3) |
 | `report.cpp` | progress lines |
 | `certificate.cpp` | values of the certificate block in internal variables, for `--cert` (10.4) |
 
@@ -601,8 +602,8 @@ all iteration over constraints goes through the reference lists (4.3).
 Deleting a constraint (`mark_garbage`) sets the bit, reports the deletion to
 the proof, adds its words to `wasted`, and smudges its two watch lists
 (section 6.2). Memory is reclaimed when `wasted > gcfrac% * size` at one of
-the safe points (after `reduce`, after `collect`, at the end of an
-inprocessing pass), never inside propagation or analysis. `--gcfrac=0`
+the safe points (after `reduce`, after root simplification (`simplify_root`,
+unless it returns a root conflict), at the end of an inprocessing pass), never inside propagation or analysis. `--gcfrac=0`
 collects at **every** safe point, even when nothing is wasted; the stress
 configurations of the test matrix use it so that relocation runs on tiny
 instances (ROADMAP 0.1).
@@ -738,6 +739,11 @@ solve ():
     if      conflict = propagate ()           analyze (conflict)   // may end the search
     else if terminated or limit hit           return unknown
     else if restarting ()                     restart ()
+    else if simplifying ()                    simplify_root ()  // M2.1; may end the search,
+                                                                // assign root literals or
+                                                                // return a root conflict
+                                                                // (then analyze); an
+                                                                // iteration of its own
     else if (M2) rephasing () / switching ()  rephase () / switch_mode ()
     else
         if retiering ()                       retier ()      // M2.2: tier limits per kind
@@ -746,6 +752,11 @@ solve ():
         if !decide ()                         // no eligible decision variable
             conflict = initial_cube ()        // 4.5; then analyze
 ```
+
+`simplify_root` is an iteration of its own: the root literals it assigns
+must be propagated before the next decision, and a root conflict it finds
+goes to `analyze`. `simplifying ()` needs root literals that the last run
+did not see, so the loop cannot simplify again without progress.
 
 `reduce` does not end the iteration. The old size trigger (`#learnt -
 #assigned >= max_learnts`, now `--reducesize`, off by default since M2.2) can
@@ -881,7 +892,11 @@ beyond those the following `qreduce` removes anyway, which is what the old
 Root-level literals are kept in learnt constraints in M1 as in the old code.
 M2 may resolve them away when their reason has the same kind (adding the unit
 ids to the chain); a root literal whose reason has the other kind must stay
-(INV-DERIVED).
+(INV-DERIVED). As built in M2-T4, `simplify.cpp` removes root literals with
+a same-kind unit from stored constraints at the next root simplification;
+it replaces the reason of a root variable by the unit derived for it
+(`replace_reason` in `assign.cpp`), which the analyses read like any other
+reason.
 
 ---------------------------------------------------------------------------
 
@@ -968,10 +983,10 @@ the proof ids do not reproduce) and writes no deletions
 | learnt constraint | `learn.cpp` | derived, chain = conflict id, then reason ids in resolution order (plus, from M2, the reasons used by minimisation) |
 | final empty constraint | `learn.cpp` | derived with empty literal list |
 | initial cube from a model | `model.cpp` | `add_model_cube`: fatal error if a QLRUP tracer is connected; `TraceTracer` writes a step without premises |
-| root unit materialised (M2.1) | `collect.cpp` | derived unit, chain = the non-unit reason id, then the same-kind unit ids of its other literals |
+| root unit materialised (M2.1) | `simplify.cpp` | derived unit, chain = the non-unit reason id, then the same-kind unit ids of its other literals (in the order of the reason's literals); a secondary unit (mode 1) is the empty constraint |
 | learnt constraint deleted | `reduce.cpp` -> `mark_garbage` | `d id` |
-| satisfied constraint removed at root | `collect.cpp` -> `mark_garbage` | `d id` |
-| root-vanished literals removed | `collect.cpp` | `strengthen`, chain = constraint id, then the unit ids (only literals whose root reason has the same kind) |
+| satisfied constraint removed at root | `simplify.cpp` -> `mark_garbage` | `d id` (only under a literal with a unit of either kind) |
+| root-vanished literals removed | `simplify.cpp` | `strengthen`, chain = constraint id, then the unit ids (only literals whose root reason is a unit of the same kind); a result of one literal is derived under a fresh id and the old id deleted by `mark_garbage` (one `a`, one `d`), an empty one is derived and ends the proof |
 | BVE resolvent | `elim.cpp` | derived, chain = the two parent ids |
 | BVE parents removed | `elim.cpp` | `d` |
 | subsumed constraint removed | `subsume.cpp` | `d` |
@@ -1057,9 +1072,12 @@ added. From M1:
 | `tier1minglue`, `tier2minglue` | 0, 0 | 0..100 | - | lowest values of the recomputed limits (tier 2 is then forced above tier 1) |
 | `luby`, `rfirst`, `rinc` | 1, 100, 200 (%) | `rfirst` 1.., `rinc` 100.. | `--no-luby --rfirst=1 --rinc=100` | restart after every conflict |
 | `depreset` | 20 | 1..1e9 | 1 | reset dependencies every n-th restart |
+| `rootsimp` | 1 | 0..1 | - | M2-T4: root-level simplification (`simplify.cpp`) when root literals are new; modes 0 and 1 only (off in mode 2 whatever the option says) |
+| `rootsimpdelay` | 1 | 0..1 | 0 | wait until `propagations >= lim.simplify`, where each run sets `lim.simplify = propagations + literals in all stored constraints` (MiniSat's `simpDB_props`); 0 = simplify after every complete propagation that brought new root literals |
 
 The M1-equivalent configuration is `--no-tiers --no-glueupdate
---reducetarget=50 --reducesize --reduceint=0` (`tests/m1_equiv.sh`).
+--reducetarget=50 --reducesize --reduceint=0 --no-recomputetier
+--no-rootsimp` (`tests/m1_equiv.sh`).
 
 The arithmetic growth of the `reduceint` schedule is deliberate: a fixed tiny
 interval would keep the learnt database at constant size, and together with
@@ -1075,7 +1093,8 @@ benchmarked.
 (`conflicts`, `decisions`, `propagations`, `ticks`, `restarts`,
 `learned[kind]`, `learnedlits[kind]`, `minimized`, `dependencies`,
 `reductions`, `reduced[kind]`, `used[kind]`, `glueupdates[kind]`,
-`promoted[kind]`, `collections`, `modelcubes`, and per pass:
+`promoted[kind]`, `rootsimps`, `rootunits`, `rootstrengthened`,
+`rootlits`, `rootdeleted`, `collections`, `modelcubes`, and per pass:
 rounds, tried, successful, removed literals...). They are incremented
 directly (`stats.conflicts++`) and printed in one place (`stats.cpp`) at
 verbosity >= 1, each line prefixed with `c `. Current database sizes are
@@ -1093,7 +1112,8 @@ interface change (update `tests/matrix.txt` in the same commit).
 ### 9.3 Profiling
 
 `START (name)` / `STOP (name)` around phases (`parse`, `search`,
-`propagate`, `analyze`, `reduce`, `collect`, `elim`, `subsume`, `vivify`),
+`propagate`, `analyze`, `reduce`, `simplify`, `collect`, `elim`, `subsume`,
+`vivify`),
 defined by an X-macro list with a level per profile; active profiles at or
 below `--profile=<level>` are timed (process CPU time), nested as in CaDiCaL,
 and printed with the statistics. Level 0 costs nothing in the inner loop.
@@ -1110,6 +1130,8 @@ M1-r1).
 `lim.retier` (M2-T3, only with `--recomputetier`): the first recomputation of
 the tier limits after 2 conflicts, then `1 << min (retiered, 16)` conflicts
 after the previous one (CaDiCaL's schedule).
+`lim.simplify` (M2-T4, with `--rootsimpdelay`) is a *propagation* count:
+root simplification waits until `stats.propagations` reaches it.
 Events are only ever triggered by comparing `stats` with `lim` in the loop of
 7.1; no technique schedules itself from inside another.
 

@@ -38,6 +38,9 @@ void Stats::print (FILE *file, double seconds) const {
   row ("used:", total (used));
   row ("glue updates:", total (glueupdates));
   row ("promoted:", total (promoted));
+  row ("root units:", rootunits);
+  row ("strengthened:", rootstrengthened);
+  row ("root deleted:", rootdeleted);
   fprintf (file, "c %-16s %12.2f seconds\n", "time:", seconds);
 }
 

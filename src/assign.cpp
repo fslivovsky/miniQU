@@ -29,6 +29,17 @@ void Internal::assign (Lit l, Ref reason) {
     LOG (reason, "assign %s%u reason", sign (l) ? "-" : "", v + 1);
 }
 
+// Root simplification ('simplify.cpp') makes a unit derived for a root
+// literal its reason.  A unit has no other literals, so the reasons stay
+// consistent with the trail order.
+void Internal::replace_reason (Var v, Ref unit) {
+  assert (!level (v) && val (mk_lit (v)));
+  assert (deref (arena, unit).size () == 1);
+  assert (var (deref (arena, unit)[0]) == v);
+  vtab[v].reason = unit;
+  LOG (unit, "new reason of %u", v + 1);
+}
+
 void Internal::new_level () {
   control.push_back (trail.size ());
   LOG ("new decision level");

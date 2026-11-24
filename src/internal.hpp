@@ -59,6 +59,23 @@ struct Depend {
   int64_t learned = 0; // learnt constraints at the last reset
 };
 
+// A unit derived by step 2 of 'simplify_root', stored after the pass.
+struct RootUnit {
+  uint64_t id;
+  Kind kind;
+  Lit lit;
+};
+
+// State of root-level simplification ('simplify.cpp'): how much of the root
+// trail the last run saw, the units step 2 derived, and the literals and
+// the chain of the step being built.
+struct Simplifier {
+  size_t trail = 0;
+  std::vector<RootUnit> units;
+  std::vector<Lit> lits;
+  std::vector<uint64_t> chain;
+};
+
 // The resolvent of 'analyze_qu' as variables per block, so that the
 // rightmost primary block and the literals right of it are found without
 // scanning ('analyze_qu.cpp').  'position[v]' is the index of 'v' in
@@ -146,6 +163,7 @@ struct Internal {
   Minimizer minimizer;
 
   Depend depend;
+  Simplifier simplifier;
 
   Ref model_cube = Ref::none; // buffer of 'initial_cube'
   std::vector<Lit> model;     // literals of the next initial cube
@@ -192,6 +210,7 @@ struct Internal {
 
   // assign.cpp
   void assign (Lit, Ref reason);
+  void replace_reason (Var, Ref unit);
   void new_level ();
 
   // propagate.hpp, propagate.cpp, propagate_ldq.cpp
@@ -260,6 +279,18 @@ struct Internal {
   void retier ();
   void print_tier_limits () const;
 
+  // simplify.cpp
+  bool simplifying () const;
+  const Constraint *root_unit (Lit) const;
+  const Constraint *root_unit (Kind, Lit) const;
+  bool is_root_reason (Ref) const;
+  void materialize_root_units (size_t end);
+  void watch_root_simplified (Ref);
+  void strengthen_root (Ref);
+  void simplify_constraint (Ref);
+  [[nodiscard]] Ref add_root_units ();
+  [[nodiscard]] Ref simplify_root ();
+
   // collect.cpp
   bool collecting () const;
   void garbage_collect ();
@@ -285,6 +316,7 @@ struct Internal {
 
   // check.cpp
   void check_invariants () const;
+  void check_root_simplified () const;
 
 #ifdef MINIQU_LOGGING
   // logging.cpp; 'LOG' calls these inside member functions.

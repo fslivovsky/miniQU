@@ -16,6 +16,7 @@ namespace miniqu {
   PROFILE (parse, 0) \
   PROFILE (search, 1) \
   PROFILE (reduce, 2) \
+  PROFILE (simplify, 2) \
   PROFILE (collect, 2) \
   PROFILE (analyze, 3) \
   PROFILE (propagate, 3)

@@ -631,8 +631,9 @@ Decisions that differ from the package texts below:
 
 ### M2.1 Root-level simplification (adopt; prerequisite for M3)
 
-`collect.cpp`, at decision level 0 after propagation, when new root
-assignments exist. Three steps; (LO)/(HI) refer to ARCH 11.1.
+`simplify.cpp` (built in M2-T4; modes 0 and 1), at decision level 0 after
+propagation, when new root assignments exist. Three steps; (LO)/(HI) refer
+to ARCH 11.1.
 
 1. **Materialise root units** (class D). A root assignment whose reason is a
    constraint `R` of kind `K` with more than one literal gets a stored unit

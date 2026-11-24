@@ -8,8 +8,12 @@
 // The loop is the one of the old 'search' / 'solve_' pair, flattened: each
 // iteration propagates, and either analyses the conflict found, or stops
 // when asked to, or restarts (and forgets the dependencies on their
-// schedule, after the restart as in the old 'solve_'), or decides (after a
-// reduction, if one is due).  When no decision variable is left, the
+// schedule, after the restart as in the old 'solve_'), or simplifies the
+// databases at the root, or decides (after a reduction, if one is due).
+// Root simplification is an iteration of its own: it can assign root
+// literals or find a root conflict, and a decision must not come before
+// their propagation.  It runs only when root literals are new, so it cannot
+// repeat without progress.  When no decision variable is left, the
 // clauses are satisfied (QDIMACS) and the initial cube taken from the
 // assignment is analysed like any satisfied cube (4.5).  Analysis ends the
 // search by deriving an empty constraint, which sets 'status'.
@@ -69,6 +73,11 @@ void Internal::search () {
       restart ();
       if (resetting_dependencies ())
         reset_dependencies ();
+    } else if (simplifying ()) {
+      // It may assign root literals, which are propagated first.
+      if (const Ref root_conflict = simplify_root ();
+          root_conflict != Ref::none)
+        analyze (root_conflict);
     } else {
       // The size trigger of 'reduce' may stay true, so the loop goes on
       // to decide: see reduce.cpp.

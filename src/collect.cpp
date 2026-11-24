@@ -10,8 +10,9 @@
 // reach (reasons, unit constraints, constraints of the reference lists
 // that no watch list holds) is copied after them.
 //
-// The collector runs only at safe points (after 'reduce'): no 'Ref' may be
-// held in a local variable, a conflict in flight or an analysis buffer.
+// The collector runs only at safe points (after 'reduce' and after a root
+// simplification that found no conflict): no 'Ref' may be held in a local
+// variable, a conflict in flight or an analysis buffer.
 // Blockers are literals and stay valid.  A stale watch of mode 2
 // (propagate_ldq.cpp) is relocated like any other: it refers to a live
 // constraint, which is copied once and forwarded.  The buffer of

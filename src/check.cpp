@@ -13,7 +13,8 @@
 // list of the variable it watches).  No
 // stored reference, in the lists, the reasons and the watch lists that are
 // clean, is to a moved constraint; clean watch lists hold no garbage (the
-// state after a garbage collection, ARCHITECTURE 5.3).
+// state after a garbage collection, ARCHITECTURE 5.3).  Units are
+// irredundant and not watched (4.3).
 //
 // Mode 2 (propagate_ldq.cpp, ARCHITECTURE 6.3): watch lists may hold stale
 // entries, also of deleted constraints in clean lists, which are accepted;
@@ -42,6 +43,9 @@ namespace miniqu {
       fatal ("invariant violated: " __VA_ARGS__); \
   } while (0)
 
+// Set in the entry of a unit that some list holds, which must not happen.
+static constexpr uint8_t watched_unit = 4;
+
 // For every live constraint of size >= 2, which of its literals 0 and 1 are
 // watched: bit i of the entry is set if the list of literal i holds the
 // constraint.  The blocker of a watch is another literal of the
@@ -60,6 +64,10 @@ watched_positions (const Watches &watches, const Arena &arena) {
           const Constraint &c = deref (arena, w.ref);
           if (c.garbage ())
             continue;
+          if (c.size () < 2) {
+            result[w.ref] |= watched_unit;
+            continue;
+          }
           for (unsigned i = 0; i < 2; i++)
             if (watch_key (kind, c[i]) == p && w.blocker != c[i] &&
                 std::find (c.begin (), c.end (), w.blocker) != c.end ())
@@ -135,8 +143,12 @@ void Internal::check_invariants () const {
         CHECK_INVARIANT (prefix.is_primary (kind, rightmost),
                          "constraint %lu not reduced",
                          (unsigned long) message_id (c));
-        if (c.size () < 2)
+        if (c.size () < 2) {
+          CHECK_INVARIANT (!c.redundant () && !watched.contains (ref),
+                           "unit %lu redundant or watched",
+                           (unsigned long) message_id (c));
           continue;
+        }
         CHECK_INVARIANT (watched.contains (ref) && watched.at (ref) == 3,
                          "constraint %lu not watched",
                          (unsigned long) message_id (c));
@@ -234,6 +246,33 @@ void Internal::check_invariants () const {
                            1,
                        "dependency watch of %u", v + 1);
     }
+}
+
+// The state right after steps 2 and 3 of root simplification
+// ('simplify.cpp'), before the units of step 2 are stored: no constraint of
+// size >= 2 is disabled by a literal with a unit of either kind, and none
+// but a reason holds a vanished literal with a unit of its own kind.
+void Internal::check_root_simplified () const {
+  for (Kind kind : {Kind::Clause, Kind::Cube})
+    for (const auto *lists : {&irredundant, &redundant})
+      for (Ref ref : (*lists)[index (kind)]) {
+        const Constraint &c = deref (arena, ref);
+        if (c.garbage () || c.size () < 2)
+          continue;
+        const bool reason = is_root_reason (ref);
+        for (Lit l : c) {
+          const int value = kval (kind, l);
+          const Constraint *unit = value ? root_unit (l) : nullptr;
+          if (!unit)
+            continue;
+          CHECK_INVARIANT (value < 0, "constraint %lu disabled by a unit",
+                           (unsigned long) message_id (c));
+          CHECK_INVARIANT (reason || unit->kind () != kind,
+                           "constraint %lu holds a literal removed by a "
+                           "unit",
+                           (unsigned long) message_id (c));
+        }
+      }
 }
 
 } // namespace miniqu

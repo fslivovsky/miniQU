@@ -67,6 +67,11 @@ namespace miniqu {
           "lowest tier 1 limit, with recomputetier") \
   OPTION (tier2minglue, 0, 0, 100, \
           "lowest tier 2 limit, with recomputetier") \
+  OPTION (rootsimp, 1, 0, 1, \
+          "root-level simplification (modes 0 and 1; off in mode 2)") \
+  OPTION (rootsimpdelay, 1, 0, 1, \
+          "simplify at the root only after as many propagations as " \
+          "stored literals") \
   OPTION (depreset, 20, 1, 1000000000, \
           "reset dependencies every n restarts") \
   OPTION (profile, 0, 0, 3, "profiling level")
