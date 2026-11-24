@@ -45,7 +45,7 @@
 # with no pair compared, and on a failure to run.
 
 # The M1-equivalent option string; one variable, extended by later tasks.
-EQUIV="--no-tiers --no-glueupdate --reducetarget=50 --reducesize --reduceint=0 --no-recomputetier --no-rootsimp --ccminmode=0"
+EQUIV="--no-tiers --no-glueupdate --reducetarget=50 --reducesize --reduceint=0 --no-recomputetier --no-rootsimp --ccminmode=0 --restartmode=0 --no-reusetrail"
 STRESS="--reduceint=2 --tier1glue=0 --gcfrac=0"
 SEEDS=40
 TIMEOUT=60

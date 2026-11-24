@@ -11,6 +11,7 @@ namespace miniqu {
 // Conflict count at which each event fires next.
 struct Limit {
   int64_t restart = 0;
+  int64_t depreset = 0; // with --restartmode=1
   int64_t reduce = 0;
   int64_t retier = 0;
   int64_t simplify = 0;   // a propagation count ('--rootsimpdelay')

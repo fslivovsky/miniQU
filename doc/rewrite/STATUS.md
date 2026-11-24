@@ -3097,3 +3097,85 @@ benchmark claim, M2-T7 decides the default.
    right of the asserting one) would need its own argument for mode 3 (the kept literal raises the bound limit); not done.
 3. `minimized` is not in the STATS list of `m1_equiv.sh`; the pass compares conflicts/decisions/propagations/ticks etc., which
    already pin the search.
+
+## M2-T6 (worker, 2026-11-24): glue-EMA restarts per kind (`--restartmode=1`) and trail reuse (`--reusetrail`)
+
+**Built** (as specified unless noted; ARCH 7.1, 9.1, 9.4 and ROADMAP M2.4/M2.5 updated).
+- Options `restartmode` (0), `restartint` (2), `restartmargin` (10), `emagluefast` (33), `emaglueslow` (100000), `depresetint`
+  (5000), `reusetrail` (1); counter `reused`; `lim.depreset`; `Internal::averages` (per kind, `struct Averages { Ema fast, slow; }`)
+  and `last_learnt_kind`. `init_restart ()` (called where `lim.restart` was) sets the limits and the averages.
+- `restart.cpp` is rewritten: header comment for both modes (heuristic, no proof steps; what the reuse criterion approximates);
+  `update_averages` (called from `learn_watched`, both modes, pure bookkeeping), `restarting ()`, `reuse_level ()`, `restart ()`.
+  Mode 0 intervals unchanged. Mode 1: `conflicts >= lim.restart` and `fast > (1 + margin/100) * slow` of the kind learnt last
+  (strict; nothing learnt yet: 0 > 0 is false, no restart); `lim.restart = conflicts + restartint` after a restart.
+- Dependency reset, inside `resetting_dependencies ()`: mode 1 `conflicts >= lim.depreset` (and `-dl`, and "learnt since the last
+  reset"); `reset_dependencies ()` sets `lim.depreset = conflicts + depresetint`. Mode 0 keeps `(restarts + 1) % depreset == 0`.
+  `restart ()` calls `resetting_dependencies ()` after incrementing `restarts`, exactly the state in which the loop evaluates it
+  right afterwards, so `reuse_level ()` returns 0 exactly when the loop will reset.
+- `reuse_level ()`: 0 without `--reusetrail` or with a reset due; else the largest k such that for each level i <= k the decision
+  (`trail[control[i-1]]`; `control[l]` is the trail start of level l+1) has `scores[d] >= scores[best]`, `best` the best
+  unassigned variable of `heap_of (d)` (the block heap, or the single heap with `-dl`), cached for consecutive levels on one heap.
+  New `Heap::best_unskipped (skip)` finds it **without popping**: depth-first through assigned entries, cut at subtrees whose
+  root cannot beat the best so far. So with `--no-reusetrail` nothing changes and with it the heap is not touched (checked in the
+  unit test). It relies on the heap order; MiniSat's `remove` can break that order slightly (see heap.hpp), which only makes the
+  heuristic slightly off, never unsound. No candidate (all assigned) keeps the level. `stats.reused` counts restarts with k > 0.
+  `check_invariants ()` after a restart only at level 0.
+- Interactions (verified by reading, and exercised by the stress rows): root simplification (`simplifying ()`) needs level 0, which
+  reuse reaches mainly after learnt units (as CaDiCaL) or when a decision is outscored at level 1; reduction and garbage collection
+  never needed level 0; `phases`, heap membership and `depend.propagated` after the partial backtrack are what `backtrack (k)`
+  guarantees for any backjump (the kept prefix was fully propagated when the restart fired, so `propagated = start` is right).
+  A pending dependency reset forces level 0, because `reset_dependencies` re-inserts root-assigned variables.
+
+**Tests.** `test/unit/restart.cpp` (new, in ctest): mode-1 restarts on hand-fed glue sequences per kind (jump, margin, the other
+kind's flat averages do not restart, `restartint`), mode 0 ignoring the averages and keeping its intervals, `reuse_level` without
+and with `-dl` and with blocks (prefix kept, tie keeps, candidate looked through assigned heap tops without changing the heap,
+0 with `--no-reusetrail`, 0 with a reset due in both schedules, `reused` counted), options defaults in `options.cpp`.
+`tests/fake/stat-wrapper.sh` drops the new options (the frozen baseline has none).
+`tests/m1_equiv.sh`: `--restartmode=0 --no-reusetrail` appended to EQUIV; **M1 EQUIVALENCE PASSED**, 0 differences in all sets
+(log `/home/ec2-user/miniqu-work/m2-t6/m1equiv.log`).
+
+**Matrix.** Normal rows `ema`, `ema-dl`, `noreuse`; stress rows `ema-stress`, `ema-stress-dl`, `ema-stress-mode1` with exactly the
+options of the task (`--restartmode=1 --restartint=1 --restartmargin=0 --emagluefast=1 --emaglueslow=2 --depresetint=1`, plus
+`-dl` / `-mode=1`); they terminate and restart often (`restarts` 94% of the instances, `reused` 90-94%, `depresets` 94% in the
+dl row). The three old `restart*` rows get `--no-reusetrail`: they are meant to be at level 0 after every conflict (dependency
+resets, root simplification); with reuse they would mostly stay deep, so they would no longer test those paths. Their counters
+are unchanged (`restarts` 93-94%, `depresets` 93-94%). Limits (H7): `ema-stress` and `-mode1` 0 timeouts of 150 (limit 2);
+`ema-stress-dl` 4 of 150 (2.7%), limit set to 4: the same options with `--no-reusetrail` time out on 6 of 150
+(seeds 1:300, `-n -S`, file `/home/ec2-user/miniqu-work/m2-t6/cmp.matrix`, cores 24-47, 12 jobs), and the existing `restart-dl`
+(limit 8) has 6 of 150 in this gate; restarting after every conflict with `-dl` is slow by nature.
+
+**Gate** (logs in `/home/ec2-user/miniqu-work/m2-t6/`; heavy commands `taskset -c 0-23`, 16 jobs).
+- release, debug, asan, release-clang: warning-free; `ctest --preset release` and `debug` 43/43 (incl. `format`).
+- `tests/regress.sh -j 16 -s 1:300 -M all release/miniQU`: every row passed except the stress limit of `ema-stress-dl` (4/150
+  against 2, fixed above as measured); 0 wrong verdicts, all proofs checked by Lean (0 rejected); other warnings as before
+  (`noearly` 34, `restart-dl` 6, `restart-mode1-dl` 18, `mode1-dl` 3, `mode2-dl` 2 solver timeouts, all within their limits or
+  normal rows). New rows 0 search timeouts except `ema-stress-dl`.
+- `tests/regress.sh -S -j 16 -s 1:100 -t 240 -M all asan/miniQU`: REGRESSION TESTS PASSED (3 warnings: solver timeouts `mode1-dl` 4,
+  `noearly` 12, `restart-mode1-dl` 4), no sanitizer report, no Checker abort. `ema-stress-dl` alone rerun on release after the limit
+  change (`-s 1:300 -S`): PASSED, 4 of 150 (limit 4).
+- `tests/fuzz_qdimacs.sh release/miniQU 1 300 OPT`, OPT in '', `-dl`, `-mode=1`, `-mode=2`, each alone and with
+  `--restartmode=1 --restartint=1`: 8 x 600 instances, 0 failures, 0 timeouts. `tests/run_regressions.sh` with '',
+  `--restartmode=1 --restartint=1`, `-mode=1 --restartmode=1`: 8 instances each, 0 failures (proofs Lean-checked).
+- Lean on benchmarks (release, `-proof=FILE -proof-binary`, instances `9.3` and `jctc4-fail`, proofs deleted after the check):
+  `--restartmode=1`, `--restartmode=1 -dl`, default (reuse on) and `-mode=1`: all 8 proofs `s VERIFIED FALSE`.
+
+**Restart and reuse counts** (release, one run, `restarts` / `reused`; conflicts in brackets; informational, no performance claim;
+`depresets` only in the `-dl` columns: tippy 3 / 4 in mode 0 / 1 and 1 on `jctc4-fail` mode 1).
+
+| instance | mode 0 | mode 1 | mode 0 `-dl` | mode 1 `-dl` |
+|---|---|---|---|---|
+| 9.3 | 6 / 5 (934) | 5 / 5 (928) | 6 / 1 (1174) | 73 / 66 (1402) |
+| hadw6-7 | 9 / 9 (1440) | 3 / 3 (2462) | 9 / 2 (1410) | 121 / 117 (1101) |
+| jctc4-fail | 11 / 11 (1781) | 80 / 80 (1357) | 16 / 4 (3392) | 1359 / 1304 (6031) |
+| test_5_5_tippy.pg-7 | 210 / 210 (67976) | 7074 / 7074 (82898) | 77 / 41 (21905) | 1777 / 1521 (28491) |
+| 5-5-6-7-3-60-EdAd | 3 / 3 (414) | 0 / 0 (414) | 14 / 14 (3138) | 484 / 484 (4611) |
+
+Reuse fires at almost every restart (k > 0 whenever the first decision outscores the best candidate), so it is cheap; how much
+it saves is a question for M2-T7. In mode 1 the restart count is 10-1000 times that of Luby on the non-trivial instances, which is
+the usual EMA behaviour; whether it pays is M2-T7's measurement.
+
+**Open points.**
+1. Defaults shipped: `restartmode=0`, `reusetrail=1` (M2-T7 decides). With reuse on, the default search differs from M1 (the
+   equivalence gate runs with `--no-reusetrail`).
+2. The reuse criterion compares against the candidates unassigned at restart time, not after the backtrack (CaDiCaL does the
+   same); in prefix order it is therefore only an approximation of "the search would redo this decision".

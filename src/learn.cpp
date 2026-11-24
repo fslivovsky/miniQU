@@ -115,6 +115,7 @@ void Internal::learn_watched (Kind kind) {
   const uint32_t glue = compute_glue (derived);
   stats.learned[index (kind)]++;
   stats.learnedlits[index (kind)] += (int64_t) derived.size ();
+  update_averages (kind, glue);
   backtrack (jump);
   const Ref ref = new_constraint (next_id++, kind, derived, true, glue);
   if (Constraint &learnt = deref (arena, ref); learnt.redundant ())

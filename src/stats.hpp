@@ -20,6 +20,7 @@ namespace miniqu {
   COUNTER (propagations) \
   COUNTER (ticks) \
   COUNTER (restarts) \
+  COUNTER (reused) \
   KIND_COUNTER (learned) \
   KIND_COUNTER (learnedlits) \
   COUNTER (minimized) \

@@ -31,6 +31,9 @@ noearly      | -no-earlytseitin                 | yes | conflicts restarts learn
 legacy       | -legacyanalyze                   | yes | conflicts restarts learned.clause learned.cube | normal
 m1reduce     | --no-tiers --no-glueupdate --reducetarget=50 --reducesize --reduceint=0 | yes | conflicts restarts learned.clause learned.cube | normal
 norootsimp   | --no-rootsimp                    | yes | conflicts restarts learned.clause learned.cube | normal
+ema          | --restartmode=1                  | yes | conflicts restarts reused learned.clause learned.cube | normal
+ema-dl       | --restartmode=1 -dl              | yes | conflicts restarts reused learned.clause learned.cube dependencies | normal
+noreuse      | --no-reusetrail                  | yes | conflicts restarts learned.clause learned.cube | normal
 # Stress configurations: reduce often with no protected tier, garbage collect
 # on any waste; restart every conflict and reset dependencies often. The
 # options and limits are those of STATUS.md, "Coordinator decisions after M1
@@ -46,9 +49,23 @@ gc-dl        | --reduceint=30 --tier1glue=0 --gcfrac=0 -dl | yes | conflicts res
 gc-mode1     | --reduceint=100 --tier1glue=0 --gcfrac=0 -mode=1 | yes | conflicts restarts learned.clause learned.cube reductions reduced.clause reduced.cube collections relocated | stress | 5
 gc-ccmin3    | --reduceint=2 --tier1glue=0 --gcfrac=0 -ccminmode=3 | yes | conflicts restarts learned.clause learned.cube minimized reductions reduced.clause reduced.cube collections relocated | stress | 2
 gc-mode2     | --reduceint=10 --tier1glue=0 --gcfrac=0 -mode=2 | no | conflicts restarts learned.clause learned.cube reductions reduced.clause reduced.cube collections relocated | stress | 2
-restart      | --no-luby --rfirst=1 --rinc=100 --depreset=1 | yes | conflicts restarts learned.clause learned.cube | stress | 2
-restart-dl   | --no-luby --rfirst=1 --rinc=100 --depreset=1 -dl | yes | conflicts restarts learned.clause learned.cube dependencies depresets | stress | 8
-restart-mode1-dl | --rfirst=1 --depreset=1 -mode=1 -dl | yes | conflicts restarts learned.clause learned.cube dependencies depresets | stress | 25
+restart      | --no-luby --rfirst=1 --rinc=100 --depreset=1 --no-reusetrail | yes | conflicts restarts learned.clause learned.cube | stress | 2
+restart-dl   | --no-luby --rfirst=1 --rinc=100 --depreset=1 --no-reusetrail -dl | yes | conflicts restarts learned.clause learned.cube dependencies depresets | stress | 8
+restart-mode1-dl | --rfirst=1 --depreset=1 --no-reusetrail -mode=1 -dl | yes | conflicts restarts learned.clause learned.cube dependencies depresets | stress | 25
+# M2-T6: the three rows above restart after every conflict and want level 0
+# every time (the dependency resets need it, and root simplification only
+# runs there), which trail reuse would mostly prevent, so they run with
+# --no-reusetrail.  The rows below restart as often as the glue averages
+# allow (fast average of window 1 = last glue, slow of window 2, no margin,
+# one conflict apart, dependency reset every conflict) with reuse on, so
+# that partial backtracks meet reductions, collections, resets and
+# root simplification.  ema-stress-dl has the limit 4: restarting after every
+# conflict with -dl is slow by nature (restart-dl has 8); measured on seeds
+# 1:300 (STATUS.md H7), the same options with --no-reusetrail time out on 6 of
+# 150 search instances, with reuse on 4 of 150.
+ema-stress   | --restartmode=1 --restartint=1 --restartmargin=0 --emagluefast=1 --emaglueslow=2 --depresetint=1 | yes | conflicts restarts reused learned.clause learned.cube | stress | 2
+ema-stress-dl | --restartmode=1 --restartint=1 --restartmargin=0 --emagluefast=1 --emaglueslow=2 --depresetint=1 -dl | yes | conflicts restarts reused learned.clause learned.cube dependencies depresets | stress | 4
+ema-stress-mode1 | --restartmode=1 --restartint=1 --restartmargin=0 --emagluefast=1 --emaglueslow=2 --depresetint=1 -mode=1 | yes | conflicts restarts reused learned.clause learned.cube | stress | 2
 # Tiers (M2-T2): tier0 has no protected glue and one reduction of grace for
 # every learnt constraint, so marks wear off and are decremented all the
 # time; tier2 puts the tier limits where glue updates cross them

@@ -59,7 +59,7 @@ void Internal::size_watches () {
 void Internal::search () {
   profiles.enable (opts.profile);
   PROFILE_SCOPE (search);
-  lim.restart = restart_interval (0);
+  init_restart ();
   size_watches ();
   init_reduce ();
   init_tiers ();

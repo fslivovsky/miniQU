@@ -729,6 +729,15 @@ available (`--restartmode`). The dependency reset is decoupled from the
 restart count (every `depresetint` conflicts), otherwise frequent restarts
 would wipe dependencies constantly; tune it in the `-dl` ablation.
 
+*Built in M2-T6* (`restart.cpp`; `--restartmode=1`, default 0 until M2-T7
+decides). Deviations: the averages (`Internal::averages`, per kind) are updated
+in `learn_watched` in both modes, since that is pure bookkeeping; a learnt
+dependency learns no constraint and leaves them alone; the condition is the
+strict `fast > (1 + restartmargin/100) * slow`, so the all-equal start
+(both 0) does not restart; the dependency reset keeps its "something was learnt
+since the last reset" guard, with `lim.depreset = conflicts + depresetint`
+after each reset.
+
 ### M2.5 Trail reuse (adopt)
 
 On restart keep the decision levels that would be re-decided anyway: the
@@ -736,6 +745,14 @@ longest prefix of levels whose decision variable has a score at least that of
 the best unassigned candidate of its own block (prefix order) or of the single
 heap (`-dl`). Only changes the backtrack level of a restart; no soundness
 content. Cheap win when restarts are frequent, so it follows M2.4.
+
+*Built in M2-T6* (`reuse_level`, `--reusetrail`, default 1). Deviations: ties
+count as "not lower" (CaDiCaL stops on a tie); the candidate is the best
+unassigned variable of the heap at restart time, found with
+`Heap::best_unskipped` (assigned entries are looked through, nothing is
+popped, so `--no-reusetrail` and the search after a restart do not depend on
+it); a pending dependency reset forces level 0; counter `reused`. The M1
+restart rows of the matrix run with `--no-reusetrail`.
 
 ### M2.6 Stable/focused mode switching (experiment, after M2.4)
 

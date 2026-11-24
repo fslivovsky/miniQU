@@ -10,7 +10,8 @@ MATRIX=$(dirname "$0")/../matrix.txt
 args=()
 for arg in "$@"; do
     case $arg in
-        --reduceint=*|--tier1glue=*|--gcfrac=*|--depreset=*) ;;       # no equivalent in the baseline
+        --reduceint=*|--tier1glue=*|--gcfrac=*|--depreset=*) ;;
+        --restartmode=*|--restartint=*|--restartmargin=*|--emaglue*=*|--depresetint=*|--no-reusetrail|--reusetrail) ;;       # no equivalent in the baseline
         -ccminmode=*) args+=("-ccmin-mode=${arg#-ccminmode=}") ;;
         -legacyanalyze) args+=(-legacy-analyze) ;;
         -no-earlytseitin) args+=(-no-early-tseitin) ;;

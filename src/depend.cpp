@@ -113,12 +113,15 @@ bool Internal::waits_for_dependency (Var v) const {
 // stress configuration) would otherwise repeat the same decisions and the
 // same dependency forever.
 bool Internal::resetting_dependencies () const {
-  return opts.dl && (stats.restarts + 1) % opts.depreset == 0 &&
-         stats.learned[0] + stats.learned[1] > depend.learned;
+  if (!opts.dl || stats.learned[0] + stats.learned[1] <= depend.learned)
+    return false;
+  return opts.restartmode ? stats.conflicts >= lim.depreset
+                          : (stats.restarts + 1) % opts.depreset == 0;
 }
 
 void Internal::reset_dependencies () {
   stats.depresets++;
+  lim.depreset = stats.conflicts + opts.depresetint;
   depend.learned = stats.learned[0] + stats.learned[1];
   LOG ("resetting dependencies");
   for (std::vector<Var> &on : depend.on)

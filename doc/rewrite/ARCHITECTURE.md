@@ -753,6 +753,18 @@ solve ():
             conflict = initial_cube ()        // 4.5; then analyze
 ```
 
+`restart ()` (7.1, `restart.cpp`) backtracks to `reuse_level ()` instead of 0
+(M2.5): the largest `k` such that the decision of each level `i <= k` has a
+score not lower than the best unassigned variable of its heap (the heap of
+its block, or the single heap with `--dl`); 0 with `--no-reusetrail` or when
+a dependency reset is due, since the reset needs level 0. The criterion is a
+heuristic (every backtrack level is sound); in prefix order it approximates
+"the search would decide the same variables again". `restarting ()` follows
+`--restartmode` (9.4): the old interval, or the glue averages of the kind
+learnt last (M2.4); neither has proof steps. Root simplification needs level
+0, which with reuse is reached mostly after learnt units, as in CaDiCaL;
+reduction and garbage collection do not.
+
 `simplify_root` is an iteration of its own: the root literals it assigns
 must be propagated before the next decision, and a root conflict it finds
 goes to `analyze`. `simplifying ()` needs root literals that the last run
@@ -1078,13 +1090,19 @@ added. From M1:
 | `tier1limit`, `tier2limit` | 50, 90 | 0..100 | - | percent of the uses that tier 1 and tier 2 cover: the limit is the smallest glue (at least 1) whose cumulative uses reach that share |
 | `tier1minglue`, `tier2minglue` | 0, 0 | 0..100 | - | lowest values of the recomputed limits (tier 2 is then forced above tier 1) |
 | `luby`, `rfirst`, `rinc` | 1, 100, 200 (%) | `rfirst` 1.., `rinc` 100.. | `--no-luby --rfirst=1 --rinc=100` | restart after every conflict |
-| `depreset` | 20 | 1..1e9 | 1 | reset dependencies every n-th restart |
+| `depreset` | 20 | 1..1e9 | 1 | reset dependencies every n-th restart (`--restartmode=0`) |
+| `restartmode` | 0 | 0..1 | - | M2-T6: 0 = the schedule of `luby`/`rfirst`/`rinc`, 1 = glue averages per kind (CaDiCaL `restarting`); heuristic, no proof steps |
+| `restartint` | 2 | 1..1e9 | 1 | mode 1: minimum conflicts between two restarts |
+| `restartmargin` | 10 | 0..100 | 0 | mode 1: restart when `fast > (1 + margin/100) * slow` for the kind learnt last |
+| `emagluefast`, `emaglueslow` | 33, 100000 | 1..1e9 | 1, 2 | mode 1: window lengths of the two glue averages (`alpha = 1/window`, `Ema` of `ema.hpp`) |
+| `depresetint` | 5000 | 1..1e9 | 1 | mode 1: reset dependencies when `conflicts >= lim.depreset`, then `lim.depreset = conflicts + depresetint` (same "learnt since the last reset" guard as mode 0) |
+| `reusetrail` | 1 | 0..1 | - | M2-T6: restart to `reuse_level ()` instead of 0 (`restart.cpp`); counter `reused` |
 | `rootsimp` | 1 | 0..1 | - | M2-T4: root-level simplification (`simplify.cpp`) when root literals are new; modes 0 and 1 only (off in mode 2 whatever the option says) |
 | `rootsimpdelay` | 1 | 0..1 | 0 | wait until `propagations >= lim.simplify`, where each run sets `lim.simplify = propagations + literals in all stored constraints` (MiniSat's `simpDB_props`); 0 = simplify after every complete propagation that brought new root literals |
 
 The M1-equivalent configuration is `--no-tiers --no-glueupdate
 --reducetarget=50 --reducesize --reduceint=0 --no-recomputetier
---no-rootsimp` (`tests/m1_equiv.sh`).
+--no-rootsimp --restartmode=0 --no-reusetrail` (`tests/m1_equiv.sh`).
 
 The arithmetic growth of the `reduceint` schedule is deliberate: a fixed tiny
 interval would keep the learnt database at constant size, and together with
@@ -1137,6 +1155,9 @@ M1-r1).
 `lim.retier` (M2-T3, only with `--recomputetier`): the first recomputation of
 the tier limits after 2 conflicts, then `1 << min (retiered, 16)` conflicts
 after the previous one (CaDiCaL's schedule).
+`lim.restart` (M2-T6, mode 1): `restartint` after the last restart; `lim.depreset`
+(mode 1): conflict count of the next dependency reset. `Internal::averages`
+holds the glue averages per kind (`struct Averages { Ema fast, slow; }`).
 `lim.simplify` (M2-T4, with `--rootsimpdelay`) is a *propagation* count:
 root simplification waits until `stats.propagations` reaches it.
 Events are only ever triggered by comparing `stats` with `lim` in the loop of

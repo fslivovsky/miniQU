@@ -73,7 +73,21 @@ namespace miniqu {
           "simplify at the root only after as many propagations as " \
           "stored literals") \
   OPTION (depreset, 20, 1, 1000000000, \
-          "reset dependencies every n restarts") \
+          "reset dependencies every n restarts, with restartmode=0") \
+  OPTION (restartmode, 0, 0, 1, \
+          "0=Luby/geometric schedule, 1=glue averages per kind") \
+  OPTION (restartint, 2, 1, 1000000000, \
+          "minimum conflicts between two restarts, with restartmode=1") \
+  OPTION (restartmargin, 10, 0, 100, \
+          "percent the fast glue average must exceed the slow one by") \
+  OPTION (emagluefast, 33, 1, 1000000000, \
+          "window of the fast glue average") \
+  OPTION (emaglueslow, 100000, 1, 1000000000, \
+          "window of the slow glue average") \
+  OPTION (depresetint, 5000, 1, 1000000000, \
+          "reset dependencies every n conflicts, with restartmode=1") \
+  OPTION (reusetrail, 1, 0, 1, \
+          "keep the trail prefix whose decisions a restart would redo") \
   OPTION (profile, 0, 0, 3, "profiling level")
 
 struct Options {

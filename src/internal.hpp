@@ -3,6 +3,7 @@
 
 #include "arena.hpp"
 #include "constraint.hpp"
+#include "ema.hpp"
 #include "heap.hpp"
 #include "limit.hpp"
 #include "lit.hpp"
@@ -57,6 +58,11 @@ struct Depend {
   std::vector<std::vector<Var>> watching;
   size_t propagated = 0;
   int64_t learned = 0; // learnt constraints at the last reset
+};
+
+// Glue averages of the learnt constraints of one kind (restart.cpp).
+struct Averages {
+  Ema fast, slow;
 };
 
 // A unit derived by step 2 of 'simplify_root', stored after the pass.
@@ -125,6 +131,8 @@ struct Internal {
   Stats stats;
   Profiles profiles{0};
   Limit lim;
+  std::array<Averages, 2> averages; // per kind, for --restartmode=1
+  Kind last_learnt_kind = Kind::Clause;
   Inc inc;
   Tiers tiers;
 
@@ -298,8 +306,11 @@ struct Internal {
   void garbage_collect ();
 
   // restart.cpp
+  void init_restart ();
   int64_t restart_interval (int64_t restarts) const;
+  void update_averages (Kind, uint32_t glue);
   bool restarting () const;
+  int reuse_level () const;
   void restart ();
 
   // model.cpp

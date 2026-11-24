@@ -51,6 +51,13 @@ int main () {
   CHECK_EQ (o.gcfrac, 20);
   CHECK_EQ (o.tier1glue, 2);
   CHECK_EQ (o.depreset, 20);
+  CHECK_EQ (o.restartmode, 0);
+  CHECK_EQ (o.restartint, 2);
+  CHECK_EQ (o.restartmargin, 10);
+  CHECK_EQ (o.emagluefast, 33);
+  CHECK_EQ (o.emaglueslow, 100000);
+  CHECK_EQ (o.depresetint, 5000);
+  CHECK_EQ (o.reusetrail, 1);
   CHECK_EQ (o.reduceint, 300);
   CHECK_EQ (o.seed, 0);
 

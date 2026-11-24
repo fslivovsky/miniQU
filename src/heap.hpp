@@ -127,6 +127,33 @@ public:
     }
   }
 
+  // The variable of highest score for which 'skip' is false, or 'no_var'.
+  // Entries that are skipped (assigned variables the heap still holds)
+  // are looked through without removing them, so the heap does not
+  // change.  A subtree is cut once its root cannot beat the best so far,
+  // which relies on the heap order.
+  template <class Skip> Var best_unskipped (Skip skip) const {
+    Var best = no_var;
+    std::vector<uint32_t> open;
+    if (!empty ())
+      open.push_back (0);
+    while (!open.empty ()) {
+      const uint32_t i = open.back ();
+      open.pop_back ();
+      const Var v = heap[i];
+      if (best != no_var && !before (v, best))
+        continue;
+      if (!skip (v)) {
+        best = v;
+        continue;
+      }
+      for (uint32_t child : {2 * i + 1, 2 * i + 2})
+        if (child < heap.size ())
+          open.push_back (child);
+    }
+    return best;
+  }
+
   // Restores the order after the score of the contained 'v' increased: it
   // only moves up (MiniSat's 'decrease', which bumping calls).
   void update (Var v) {
