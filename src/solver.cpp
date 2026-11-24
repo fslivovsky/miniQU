@@ -8,8 +8,8 @@
 // 'Impl' owns the 'Proof' and through it the tracers.  The internal
 // 'Checker' is connected with the first original constraint, when the
 // prefix is complete: always with '--check', and by default in builds with
-// assertions when no tracer was connected by the caller (ARCHITECTURE 8.1;
-// in M1 also only without minimisation).  Long-distance steps (mode 2) are
+// assertions when no tracer was connected by the caller (ARCHITECTURE
+// 8.1).  Long-distance steps (mode 2) are
 // not expressible in any tracer's format, so no tracer may be connected
 // there.
 
@@ -71,7 +71,7 @@ struct Solver::Impl {
       REQUIRE (!proof, "no tracer can follow mode 2");
       return;
     }
-    if (opts.check || (assertions_enabled && !proof && !opts.ccminmode))
+    if (opts.check || (assertions_enabled && !proof))
       connect (std::make_unique<Checker> (internal));
   }
 };

@@ -23,6 +23,7 @@ namespace miniqu {
   KIND_COUNTER (learned) \
   KIND_COUNTER (learnedlits) \
   COUNTER (minimized) \
+  COUNTER (minimizedchain) \
   COUNTER (dependencies) \
   COUNTER (depresets) \
   COUNTER (reductions) \

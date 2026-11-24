@@ -23,25 +23,72 @@
 //              the asserting level is never removed, and the recursion is
 //              cut at depth 1000 (as the old code).
 //
+// In mode 1 the asserting literal may be secondary; the analysis then
+// leaves a primary literal right of it, and the reduction keeps it only as
+// long as one stays.  If the mode would remove all of them, the
+// constraint is not minimised at all (M2-T5: the old code kept the literal
+// unreduced, the M1 port lost it in the reduction and failed).  This is
+// decided before and independently of the proof.
+//
 // Soundness: the minimised constraint is C resolved with reasons of its
-// own kind, then reduced; every resolution is on a primary pivot and every
-// literal it brings in is vanished, so no complementary pair arises.  It
-// is one QLRUP step from C's antecedents plus those reasons, but the chain
-// of the analysis does not list them, so in M1 minimisation is off while a
-// tracer is connected ('Internal::minimizing'; M2.3 extends the chain).
-// The old code never minimised long-distance resolvents; neither does this.
+// own kind, then reduced; every literal such a reason brings in is
+// vanished, so no complementary pair arises.  The old code never
+// minimised long-distance resolvents; neither does this.
+//
+// Proof (M2.3): minimisation runs alike with and without a proof, and the
+// step of the learnt constraint justifies it.  Once the literals to remove
+// are known, 'extend_chain' appends to the chain of the analysis the
+// reasons of every variable the minimisation resolves away, in reverse
+// trail order: the removed literals (ccminmode 3: only the primary ones;
+// a removed secondary literal is right of every primary literal kept and
+// falls to the final reduction) and, transitively, every literal of their
+// reasons that is neither in C nor, in ccminmode 3, secondary.  A root
+// literal whose reason is a unit of kind K is one of them; its unit id is
+// appended like any reason.  The set is found by a pass from the removed
+// literals after the decision, never from the marks of the search alone:
+// a literal that was explored but stays, or whose exploration failed, is
+// still in the resolvent, and resolving with its reason would remove a
+// literal of C.  Why this is one valid QLRUP step:
+//
+// - Every literal of the resolvent R of the analysis and of these reasons
+//   is assigned and vanished, except each reason's propagated literal (and,
+//   after a kind switch in 'analyze_qu', the literal the round started
+//   from, which is the asserting literal, never removed, and later on the
+//   trail than every literal minimisation meets).  So each appended reason
+//   clashes with R on its propagated literal and nowhere else.
+// - Reverse trail order: a reason contains only literals assigned before
+//   its own, so the literals it brings in are resolved later, and a
+//   variable once resolved is never brought back.  The final R is thus the
+//   kept literals plus, in ccminmode 3, introduced secondary literals,
+//   which are right of every primary literal kept ('bound'), so the
+//   reduction at the end of the step removes them.
+// - Mode 1 and '--legacyanalyze', where the analysis part may need the
+//   variant of the format that reduces after every step: there R after the
+//   analysis part is exactly the resolvent 'analyze_qu' kept.  Reduction
+//   removes only secondary literals and kept literals are never pivots, so
+//   every primary literal kept stays in R; a secondary pivot of mode 1
+//   that an intermediate reduction removed only makes its reason clash
+//   nowhere (R stays), and the literals only that reason would bring in
+//   are never introduced.  The final literal set is again a subset of the
+//   kept literals and of introduced secondary literals right of every
+//   kept primary one, so the step holds in whichever variant the analysis
+//   part holds in.  A literal the analysis reduced along the way that a
+//   minimisation reason brings back is either resolved away (modes 1, 2)
+//   or secondary and right of every kept primary literal (mode 3).
 //
 // 'seen' is all zero on entry (the analyses clear it before 'learn') and
 // is cleared again on return.  'stats.minimized' counts the literals that
 // minimisation removes beyond those the reduction after it removes anyway
 // (the resolvents of 'analyze_q' still hold such literals; the old solver
 // reduced them in the analysis, so its 'conflict literals ... deleted'
-// counts the same literals).
+// counts the same literals); 'stats.minimizedchain' counts the reason ids
+// appended to chains.
 
 #include "internal.hpp"
 
 #include <algorithm>
 #include <cassert>
+#include <span>
 
 namespace miniqu {
 
@@ -53,6 +100,7 @@ enum : uint8_t {
   removable = 2, // ccminmode 2: shown redundant
   failed = 4,    // ccminmode 2: shown not redundant
   cached = 8,    // ccminmode 3: 'Minimizer::bound' is valid
+  chained = 16,  // its reason extends the chain
 };
 
 constexpr int max_depth = 1000;
@@ -72,9 +120,25 @@ public:
     s.seen[v] |= flag;
   }
 
+  // Each returns the number of literals kept, which it moves to the
+  // front in their order; the removed ones follow.
   size_t basic (std::vector<Lit> &lits);
   size_t deep (std::vector<Lit> &lits);
   size_t bounded (std::vector<Lit> &lits);
+
+  void extend_chain (std::span<const Lit> removed);
+
+  // Whether the first 'kept' literals leave a primary one right of the
+  // asserting literal, if that is secondary.
+  bool keeps_asserting (const std::vector<Lit> &lits, size_t kept) const {
+    const Var asserting = var (lits[0]);
+    return s.prefix.is_primary (kind, asserting) ||
+           std::any_of (lits.begin () + 1, lits.begin () + (long) kept,
+                        [&] (Lit l) {
+                          return var (l) > asserting &&
+                                 s.prefix.is_primary (kind, var (l));
+                        });
+  }
 
   // The number of literals of 'lits' that reduction keeps.
   size_t reduced_size (const std::vector<Lit> &lits) const {
@@ -108,6 +172,22 @@ private:
   bool locally_redundant (Var v) const;
   bool redundant (Lit p);
   Var bound (Lit, int asserting_level, int depth);
+
+  bool resolved_away (Var removed) const {
+    return s.opts.ccminmode != 3 || s.prefix.is_primary (kind, removed);
+  }
+  // Whether the decision of the mode allows to resolve away 'v', a literal
+  // of a reason that is not in C (for assertions).
+  bool shown_removable (Var v) const {
+    switch (s.opts.ccminmode) {
+    case 1:
+      return free_root (v);
+    case 2:
+      return (s.seen[v] & removable) || free_root (v);
+    default:
+      return (s.seen[v] & cached) && m.bound[v];
+    }
+  }
 };
 
 bool Minimize::locally_redundant (Var v) const {
@@ -126,7 +206,7 @@ size_t Minimize::basic (std::vector<Lit> &lits) {
   size_t j = 1;
   for (size_t i = 1; i < lits.size (); i++)
     if (!locally_redundant (var (lits[i])))
-      lits[j++] = lits[i];
+      std::swap (lits[j++], lits[i]);
   return j;
 }
 
@@ -176,7 +256,7 @@ size_t Minimize::deep (std::vector<Lit> &lits) {
   size_t j = 1;
   for (size_t i = 1; i < lits.size (); i++)
     if (!same_kind_reason (var (lits[i])) || !redundant (lits[i]))
-      lits[j++] = lits[i];
+      std::swap (lits[j++], lits[i]);
   return j;
 }
 
@@ -215,15 +295,47 @@ size_t Minimize::bounded (std::vector<Lit> &lits) {
       [] (const auto &a, const auto &b) { return a.first < b.first; });
   // The asserting literal may be secondary in mode 1.
   Var rightmost = var (lits[0]);
-  size_t j = 1;
-  for (const auto &[limit, l] : m.keys) {
-    if (limit > rightmost)
-      break;
-    lits[j++] = l;
-    if (s.prefix.is_primary (kind, var (l)))
-      rightmost = std::max (rightmost, var (l));
+  size_t kept = 0;
+  while (kept < m.keys.size () && m.keys[kept].first <= rightmost) {
+    const Var v = var (m.keys[kept++].second);
+    if (s.prefix.is_primary (kind, v))
+      rightmost = std::max (rightmost, v);
   }
-  return j;
+  for (size_t i = 0; i < m.keys.size (); i++)
+    lits[i + 1] = m.keys[i].second;
+  return kept + 1;
+}
+
+// The marking pass of the header comment, then the reason ids in reverse
+// trail order.  'Minimizer::resolved' doubles as the work list.
+void Minimize::extend_chain (std::span<const Lit> removed) {
+  std::vector<Var> &resolved = m.resolved;
+  assert (resolved.empty ());
+  for (Lit l : removed)
+    if (resolved_away (var (l))) {
+      mark (var (l), chained);
+      resolved.push_back (var (l));
+    }
+  for (size_t next = 0; next < resolved.size (); next++) {
+    const Constraint *c = same_kind_reason (resolved[next]);
+    assert (c);
+    for (uint32_t i = 1; i < c->size (); i++) {
+      const Var u = var ((*c)[i]);
+      if ((s.seen[u] & (in_learnt | chained)) ||
+          (s.opts.ccminmode == 3 && !s.prefix.is_primary (kind, u)))
+        continue;
+      assert (shown_removable (u));
+      mark (u, chained);
+      resolved.push_back (u);
+    }
+  }
+  std::sort (resolved.begin (), resolved.end (), [this] (Var a, Var b) {
+    return s.vtab[a].trail > s.vtab[b].trail;
+  });
+  for (Var v : resolved)
+    s.chain.push_back (same_kind_reason (v)->id ());
+  s.stats.minimizedchain += (int64_t) resolved.size ();
+  resolved.clear ();
 }
 
 } // namespace
@@ -247,8 +359,12 @@ void Internal::minimize (std::vector<Lit> &lits, Kind kind) {
     kept = pass.bounded (lits);
     break;
   }
+  if (!pass.keeps_asserting (lits, kept))
+    kept = lits.size ();
   LOG ("minimisation removed %zu of %zu literals", lits.size () - kept,
        lits.size ());
+  if (proof)
+    pass.extend_chain (std::span (lits).subspan (kept));
   lits.resize (kept);
   stats.minimized += (int64_t) (before - pass.reduced_size (lits));
   for (Var v : minimizer.touched)

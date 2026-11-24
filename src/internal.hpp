@@ -97,12 +97,14 @@ struct LongDistanceAnalysis {
 // Scratch state of 'minimize.cpp'.  'touched' lists the variables whose
 // 'seen' flags minimisation set; 'bound' is valid for variables flagged as
 // cached (ccminmode 3); 'stack' is the explicit recursion of ccminmode 2;
-// 'keys' pairs each literal with its bound.
+// 'keys' pairs each literal with its bound; 'resolved' collects, with a
+// proof, the variables whose reasons justify the removal in the chain.
 struct Minimizer {
   std::vector<Var> touched;
   std::vector<Var> bound;
   std::vector<std::pair<uint32_t, Lit>> stack;
   std::vector<std::pair<Var, Lit>> keys;
+  std::vector<Var> resolved;
 };
 
 // The list in which a constraint of that kind watching 'l' is found: the

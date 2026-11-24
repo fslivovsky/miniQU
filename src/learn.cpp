@@ -17,9 +17,9 @@
 //
 // Minimisation ('minimize.cpp', '--ccminmode') runs where the old
 // 'finishLearnt' ran it, for the resolvents of 'analyze_q' and
-// 'analyze_qu', with the asserting literal at position 0.  In M1 it is off
-// while a tracer is connected (ARCHITECTURE 7.5, 8.1): the chain of the
-// analysis does not cover the reasons it resolves with.
+// 'analyze_qu', with the asserting literal at position 0, alike with and
+// without a proof: with one, it appends the reasons it resolves with to
+// the chain of the analysis.
 //
 // Glue is the number of distinct decision levels of the assigned literals,
 // computed before the backjump unassigns them (porting note 8).  Learnt
@@ -39,8 +39,9 @@
 //
 // Proof: the learnt constraint, or the empty one, is a derived step with
 // the chain collected by the analysis (conflict id, then the reason ids in
-// resolution order).  Reduction is part of the step, so INV-DERIVED holds.
-// A dependency derives nothing.  Mode 2 has no tracer.
+// resolution order), followed by the reasons of minimisation.  Reduction
+// is part of the step, so INV-DERIVED holds.  A dependency derives
+// nothing.  Mode 2 has no tracer.
 
 #include "internal.hpp"
 #include "proof.hpp"
@@ -73,7 +74,7 @@ uint32_t Internal::compute_glue (std::span<const Lit> lits,
   return glue;
 }
 
-bool Internal::minimizing () const { return opts.ccminmode && !proof; }
+bool Internal::minimizing () const { return opts.ccminmode != 0; }
 
 // 'derived' holds the resolvent; 'asserting' is its asserting variable, or
 // 'no_var' if every primary literal was resolved away.

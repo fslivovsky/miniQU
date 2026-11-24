@@ -15,3 +15,4 @@ below why it exists.
 | `output-negated-input.unsat.qcir` | the output is the negation of a universal input, so no gate exists |
 | `rightmost-dependency.sat.qcir` | alternating blocks where each existential must follow its universal; the right-to-left order matters for elimination |
 | `prenex-pair.sat.qdimacs`, `prenex-pair.sat.qcir` | the same formula in both input formats; verdicts must agree |
+| `mode1-minimize-asserting.sat.qcir` | run with `-mode=1 -ccminmode=2` (or 3): minimisation removed every primary literal right of a secondary asserting literal, which the reduction then dropped (failed assertion in `learn`, hang in the M1 binary); tiny corpus seed 16 (M2-T5) |
