@@ -58,6 +58,7 @@ void Internal::search () {
   lim.restart = restart_interval (0);
   size_watches ();
   init_reduce ();
+  init_tiers ();
   init_model_cube ();
   while (status == Status::Unknown) {
     if (const Ref conflict = propagate (); conflict != Ref::none)
@@ -71,6 +72,8 @@ void Internal::search () {
     } else {
       // The size trigger of 'reduce' may stay true, so the loop goes on
       // to decide: see reduce.cpp.
+      if (retiering ())
+        retier ();
       if (reducing ())
         reduce ();
       if (!decide ())

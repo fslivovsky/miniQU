@@ -13,6 +13,7 @@
 #include "profile.hpp"
 #include "random.hpp"
 #include "stats.hpp"
+#include "tier.hpp"
 #include "watch.hpp"
 
 #include <array>
@@ -106,6 +107,7 @@ struct Internal {
   Profiles profiles{0};
   Limit lim;
   Inc inc;
+  Tiers tiers;
 
   Prefix prefix;
 
@@ -251,8 +253,12 @@ struct Internal {
   void reduce ();
 
   // tier.cpp
+  void init_tiers ();
   void mark_used (Constraint &);
   void bump_constraint (Constraint &);
+  bool retiering () const;
+  void retier ();
+  void print_tier_limits () const;
 
   // collect.cpp
   bool collecting () const;

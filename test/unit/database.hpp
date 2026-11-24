@@ -70,6 +70,7 @@ struct Database {
     U5 = learn (Kind::Cube, {-1, -2, -3, 4}, 4);
     Q = learn (Kind::Cube, {3, 4}, 6);
     internal.init_model_cube ();
+    internal.init_tiers ();
   }
 
   // Assigns 5 with reason R and -4 with reason Q.

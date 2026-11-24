@@ -695,7 +695,8 @@ MiniSat's `simpDB_props`) is an option whose range includes "none", for the
   of the remaining candidates delete the `reducetarget`% (default 75) worst
   by (glue, size). Deletions go through `mark_garbage` (proof `d`); then
   garbage collection if due.
-- Second step, separate ablation: dynamic tier limits from the usage
+- Second step, separate ablation (built in M2-T3, `--recomputetier`, off by
+  default; the decision is M2-T7's): dynamic tier limits from the usage
   histogram per kind (CaDiCaL `recompute_tier`).
 - QBF notes: a constraint is redundant-and-deletable regardless of kind;
   deleting learnt constraints never affects soundness or INV-COMPLETE.

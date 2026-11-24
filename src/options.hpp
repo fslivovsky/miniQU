@@ -57,6 +57,16 @@ namespace miniqu {
   OPTION ( \
       tier2glue, 6, 0, 1000000000, \
       "learnt constraints up to this glue are used for two reductions") \
+  OPTION (recomputetier, 0, 0, 1, \
+          "tier limits per kind from the usage of learnt constraints") \
+  OPTION (tier1limit, 50, 0, 100, \
+          "percent of the uses that tier 1 covers, with recomputetier") \
+  OPTION (tier2limit, 90, 0, 100, \
+          "percent of the uses that tier 2 covers, with recomputetier") \
+  OPTION (tier1minglue, 0, 0, 100, \
+          "lowest tier 1 limit, with recomputetier") \
+  OPTION (tier2minglue, 0, 0, 100, \
+          "lowest tier 2 limit, with recomputetier") \
   OPTION (depreset, 20, 1, 1000000000, \
           "reset dependencies every n restarts") \
   OPTION (profile, 0, 0, 3, "profiling level")

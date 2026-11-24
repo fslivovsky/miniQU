@@ -90,6 +90,7 @@ static void test_reduce (bool traced, int tier1glue,
   Database db (traced);
   Internal &internal = db.internal;
   internal.opts.tier1glue = tier1glue;
+  internal.init_tiers ();
   // The M1 policy, with marks that would protect the constraints if
   // '--tiers' were on.
   internal.opts.tiers = 0;
@@ -140,6 +141,7 @@ static void test_everything_protected () {
   Database db;
   Internal &internal = db.internal;
   internal.opts.tier1glue = 1000;
+  internal.init_tiers ();
   db.propagate_reasons ();
   internal.reduce ();
   CHECK_EQ (internal.stats.reduced[0] + internal.stats.reduced[1], 0);
@@ -238,6 +240,24 @@ static void test_target () {
   }
 }
 
+// Tier 1 is a limit per kind: reduce keeps what is within the limit of its
+// own kind.
+static void test_tier1_per_kind () {
+  Database db;
+  Internal &internal = db.internal;
+  internal.opts.gcfrac = 100;
+  internal.opts.tiers = 0;
+  internal.opts.reducetarget = 100;
+  internal.tiers.tier1[0] = 5; // every clause glue
+  internal.tiers.tier1[1] = 2;
+  db.propagate_reasons ();
+  internal.reduce ();
+  CHECK_EQ (internal.stats.reduced[0], 0);
+  // U2 U3 U4 U5 are above 2; U1 is not and Q is a reason.
+  CHECK_EQ (internal.stats.reduced[1], 4);
+  CHECK (!db.garbage (db.U1) && !db.garbage (db.Q));
+}
+
 // The collection after a reduction is due by 'gcfrac'.
 static void test_collection_after_reduce (bool traced) {
   Database db (traced);
@@ -270,6 +290,7 @@ int main () {
     test_tiers (traced);
   }
   test_no_tiers_ignores_marks ();
+  test_tier1_per_kind ();
   test_target ();
   test_everything_protected ();
   return test_result ();

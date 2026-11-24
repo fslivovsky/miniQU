@@ -17,6 +17,7 @@ static uint32_t glue (const Internal &internal, Ref ref) {
 
 // Learns (-2 1) with glue 2 (see test/unit/search.cpp) and returns it.
 static Ref learn_clause (Internal &internal) {
+  internal.init_tiers ();
   declare (internal, "aee");
   add (internal, Clause, {1, -2, 3});
   add (internal, Clause, {1, -2, -3});
@@ -40,6 +41,7 @@ static void test_marked_on_learning () {
   {
     Internal internal;
     internal.opts.tier2glue = 1;
+    internal.init_tiers ();
     CHECK_EQ (used (internal, learn_clause (internal)), 1u);
   }
   {
@@ -57,6 +59,7 @@ static void test_marked_on_learning () {
 static void test_bump_lowers_glue () {
   Database db;
   Internal &internal = db.internal;
+  internal.init_tiers ();
   db.propagate_reasons ();
 
   // Glue 4 to 2 enters tier 1 (2 <= tier1glue).
@@ -74,14 +77,17 @@ static void test_bump_lowers_glue () {
 
   // Tier 1 is not recomputed.
   internal.opts.tier1glue = 5;
+  internal.init_tiers ();
   internal.bump_constraint (deref (internal.arena, db.G)); // really 1
   CHECK_EQ (glue (internal, db.G), 5u);
   CHECK_EQ (internal.stats.glueupdates[0], 1);
   internal.opts.tier1glue = 0;
+  internal.init_tiers ();
 
   // From tier 3 into tier 2 only: counted as promotion once, and a drop
   // within tier 2 is a glue update without promotion.
   internal.opts.tier2glue = 3;
+  internal.init_tiers ();
   internal.bump_constraint (deref (internal.arena, db.I)); // 4 -> 1
   CHECK_EQ (glue (internal, db.I), 1u);
   CHECK_EQ (internal.stats.promoted[0], 2);
@@ -106,6 +112,7 @@ static void test_bump_never_raises () {
   Database db;
   Internal &internal = db.internal;
   internal.opts.tier1glue = 0;
+  internal.init_tiers ();
   db.propagate_reasons ();
   deref (internal.arena, db.U4).set_glue (1); // really 2
   internal.bump_constraint (deref (internal.arena, db.U4));
@@ -119,6 +126,7 @@ static void test_bump_never_raises () {
 static void test_switches () {
   Database db;
   Internal &internal = db.internal;
+  internal.init_tiers ();
   db.propagate_reasons ();
   internal.opts.glueupdate = 0;
   internal.bump_constraint (deref (internal.arena, db.E));
@@ -145,7 +153,9 @@ static void test_switches () {
 static void test_bump_in_analysis (int mode) {
   Internal internal;
   internal.opts.mode = mode;
+  internal.init_tiers ();
   internal.opts.tier1glue = 0;
+  internal.init_tiers ();
   declare (internal, "eeee");
   internal.size_watches ();
   const Ref reason2 = internal.new_constraint (internal.next_id++, Clause,
@@ -166,7 +176,177 @@ static void test_bump_in_analysis (int mode) {
   }
 }
 
+// Fills the histogram of a kind: 'uses[g]' uses of glue g.
+static void fill (Internal &internal, Kind kind,
+                  std::initializer_list<int64_t> uses) {
+  auto &histogram = internal.tiers.usage[index (kind)];
+  histogram.fill (0);
+  size_t glue = 0;
+  for (int64_t n : uses)
+    histogram[glue++] = n;
+}
+
+static std::array<int, 2> limits (const Internal &internal, Kind kind) {
+  return {internal.tiers.tier1[index (kind)],
+          internal.tiers.tier2[index (kind)]};
+}
+
+// The limits are the smallest glues that cover 'tier1limit' and
+// 'tier2limit' percent of the uses, per kind.
+static void test_retier_from_histogram () {
+  Internal internal;
+  internal.opts.recomputetier = 1;
+  internal.init_tiers ();
+  CHECK ((limits (internal, Kind::Clause) == std::array<int, 2>{2, 6}));
+
+  // All clause uses at glue 1; cube uses spread over glue 1..10.
+  fill (internal, Kind::Clause, {0, 100});
+  fill (internal, Kind::Cube, {0, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10});
+  internal.retier ();
+  CHECK_EQ (internal.stats.retiered, 1);
+  // Clause tier 2 is raised above tier 1.
+  CHECK ((limits (internal, Kind::Clause) == std::array<int, 2>{1, 2}));
+  // 50% of 100 uses is reached at glue 5, 90% at glue 9.
+  CHECK ((limits (internal, Kind::Cube) == std::array<int, 2>{5, 9}));
+
+  // The kinds move independently: more clause uses at glue 3 leave the
+  // cube limits where they are.
+  fill (internal, Kind::Clause, {0, 50, 0, 50});
+  internal.retier ();
+  CHECK ((limits (internal, Kind::Clause) == std::array<int, 2>{1, 3}));
+  CHECK ((limits (internal, Kind::Cube) == std::array<int, 2>{5, 9}));
+  CHECK_EQ (internal.stats.retiered, 2);
+}
+
+// A kind without uses keeps its limits; uses of glue 0 count for every
+// limit; the last bucket stands for every glue above.
+static void test_retier_edges () {
+  Internal internal;
+  internal.opts.recomputetier = 1;
+  internal.opts.tier1glue = 3;
+  internal.opts.tier2glue = 8;
+  internal.init_tiers ();
+  fill (internal, Kind::Cube, {0, 0, 0, 0, 0, 7});
+  internal.retier ();
+  CHECK ((limits (internal, Kind::Clause) == std::array<int, 2>{3, 8}));
+  CHECK ((limits (internal, Kind::Cube) == std::array<int, 2>{5, 6}));
+
+  fill (internal, Kind::Cube, {100, 1});
+  internal.retier ();
+  CHECK ((limits (internal, Kind::Cube) == std::array<int, 2>{1, 2}));
+
+  internal.tiers.usage[1].fill (0);
+  internal.tiers.usage[1][Tiers::buckets - 1] = 5;
+  internal.retier ();
+  CHECK_EQ (internal.tiers.tier1[1], Tiers::buckets - 1);
+  CHECK_EQ (internal.tiers.tier2[1], Tiers::buckets);
+}
+
+// The minimum glues are applied before tier 2 is forced above tier 1, and
+// the percentages are the options.
+static void test_retier_options () {
+  Internal internal;
+  internal.opts.recomputetier = 1;
+  internal.opts.tier1minglue = 4;
+  internal.opts.tier2minglue = 3;
+  internal.init_tiers ();
+  fill (internal, Kind::Clause, {0, 100});
+  internal.retier ();
+  CHECK ((limits (internal, Kind::Clause) == std::array<int, 2>{4, 5}));
+
+  internal.opts.tier1minglue = 0;
+  internal.opts.tier2minglue = 0;
+  internal.opts.tier1limit = 10;
+  internal.opts.tier2limit = 100;
+  fill (internal, Kind::Clause,
+        {0, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10});
+  internal.retier ();
+  CHECK ((limits (internal, Kind::Clause) == std::array<int, 2>{1, 10}));
+}
+
+// The schedule: first after 2 conflicts, then 2^count conflicts later up
+// to 2^16, only with the option.
+static void test_retier_schedule () {
+  Internal internal;
+  internal.init_tiers ();
+  internal.stats.conflicts = 1000;
+  CHECK (!internal.retiering ());
+  internal.opts.recomputetier = 1;
+  internal.init_tiers ();
+  internal.stats.conflicts = 1;
+  CHECK (!internal.retiering ());
+  internal.stats.conflicts = 2;
+  CHECK (internal.retiering ());
+  internal.retier ();
+  CHECK_EQ (internal.lim.retier, 4);
+  internal.stats.conflicts = 4;
+  internal.retier ();
+  CHECK_EQ (internal.lim.retier, 4 + 4);
+  internal.stats.retiered = 20;
+  internal.stats.conflicts = 100;
+  internal.retier ();
+  CHECK_EQ (internal.lim.retier, 100 + 65536);
+}
+
+// Bumping records the updated glue in the histogram of its kind, only
+// with the option, and the glue recomputed above the cutoff
+// (tier1 + 1) / 2 instead of above tier 1.
+static void test_bump_histogram () {
+  Database db;
+  Internal &internal = db.internal;
+  db.propagate_reasons ();
+  internal.bump_constraint (deref (internal.arena, db.E)); // 4 -> 2
+  for (const auto &histogram : internal.tiers.usage)
+    for (int64_t uses : histogram)
+      CHECK_EQ (uses, 0);
+
+  // Glue 2 is not above tier 1 (limit 2), so it stays...
+  Constraint &b = deref (internal.arena, db.B);
+  CHECK_EQ (b.glue (), 2u);
+  internal.bump_constraint (b);
+  CHECK_EQ (b.glue (), 2u);
+
+  // ... but it is above the cutoff 1 with the option, and drops to 1.
+  internal.opts.recomputetier = 1;
+  internal.bump_constraint (b);
+  CHECK_EQ (b.glue (), 1u);
+  internal.bump_constraint (deref (internal.arena, db.U4)); // 4 -> 2
+  CHECK_EQ (internal.tiers.usage[0][1], 1);
+  CHECK_EQ (internal.tiers.usage[1][2], 1);
+
+  // The cutoff is that of the kind of the constraint.
+  internal.tiers.tier1[1] = 3; // cutoff 2: glue 4 is above
+  Constraint &u = deref (internal.arena, db.U5);
+  u.set_glue (4);
+  internal.bump_constraint (u);
+  CHECK_EQ (u.glue (), 2u);
+  internal.tiers.tier1[1] = 5; // cutoff 3: not above
+  u.set_glue (3);
+  internal.bump_constraint (u);
+  CHECK_EQ (u.glue (), 3u);
+  CHECK_EQ (internal.tiers.usage[1][3], 1);
+}
+
+// Marks use the limit of the kind of the constraint.
+static void test_marks_per_kind () {
+  Database db;
+  Internal &internal = db.internal;
+  internal.tiers.tier2[0] = 1;
+  internal.tiers.tier2[1] = 5;
+  db.propagate_reasons ();
+  internal.bump_constraint (deref (internal.arena, db.E));  // glue 2
+  internal.bump_constraint (deref (internal.arena, db.U4)); // glue 2
+  CHECK_EQ (used (internal, db.E), 1u);
+  CHECK_EQ (used (internal, db.U4), 2u);
+}
+
 int main () {
+  test_retier_from_histogram ();
+  test_retier_edges ();
+  test_retier_options ();
+  test_retier_schedule ();
+  test_bump_histogram ();
+  test_marks_per_kind ();
   test_marked_on_learning ();
   test_bump_lowers_glue ();
   test_bump_never_raises ();

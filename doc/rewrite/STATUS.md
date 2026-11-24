@@ -2741,3 +2741,74 @@ with M1 the proof run is never attempted and the row passed by not solving the i
 search is produced by the M1-equivalent options, `tests/m1_equiv.sh`), but I did not change the row or the harness. Options
 for the coordinator: accept the instance as a known heavy-tailed gap of this row, drop `jctc9-pass` from the proof part for
 stress rows, or give that row a different `-ccminmode`.
+
+## M2-T3 (worker, 2026-11-24): tier limits per kind from the usage histogram (`--recomputetier`)
+
+**What was built.**
+- `src/tier.hpp`: `struct Tiers` (the ARCH rule of one struct member per technique: `Internal::tiers`): `tier1`, `tier2` per kind and the
+  usage histogram per kind (64 buckets, the last "that glue or more"). `init_tiers ()` (called in `search` next to
+  `init_reduce`, and by `Database` in the unit tests) sets the limits from `--tier1glue` / `--tier2glue`. **Every** reader of a
+  limit uses `tiers.tier1[index (kind)]` / `tiers.tier2[...]`: `bump_constraint`, `mark_used` (the `used` initialisation in
+  `learn_watched` goes through it) and `reduce`; nothing reads `opts.tier?glue` any more except `init_tiers`.
+- `bump_constraint`: with `--recomputetier` the updated glue is added to the histogram of the kind, and the glue is recomputed
+  when it is above `(tier1[kind] + 1) / 2` (CaDiCaL's cutoff); without the option the M2-T2 rule (above `tier1`) is unchanged.
+- `retiering ()` / `retier ()` in `tier.cpp`, `lim.retier` (ARCH 9.4): first at 2 conflicts, then `1 << min (retiered, 16)`
+  conflicts later. Called in the search loop right before `reducing ()` (so a reduction already uses the fresh limits; ARCH 7.1
+  pseudo-code updated). Per kind: no recorded use keeps the current limits; otherwise tier 1 / tier 2 are the smallest glues
+  (at least 1) whose cumulative uses, counted from bucket 0 as CaDiCaL does, reach `tier1limit` / `tier2limit` percent of the
+  total, raised to `tier1minglue` / `tier2minglue`, and tier 2 is forced above tier 1. **Deviation from CaDiCaL, deliberate:**
+  CaDiCaL continues the tier 2 accumulation from the bucket where tier 1 stopped, so it counts that bucket twice; here both
+  limits accumulate independently, which is what the option text says. A moved limit does not touch stored `used` marks.
+- Options `recomputetier` (0), `tier1limit` (50), `tier2limit` (90), `tier1minglue` (0), `tier2minglue` (0); stat `retiered`;
+  at verbosity >= 1 `c tier limits clause T1 T2` / `c tier limits cube T1 T2` before the statistics; `VERBOSE (2, ...)` at each
+  change. ARCH 9.1 table and 9.4, ROADMAP M2.2 ("second step built") updated. Header of `tier.cpp` states: heuristic only, no
+  QBF side condition, no proof step beyond the `d` of reduce.
+- `tests/m1_equiv.sh`: `--no-recomputetier` appended to `EQUIV`. `tests/matrix.txt`: stress rows `retier`, `retier-dl`
+  (counters as the gc rows plus `retiered used.clause used.cube`, limit 2%).
+- Unit tests (`test/unit/tier.cpp`, `reduce.cpp`): histogram to limits for both kinds independently (all uses at glue 1,
+  uniform, an empty kind keeps the options, glue 0 counts for every limit, last bucket, minglue before the tier 2 > tier 1
+  rule, percent options), the schedule, histogram recording only with the option and the glue cutoff, marks by the limit of the
+  kind, `reduce` with different tier 1 limits for clauses and cubes.
+
+**Gate results.**
+- Builds: release, debug, asan, release-clang without warnings; `ctest` release, debug and release-clang 41/41.
+- `tests/m1_equiv.sh build/release/miniQU`: **M1 EQUIVALENCE PASSED** (smoke 30-33 pairs per mode, generated 40 plain, 25-40
+  stressed per mode; 0 differences).
+- Default configuration against the pre-task binary (`/home/ec2-user/miniqu-work/m2-t3/miniQU.pre`), `c stat conflicts`,
+  `decisions`, `propagations` on all 33 instances of `bench/smoke.txt` (60 s, the new binary with `--no-recomputetier`, which
+  is the default anyway): 33/33 identical.
+- Lean (release, `--recomputetier`, `-proof-binary`, proofs deleted): `DW-unsat-09-22-1` (`--reduceint=50`, 6797 conflicts, 16
+  reductions, 12 retierings, 2608+77 deleted) `s VERIFIED FALSE`; `jctc8-pass` (default `reduceint`, 787 conflicts, 2
+  reductions, 4+17 deleted, 9 retierings) `s VERIFIED TRUE`. (`jctc8-pass` with `--reduceint=50` and `--recomputetier` is heavy
+  tailed: no result in 100 s, an instance property, not tried further.)
+- Matrix measurements (search seeds 151-300, release, proofs checked, 0 rejected): `retier`: `retiered` 99%, `reduced.clause`
+  92%, `reduced.cube` 90%, `used.clause` 99%, `used.cube` 85%; `retier-dl`: `retiered` 98%, `reduced.clause/cube` 81/82%,
+  `used.clause/cube` 91/87%; 0 of 150 search timeouts in both rows (limit 2%).
+- Fuzz gate (logs `/home/ec2-user/miniqu-work/m2-t3/gate.log`): `tests/regress.sh -j 16 -s 1:300 -M all build/release/miniQU`:
+  every row passes its counters, limits and proofs (0 wrong verdicts, 0 rejected proofs; checker timeouts only in the rows that
+  had them in M2-T2), **except the open problem 1 of M2-T2**: smoke of `gc-ccmin3`, `jctc9-pass.qcir`: `solve_timeout` of the
+  proof run, unchanged by this task (this task changes no option of that row; `--no-recomputetier` is the default).
+  `tests/regress.sh -S -j 16 -s 1:100 -t 240 -M all build/asan/miniQU`: REGRESSION TESTS PASSED (3 warnings, solver timeouts),
+  no sanitizer report. `tests/fuzz_qdimacs.sh release 1 300 OPT` for OPT in `''`, `-dl`, `-mode=1`, `-mode=2`, each also with
+  `--recomputetier --reduceint=2 --gcfrac=0`: 8 runs, 600 instances each, 0 failures; timeouts (only counted, 20 s) 0 except 5 in `-mode=2 --recomputetier ...`. `tests/run_regressions.sh`:
+  7 instances, 0 failures.
+
+**Evidence: do cube and clause limits differ?** Yes, strongly, and in both directions. Final limits (tier 1, tier 2) with
+`--recomputetier` and otherwise default options (release, `-verb=1`, one run, search is deterministic):
+
+| instance | result | conflicts | clause | cube | uses clause / cube |
+|---|---|---|---|---|---|
+| `9.3` | UNSAT | 802 | 5 11 | 4 9 | 813 / 512 |
+| `hadw6-7` | UNSAT | 817 | 2 6 | 8 15 | 21 / 1474 |
+| `DW-sat-08-22-1` | SAT | 1398 | 12 19 | 2 6 | 820 / 970 |
+| `test_5_5_tippy.pg-7` | SAT | 40991 | 4 11 | 12 14 | 322544 / 482 |
+| `jctc1-pass` | SAT | 623 | 7 14 | 3 12 | 36 / 1350 |
+| `chess_solving_mate_in_3_2010_UKR-CH_04` | SAT | 2876 | 1 5 | 2 4 | 18473 / 1445 |
+| `5-5-6-10-3-7-EdAd` | UNSAT | 369 | 3 19 | 7 17 | 25 / 429 |
+| `lift_gr1+2.tlsf` | SAT | 21389 | 4 6 | 1 11 | 19 / 325270 |
+
+The fixed limits 2 and 6 fit one kind at best: on `hadw6-7` and `test_5_5_tippy` cubes want a tier 1 of 8-12, on
+`DW-sat-08-22-1` clauses want 12. There is no rule "cubes are longer": which kind has the larger glue depends on the family
+(and on which kind is used a lot: on instances where one kind has under ~40 uses the limits of that kind are noise from a
+tiny sample, e.g. clauses of `hadw6-7`, `jctc1-pass`). Whether the dynamic limits help the search is not measured here (no
+benchmark claim); the option stays off, M2-T7 decides.

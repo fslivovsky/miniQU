@@ -30,6 +30,7 @@ namespace miniqu {
   KIND_COUNTER (used) \
   KIND_COUNTER (glueupdates) \
   KIND_COUNTER (promoted) \
+  COUNTER (retiered) \
   COUNTER (collections) \
   COUNTER (relocated) \
   COUNTER (modelcubes) \

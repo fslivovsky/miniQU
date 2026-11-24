@@ -168,6 +168,7 @@ void Solver::flush_proof () {
 }
 
 void Solver::statistics () const {
+  impl->internal.print_tier_limits ();
   impl->internal.stats.print (stdout, process_time ());
   if (impl->internal.opts.profile)
     impl->internal.profiles.print (stdout);

@@ -26,9 +26,9 @@
 // kept if
 //
 //  1. '--tiers' and its 'used' mark is nonzero (the mark is decremented,
-//  see
-//     'tier.cpp'), or
-//  2. its glue is at most '--tier1glue'.
+//     see 'tier.cpp'), or
+//  2. its glue is at most the tier 1 limit of its kind ('--tier1glue', or
+//     what '--recomputetier' made of it).
 //
 // Everything else is a candidate.  The candidates are sorted by glue, then
 // by size, both descending (the old tie-break by activity is replaced by
@@ -117,7 +117,7 @@ void Internal::reduce () {
         c.set_used (c.used () - 1);
         continue;
       }
-      if (c.glue () > (uint32_t) opts.tier1glue)
+      if (c.glue () > (uint32_t) tiers.tier1[index (kind)])
         candidates.push_back (ref);
     }
     std::stable_sort (candidates.begin (), candidates.end (),

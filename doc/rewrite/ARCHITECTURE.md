@@ -740,6 +740,7 @@ solve ():
     else if restarting ()                     restart ()
     else if (M2) rephasing () / switching ()  rephase () / switch_mode ()
     else
+        if retiering ()                       retier ()      // M2.2: tier limits per kind
         if reducing ()                        reduce ()      // then go on:
         if (M3) inprocessing ()               inprocess ()   // not an iteration
         if !decide ()                         // no eligible decision variable
@@ -1049,8 +1050,11 @@ added. From M1:
 | `reducetarget` | 50 (M1, implicit), 75 (M2) | 10..100 | 100 | percent of the reduction candidates deleted, worst glue and size first; `candidates * reducetarget / 100` in integers, so 50 is the old half |
 | `tiers` | 1 | 0..1 | 0 | learnt constraints carrying a nonzero `used` mark are not reduction candidates (5.2; `tier.cpp`) |
 | `glueupdate` | 1 | 0..1 | 0 | recompute the glue of a learnt constraint above tier 1 when an analysis uses it, keep it if lower |
-| `tier1glue` | 2 | 0..1e9 | 0 | tier 1: learnt constraints with glue up to this value are never reduced (the old hard-wired "glue > 2") |
-| `tier2glue` | 6 | 0..1e9 | 0 | tier 2: a learnt constraint with glue up to this value gets `used = 2` when learnt or used, the others `used = 1`, so it survives two reductions without use instead of one |
+| `tier1glue` | 2 | 0..1e9 | 0 | tier 1: learnt constraints with glue up to this value are never reduced (the old hard-wired "glue > 2"); with `--recomputetier` the start value of the per-kind limit |
+| `tier2glue` | 6 | 0..1e9 | 0 | tier 2: a learnt constraint with glue up to this value gets `used = 2` when learnt or used, the others `used = 1`, so it survives two reductions without use instead of one; with `--recomputetier` the start value of the per-kind limit |
+| `recomputetier` | 0 | 0..1 | 1 | M2-T3: recompute the tier limits of each kind from the histogram of glues of the analysis uses (`Tiers::usage`, 64 buckets, the last "that glue or more"), on the schedule `lim.retier` (9.4); readers use `tiers.tier1[kind]` / `tiers.tier2[kind]`, which equal `tier1glue` / `tier2glue` without the option. Glue recomputation in analysis then starts above `(tier1 + 1) / 2` (CaDiCaL) |
+| `tier1limit`, `tier2limit` | 50, 90 | 0..100 | - | percent of the uses that tier 1 and tier 2 cover: the limit is the smallest glue (at least 1) whose cumulative uses reach that share |
+| `tier1minglue`, `tier2minglue` | 0, 0 | 0..100 | - | lowest values of the recomputed limits (tier 2 is then forced above tier 1) |
 | `luby`, `rfirst`, `rinc` | 1, 100, 200 (%) | `rfirst` 1.., `rinc` 100.. | `--no-luby --rfirst=1 --rinc=100` | restart after every conflict |
 | `depreset` | 20 | 1..1e9 | 1 | reset dependencies every n-th restart |
 
@@ -1103,6 +1107,9 @@ alarm flag). `struct Inc` holds the growing intervals. `struct Last` records
 counters at the last run of each pass (to compute "effort since then"); it
 is added by the first package that reads it (not present in M1: review
 M1-r1).
+`lim.retier` (M2-T3, only with `--recomputetier`): the first recomputation of
+the tier limits after 2 conflicts, then `1 << min (retiered, 16)` conflicts
+after the previous one (CaDiCaL's schedule).
 Events are only ever triggered by comparing `stats` with `lim` in the loop of
 7.1; no technique schedules itself from inside another.
 

@@ -51,3 +51,8 @@ tier0        | --tier1glue=0 --tier2glue=0 --reduceint=2 --gcfrac=0 | yes | conf
 tier0-dl     | --tier1glue=0 --tier2glue=0 --reduceint=30 --gcfrac=0 -dl | yes | conflicts restarts learned.clause learned.cube dependencies reductions reduced.clause reduced.cube collections relocated used.clause used.cube glueupdates.clause | stress | 2
 tier2        | --tier1glue=1 --tier2glue=3 --reduceint=2 --gcfrac=0 | yes | conflicts restarts learned.clause learned.cube reductions reduced.clause reduced.cube collections relocated used.clause used.cube glueupdates.clause promoted.clause promoted.cube | stress | 2
 tier2-dl     | --tier1glue=1 --tier2glue=3 --reduceint=30 --gcfrac=0 -dl | yes | conflicts restarts learned.clause learned.cube dependencies reductions reduced.clause reduced.cube collections relocated used.clause used.cube glueupdates.clause promoted.clause promoted.cube | stress | 2
+# Tier limits from the usage histogram (M2-T3): the limits move on the
+# conflict schedule 2, 4, 8, ..., so the stress schedules of reduce see
+# several limit changes on small instances.
+retier       | --recomputetier --reduceint=2 --gcfrac=0 | yes | conflicts restarts learned.clause learned.cube reductions reduced.clause reduced.cube collections relocated retiered used.clause used.cube | stress | 2
+retier-dl    | --recomputetier --reduceint=30 --gcfrac=0 -dl | yes | conflicts restarts learned.clause learned.cube dependencies reductions reduced.clause reduced.cube collections relocated retiered used.clause used.cube | stress | 2
