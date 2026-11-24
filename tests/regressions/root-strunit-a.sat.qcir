@@ -1,0 +1,13 @@
+#QCIR-G14
+# corpus: tier=tiny seed=739 set=fuzz-cnf generator=qcir_fuzz.py 739 --vars 12 --gates 30 --blocks 6 --cnf
+# expected: SAT
+exists(v1, v2, v3)
+forall(v4)
+exists(v5)
+output(g11)
+g6 = or(v1)
+g7 = or(-v2, -v4)
+g8 = or(-v5, -v3, -v2, -v4, -v1)
+g9 = or(v1, -v3, v2, v4, -v5)
+g10 = or(v5, v2)
+g11 = and(g6, g7, g8, g9, g10)

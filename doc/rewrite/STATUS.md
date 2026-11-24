@@ -3435,3 +3435,69 @@ warnings, as before); asan `-s 1:60 -t 240 -M default,dl,mode1,root,root-gc,min-
 Open point: `jctc9-pass` times out on both binaries (known, see earlier entries; the baseline solves it in 1.2 s),
 so its counters at the kill depend on speed and were not comparable (new 714103 vs old 687199 conflicts at the same
 280 s, both `modelcubes 0`); `modelcubes` was 0 on every smoke row.
+
+## M2-T10 (worker, 2026-11-24): counters and Lean-checked instances for the step-2 unit and root-conflict paths (J7)
+
+Part A. New counters `rootstrunits` (step-2 results with exactly one literal, counted in `strengthen_root`) and
+`rootconflicts` (conflict outcome of `add_root_units`, the only place where `simplify_root` returns a root conflict
+besides the empty constraints, which `found_empty` handles). Both are in `stats.hpp`, the table (`strength. units`,
+`root conflicts`), the `c stat` lines and ARCHITECTURE 9.2. Search is unchanged: counters only. Unit tests: new
+`test_unit_becomes_reason` (unit replaces the reason of an assigned variable); `test_strengthen_unit` and
+`test_root_conflict` assert both counters. Not distinguished by counters: 'assigned' vs 'made reason' (both are
+`rootstrunits` > 0, `rootconflicts` = 0); the latter is covered by the unit test only.
+
+Part B. Release build, options `-verb=1 --rootsimpdelay=0` plus the configuration, 20 s per run (60 s for smoke), no early
+stop (all seeds, all configurations). c0 = '', c1 = `-dl`, c2 = `-mode=1`, c3 = `-mode=1 -dl`, c4 = `-no-earlytseitin`,
+c5 = `--reduceint=2 --tier1glue=0 --tier2glue=0 --gcfrac=0`. Instances with `rootconflicts` > 0 always have
+`rootstrunits` > 0. Runs without verdict are time-outs (c4 `search`: 332, the 20 s is too short without early Tseitin).
+
+| set | cfg | instances run | rootstrunits > 0 | rootconflicts > 0 | no verdict |
+|---|---|---|---|---|---|
+| tiny 1..3000 | c0 | 3000 | 31 | 14 | 0 |
+| tiny | c1 | 3000 | 27 | 13 | 0 |
+| tiny | c2 | 3000 | 35 | 14 | 0 |
+| tiny | c3 | 3000 | 35 | 13 | 0 |
+| tiny | c4 | 3000 | 24 | 8 | 0 |
+| tiny | c5 | 3000 | 31 | 14 | 0 |
+| search 1..1500 | c0 | 1500 | 0 | 0 | 0 |
+| search | c1 | 1500 | 0 | 0 | 0 |
+| search | c2 | 1500 | 4 | 0 | 0 |
+| search | c3 | 1500 | 30 | 0 | 13 |
+| search | c4 | 1500 | 0 | 0 | 332 |
+| search | c5 | 1500 | 0 | 0 | 0 |
+| smoke (33) | c0 | 33 | 0 | 0 | 1 |
+| smoke | c1 | 33 | 0 | 0 | 0 |
+| smoke | c2 | 33 | 0 | 0 | 1 |
+| smoke | c3 | 33 | 0 | 0 | 0 |
+| smoke | c4 | 33 | 0 | 0 | 3 |
+| smoke | c5 | 33 | 0 | 0 | 0 |
+
+Both paths are reached by the tiny corpus (no hand construction needed). The search tier reaches only the unit path, and
+only in mode 1 (search instances are large, the strengthened unit appears in the `-mode=1 -dl` runs); the smoke set
+reaches neither.
+
+Verification of every hit (216 instance/configuration pairs: 183 tiny, 33 search with a verdict): verdict equal to the
+frozen baseline (default options) in all, solved with `-proof=FILE -proof-binary` and the same options, Lean checker
+`qlrup-check`: all 183 tiny proofs accepted (`VERIFIED TRUE/FALSE` matching the verdict); search: 23 accepted in
+the first pass, 10 (`-mode=1 -dl`, proofs of about 570 MB) hit my 300 s checker limit with no result, and 3 of them
+(seeds 275, 444, 459) were re-checked with a 3400 s limit and accepted; seeds 55, 974, 985, 1069, 1129, 1234, 1349 stay
+unchecked (time only, not rejected). No wrong verdict, no rejected proof. Proof files deleted. Logs and scripts:
+/home/ec2-user/miniqu-work/m2-t10/ (`tiny.log`, `search.log`, `smoke.log`, `verify.log`, `one.sh`, `verify.sh`).
+
+Part C. Four instances (copies of tiny corpus seeds, not shrunk) in `tests/regressions/`, rows in its README:
+
+| file | seed | verdict | rootstrunits | rootconflicts |
+|---|---|---|---|---|
+| `root-strunit-a.sat.qcir` | tiny 739 | SAT | 1 | 0 |
+| `root-strunit-b.unsat.qcir` | tiny 2158 | UNSAT | 1 | 0 |
+| `root-conflict-clause.unsat.qcir` | tiny 2565 | UNSAT | 6 | 1 |
+| `root-conflict-cube.sat.qcir` | tiny 252 | SAT | 2 | 1 |
+
+They reach their path with default options (`rootsimps` 1) and in c0..c5. `tests/run_regressions.sh` with '', `--rootsimpdelay=0`,
+plus `-dl`, `-mode=1`, the c5 options, and `-mode=1 -dl`: 12 instances, 0 failures, proofs accepted by Lean, in release and asan.
+
+Acceptance: release, debug, asan, release-clang build without warnings; ctest release and debug 43/43; `tests/m1_equiv.sh`
+PASSED; smoke with '' and `-dl`: conflicts/decisions/propagations/ticks identical to bench-M2-r1 on all instances except
+`jctc9-pass.qcir` with '', which times out at 60 s in both (known, see M2-T4/T11; the comparison is time-bound there);
+`tests/regress.sh -S -j 16 -s 1:100 -M root,root-dl,root-mode1,root-gc,min-root-mode1`: PASSED (0 warnings).
+Open point: the 'made reason' outcome of `add_root_units` has no corpus counter and is covered by the unit test only.

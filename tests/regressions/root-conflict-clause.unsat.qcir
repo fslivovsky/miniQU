@@ -1,0 +1,18 @@
+#QCIR-G14
+# corpus: tier=tiny seed=2565 set=fuzz-cnf generator=qcir_fuzz.py 2565 --vars 12 --gates 30 --blocks 6 --cnf
+# expected: UNSAT
+exists(v1, v2)
+forall(v3)
+output(g15)
+g4 = or(-v2, -v1)
+g5 = or(-v3, v2, v1)
+g6 = or(v2, -v3)
+g7 = or(-v2, -v1)
+g8 = or(-v3, v2, v1)
+g9 = or(-v2, v1, v3)
+g10 = or(v1, v2, v3)
+g11 = or(-v1)
+g12 = or(-v1, -v3)
+g13 = or(v2, -v3, v1)
+g14 = or(v2, -v3, -v1)
+g15 = and(g4, g5, g6, g7, g8, g9, g10, g11, g12, g13, g14)
