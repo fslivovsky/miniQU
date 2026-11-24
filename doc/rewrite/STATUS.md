@@ -3504,7 +3504,7 @@ Open point: the 'made reason' outcome of `add_root_units` has no corpus counter 
 
 ## M2-T8 (worker, 2026-11-24): test tooling after the M2 triage, gate on the final binary, benchmark binary refreshed
 
-HEAD of the solver sources: `a8c45e7` (M2-T9/T10 included); this task changed only tests/, doc/rewrite/ and bench/results/M2-T8-gate/.
+Solver sources as of `cd90d80` (M2-T9/T10 included; the binaries were built at `a8c45e7`, which differs from it in tests/ and docs only); this task changed only tests/, doc/rewrite/ and bench/results/M2-T8-gate/.
 
 **Changes.**
 1. `tests/matrix.txt`: rows `tier2`, `tier2-dl` use `--tier1glue=2 --tier2glue=6` (J2; comment updated; everything else in the rows
