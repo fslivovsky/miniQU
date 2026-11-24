@@ -2812,3 +2812,157 @@ The fixed limits 2 and 6 fit one kind at best: on `hadw6-7` and `test_5_5_tippy`
 (and on which kind is used a lot: on instances where one kind has under ~40 uses the limits of that kind are noise from a
 tiny sample, e.g. clauses of `hadw6-7`, `jctc1-pass`). Whether the dynamic limits help the search is not measured here (no
 benchmark claim); the option stays off, M2-T7 decides.
+
+## M2-T4 (worker, 2026-11-24): root-level simplification (`--rootsimp`), modes 0 and 1
+
+**What was built.**
+- New `src/simplify.cpp` (ROADMAP M2.1; header comment: class per step, QBF side conditions, proof steps). `simplifying ()`:
+  `--rootsimp`, not mode 2, level 0, trail longer than at the last run (`Simplifier::trail`), and with `--rootsimpdelay`
+  (default 1) `propagations >= lim.simplify`, where each run sets `lim.simplify = propagations + literals of all stored
+  constraints`. Search loop: `else if (simplifying ())` is its own iteration after `restarting ()`; a root conflict it returns
+  goes to `analyze`. It cannot repeat without new root literals. ARCH 3.2, 5.3 (safe points), 7.1, 7.5, 8.2 (rows now name
+  `simplify.cpp`), 9.1, 9.2, 9.3, 9.4 and ROADMAP M2.1 updated.
+- Step 1 (units, D) over the new root literals in trail order, exactly as specified; the unit replaces the reason through the
+  new `Internal::replace_reason` (`assign.cpp`, see design changes). A secondary unit (mode 1) is logged as the empty
+  constraint. Step 2 (strengthening, D) and step 3 (deletion, R) are one pass over the four lists; the lists are compacted in
+  the same pass. Step 2 skips reasons (a non-materialised reason is disabled by its own propagated literal, which has no unit;
+  rewriting it would have to keep that literal at position 0 and, for a result of one literal, would delete a reason), so the
+  "reasons are never deleted" assertion of step 3 holds and step 2 never touches a reason either.
+- **The spec's claim that step 2 cannot produce a unit or a conflict after complete propagation is wrong for modes 0 and 1**,
+  so there is no such assertion: propagation in modes 0/1 ignores the prefix, but `qreduce` after the removal drops unassigned
+  secondary literals. `(e1 u2 e3)` under the unit `(-e3)` becomes the unit `(e1)`; `(u2 u4 e5)` becomes empty; with `x`
+  vanished without a unit, `(x e1 u3 e5)` becomes `(x e1)` (unit) and `(x u2 u4 e5)` becomes `(x)` (root conflict). All cases
+  are handled and unit-tested: empty = derived empty step + `found_empty`; one literal = one derived step under a fresh id,
+  then `mark_garbage` of the old constraint (exactly one `a` and one `d`, no `Proof` extension needed); the unit constraint is
+  stored and assigned only after the pass (`add_root_units`), so the assignment, and with it "has a unit", is constant while
+  the databases are walked; its literal is assigned (unassigned), made the reason if the variable has no unit yet (positive),
+  or returned as a root conflict (vanished); size >= 2 = `Proof::strengthen` (or `next_id++` without proof), strict detach,
+  rewrite, `shrink_constraint`, glue capped at the size, used kept, positions 0/1 chosen as disabling > unassigned > latest
+  vanished, attach; if the second watch is vanished and already propagated and the first does not disable the constraint, the
+  propagation head `propagated` goes back to that literal's trail position, so propagation finds the unit or conflict.
+  Detach/attach is done for every strengthened constraint, also when positions 0 and 1 survive: a blocker can be a removed
+  literal (MiniSat does not update the blocker of the kept watch), and `check_invariants` requires blockers to be literals of
+  the constraint.
+- Options `rootsimp` (1), `rootsimpdelay` (1; the `--help` text says "off in mode 2"); stats `rootsimps rootunits
+  rootstrengthened rootlits rootdeleted` (`rootunits` = units of step 1; `rootstrengthened` includes results of size 0 and 1;
+  `rootlits` counts literals removed including those of the reduction); profile `simplify` (level 2); `lim.simplify`.
+- `check.cpp`: `check_root_simplified ()` (after steps 2 and 3, before the step-2 units are stored: no constraint of size >= 2
+  disabled by a literal with a unit of either kind, none but a reason with a vanished literal with a same-kind unit), then
+  `check_invariants ()` (directly or through `garbage_collect`), both with assertions or `--check`. `check_invariants` now also
+  checks that units are irredundant and in no watch list.
+- `tests/m1_equiv.sh`: `--no-rootsimp` appended. `tests/matrix.txt`: normal `norootsimp`; stress `root`, `root-dl`,
+  `root-mode1`, `root-gc` (the options of the spec), required `rootunits rootstrengthened rootdeleted` plus the usual ones, limit
+  2%. Every root counter is nonzero on 100% of the search tier in every row (the QCIR output unit alone gives units and
+  deletions), so `tests/corpus.py` is unchanged.
+- Unit tests `test/unit/simplify.cpp` (internal Checker connected in every traced case, so every documented step is
+  replayed): step 1 for clauses (with and without proof: same ids) and cubes with their chains; no unit and no removal under a
+  unit of the other kind, deletion under it; mode 1 secondary unit -> empty clause; step 2 for clauses and cubes; strengthening
+  to a unit (stored after the pass, assigned) and to empty; the root conflict `(x)` analysed to the empty clause; the
+  unit-by-reduction case with the rewound propagation head; a removed blocker with propagation afterwards; redundant glue/used;
+  `--no-rootsimp`, mode 2 and the throttle.
+
+**Design changes (ARCH 3.6).** (1) `assign.cpp` gets `replace_reason (Var, Ref unit)`: step 1 and the step-2 units must make a
+unit the reason of an already assigned root variable, and `assign.cpp` owns the reasons. A unit has no other literal, so trail
+consistency is kept; the analyses and `minimize.cpp` (`free_root`) read it like any reason. (2) `simplify.cpp` lowers
+`propagated` (core state, no edit of `propagate*.cpp`) for the unit/conflict-by-reduction case; re-propagating root literals
+is ordinary watch propagation.
+
+**Dependency learning (`-dl`).** `depend.cpp` keeps its own trail head `depend.propagated` and per-variable watches; it reads
+`vtab[].trail` and values, never reasons or `Internal::propagated`. Root literals assigned by `add_root_units` are appended to
+the trail like propagated ones and are seen by `update_dependency_watches` before the next decision; `replace_reason` changes
+no trail position or value; rewinding `Internal::propagated` does not touch `depend.propagated`. Nothing to change; the `-dl`
+rows (`root-dl`, `dl`, `gc-dl`, `mode1-dl`, ...) pass.
+
+**Gate results** (logs `/home/ec2-user/miniqu-work/m2-t4/`; heavy commands `taskset -c 0-23`, 16 jobs, as the 48-core machine
+note says instead of the 0-47 of the task text).
+- Builds release, debug, asan, release-clang without warnings; `ctest --preset release` and `--preset debug`: 42/42.
+- `tests/m1_equiv.sh build/release/miniQU`: **M1 EQUIVALENCE PASSED** (smoke 33/32/32/32, generated 40 per mode, stressed
+  40/40/36/40, 0 differences).
+- `tests/regress.sh -j 16 -s 1:300 -M all build/release/miniQU`: every row passes counters, limits and proofs; 0 wrong
+  verdicts, 0 rejected proofs (checker timeouts only in `mode1-dl`: 16, a row that had them before); the four `root*` rows 0 of
+  150 search timeouts. Exit 1 only because of **the known open problem 1 of M2-T2** (smoke of `gc-ccmin3`: proof run of
+  `jctc9-pass.qcir` `solve_timeout`, unchanged; no coordinator decision on it yet).
+- `tests/regress.sh -S -j 16 -s 1:100 -t 240 -M all build/asan/miniQU`: REGRESSION TESTS PASSED (3 warnings: solver timeouts
+  `noearly` 10, `restart-mode1-dl` 4, as before), no sanitizer report.
+- `tests/fuzz_qdimacs.sh release 1 300 OPT` for OPT `''`, `-dl`, `-mode=1`, `-mode=2`, each also with `--rootsimpdelay=0
+  --reduceint=2 --tier1glue=0 --gcfrac=0`: 8 x 600 instances, 0 failures, 0 timeouts; asan `1 100` with the stress options in
+  the four modes: 0 failures (1 timeout each in three modes). Root simplification does run on QDIMACS (spot check, asan with
+  the initial-cube check of `model.cpp` active: e.g. `rootstrengthened` 18-344, `rootdeleted` 95-2439 per instance).
+  `tests/run_regressions.sh`: 7 instances, 0 failures.
+- Coverage of the rare paths, measured with `--log` on search seeds 151-210 (`--rootsimpdelay=0`, modes 0/1, `-dl`,
+  `-no-earlytseitin`): step 2 ends in the empty clause on 13-18 instances per configuration; a step-2 unit and the root
+  conflict through it did not occur in that sample, so those paths are covered by the unit tests only.
+- `modelcubes` is 0 on every QCIR row of the matrix.
+
+**Lean** (release, default options plus the column, `-proof=FILE -proof-binary`, proofs in `/home/ec2-user/miniqu-work/proofs/m2-t4`,
+deleted after the check; all `s VERIFIED`):
+
+| instance | options | result | conflicts | rootsimps | rootunits | rootstrengthened | rootlits | rootdeleted | check |
+|---|---|---|---:|---:|---:|---:|---:|---:|---|
+| `9.3` | | UNSAT | 981 | 2 | 4821 | 2701 | 7611 | 5520 | VERIFIED FALSE |
+| `DW-unsat-09-22-1` | | UNSAT | 6882 | 3 | 22 | 4192 | 4192 | 189 | VERIFIED FALSE |
+| `jctc8-pass` | | SAT | 787 | 2 | 156 | 75 | 113 | 449 | VERIFIED TRUE |
+| `hadw10-11` | `-dl` | UNSAT | 77374 | 25 | 193 | 5681 | 5709 | 6603 | VERIFIED FALSE |
+| `test_5_5_L.pg-7` | `-mode=1` | UNSAT | 44308 | 11 | 59 | 1846 | 2237 | 19223 | VERIFIED FALSE |
+
+The search with and without a proof is identical (`9.3`: same conflicts and propagations), since ids are counted either way.
+
+**Root counters on `bench/smoke.txt`** (release, default options, `-verb=1`; all verdicts as expected):
+
+| instance | result | rootsimps | rootunits | rootstrengthened | rootlits | rootdeleted |
+|---|---|---:|---:|---:|---:|---:|
+| 3.2 | UNSAT | 2 | 7319 | 3865 | 3873 | 7618 |
+| 5-5-6-10-3-7-EdAd | UNSAT | 2 | 2 | 8 | 8 | 311 |
+| 5-5-6-7-3-60-EdAd | SAT | 5 | 2 | 23 | 23 | 423 |
+| 5-5-6-9-3-3-EdAd | UNSAT | 1 | 2 | 3 | 3 | 2 |
+| 9.1 | SAT | 1 | 35044 | 17524 | 17524 | 35044 |
+| 9.3 | UNSAT | 2 | 4821 | 2701 | 7611 | 5520 |
+| DW-sat-08-22-1 | SAT | 4 | 1539 | 550 | 4451 | 12251 |
+| bt-2x4_13.ig | UNSAT | 5 | 102 | 170 | 170 | 3992 |
+| bt2nd-2x4_8.ig | SAT | 2 | 70 | 101 | 101 | 216 |
+| chess_solving_mate_in_2_2002_WCCC-OPEN-45_01 | SAT | 2 | 10380 | 2310 | 4355 | 29021 |
+| chess_solving_mate_in_2_2008_BEL-CH-16B_08 | SAT | 4 | 10446 | 2459 | 4535 | 29148 |
+| chess_solving_mate_in_2_2011_ISC-7B_01 | SAT | 10 | 10571 | 2725 | 5299 | 29787 |
+| chess_solving_mate_in_3_2010_UKR-CH_04 | SAT | 12 | 10541 | 2596 | 4670 | 29632 |
+| ci.e#1.a#3.E#40.A#60.c#400.w#2.s#4.asp | UNSAT | 1 | 2 | 3 | 3 | 2 |
+| ci.e#1.a#3.E#40.A#60.c#416.w#2.s#3.asp | UNSAT | 1 | 2 | 3 | 3 | 2 |
+| ci.e#1.a#3.E#40.A#60.c#432.w#2.s#8.asp | UNSAT | 1 | 2 | 3 | 3 | 2 |
+| connect-3x3_9_connect3.ig | UNSAT | 4 | 122 | 136 | 140 | 11805 |
+| hadw10-11 | UNSAT | 11 | 200 | 6591 | 6640 | 7570 |
+| hadw6-7 | UNSAT | 6 | 87 | 946 | 963 | 1251 |
+| jctc1-pass | SAT | 2 | 157 | 84 | 122 | 473 |
+| jctc13-fail | UNSAT | 4 | 310 | 138 | 235 | 1006 |
+| jctc4-fail | UNSAT | 6 | 552 | 289 | 710 | 1830 |
+| jctc9-pass | SAT | 2 | 169 | 159 | 220 | 510 |
+| lift_gr1+2.tlsf | SAT | 4 | 344 | 3876 | 6106 | 8124 |
+| load_balancer5.tlsf | SAT | 7 | 58 | 1887 | 2723 | 4660 |
+| round_robin_arbiter3.tlsf | SAT | 9 | 24 | 29171 | 67230 | 595 |
+| sc-ungrounded-1x3X3x2_1 | UNSAT | 5 | 1805 | 8209 | 660954 | 15189 |
+| test_5_5_L.pg-7 | UNSAT | 7 | 41 | 4631 | 4650 | 10147 |
+| test_5_5_el.pg-7 | SAT | 2 | 45 | 115 | 271 | 76 |
+| test_5_5_elly.pg-7 | SAT | 4 | 19 | 148 | 149 | 48 |
+| test_5_5_fatty.pg-7 | UNSAT | 3 | 167 | 895 | 1182 | 11738 |
+| test_5_5_snaky.pg-7 | UNSAT | 6 | 49 | 1040 | 1145 | 24897 |
+| test_5_5_tippy.pg-7 | SAT | 3 | 18 | 75 | 75 | 29 |
+
+Cost (not a benchmark claim): with `-profile=2` the `simplify` profile is 0-3.1% of the run time on these instances.
+
+**Peak RSS** (`/usr/bin/time -v`, default options, `--cpulim=180`, one process at a time on core 24; before = release build of
+d9c9053 in `/home/ec2-user/miniqu-work/m2-t4/miniqu-work/build/release/miniQU`): `1.3.qcir` 1134944 KB -> 1136104 KB (+0.1%,
+SAT in about 5 s both); `DW-sat-08-22-1.qcir` 29072 KB -> 29464 KB (+1.3%). The peak of `1.3` is reached while the formula is
+built, before any simplification.
+
+**Commands.** `tests/m1_equiv.sh build/release/miniQU`; `tests/regress.sh -j 16 -s 1:300 -M all build/release/miniQU`;
+`tests/regress.sh -S -j 16 -s 1:100 -t 240 -M all build/asan/miniQU`; `tests/fuzz_qdimacs.sh <bin> 1 300|100 OPT` as above;
+`tests/run_regressions.sh build/release/miniQU` (all from `/home/ec2-user/miniqu-work/m2-t4/gate.sh`); Lean and RSS from
+`lean.sh` and `rss.sh` in the same directory.
+
+**Open points.**
+1. ARCH 4.5 says that from M2.1 on, reaching `initial_cube` on QCIR input should end the run with "unknown" and an error
+   message, proof or not. Not built: `Internal` does not know the input format (it would need an API flag from the app), and
+   the task spec did not ask for it. `modelcubes` is 0 on every QCIR row of the fuzz gate. Coordinator to decide whether that
+   rule becomes a task.
+2. The step-2 unit / root-conflict paths are reached in unit tests only (see coverage above).
+3. Steps 1 and 2 consider only root literals new since the last run; a variable that gets a unit later through a step-2 unit
+   (reason replaced) does not make earlier skipped reasons materialisable in later runs. Harmless (fewer units), as specified.
+4. Problem 1 of M2-T2 (`gc-ccmin3` smoke, `jctc9-pass`) still makes `regress.sh` exit 1.
