@@ -1160,6 +1160,12 @@ removed literals per kind and tier; proof coverage and overhead tables.
 Priority weighs expected impact on this benchmark set (QCIR, dual encoding)
 against risk. "Proof" says what QLRUP can express today.
 
+Carried over from M2 (STATUS "Coordinator decisions after M2 round 1", J12 and J10): the experiment options
+that were never screened, to be decided in the tuning budget with seeds 4 and 5 and the 2.0 s PAR2 rule:
+`--recomputetier` (default and `-dl`), `--ccminmode=2` (default), `--restartmode=1` with `-dl` (commands in
+STATUS, M2-T7, open point 1); and the finer mode-1 fallback of minimisation (keep one removed primary literal
+instead of the whole constraint), only if a mode-1 minimisation configuration becomes a default candidate.
+
 | # | technique | class | QBF side conditions | proof | expected impact |
 |---|---|---|---|---|---|
 | 1 | **Forward/backward subsumption and strengthening of learnt constraints** during inprocessing (beyond the BVE helper of M3.1) | D | same kind only; `qreduce` after strengthening; irredundant subsumed only by irredundant | deletion; one resolution step | medium; cheap; keeps the learnt databases small, helps both kinds |
