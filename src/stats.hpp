@@ -42,6 +42,8 @@ namespace miniqu {
   COUNTER (rootdeleted) \
   COUNTER (elimrounds) \
   COUNTER (eliminprounds) \
+  COUNTER (elimskipped) \
+  COUNTER (elimdelayed) \
   COUNTER (elimtried) \
   COUNTER (elimblockedother) \
   COUNTER (elimblockedright) \

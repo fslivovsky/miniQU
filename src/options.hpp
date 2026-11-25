@@ -111,6 +111,13 @@ namespace miniqu {
   OPTION (elimclslim, 100, 2, 1000000000, "size limit of a resolvent") \
   OPTION (elimticks, 100000000, 0, 1000000000, \
           "literal visits one elimination round may spend") \
+  OPTION (elimmark, 1, 0, 1, \
+          "retry only variables with a deleted constraint, with elim") \
+  OPTION ( \
+      elimeffort, 0, 0, 1000000000, \
+      "inprocessing round budget in per mille of search ticks (0: off)") \
+  OPTION (elimmineff, 10000000, 0, 1000000000, \
+          "smallest budget of an inprocessing round, with elimeffort") \
   OPTION ( \
       vivify, 0, 0, 1, \
       "vivify learnt constraints in inprocessing rounds (modes 0 and 1)") \

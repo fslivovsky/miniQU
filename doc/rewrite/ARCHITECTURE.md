@@ -1260,6 +1260,29 @@ for elimination:
   `elimocclim`, `elimclslim`, `elimticks`) are in `src/options.hpp`, and:
   - `elimsubsume` (1, [0,1]): do not add resolvents subsumed by a stored constraint, with elim.
   - `elimboundmax` (16, [0,1e9]): largest bound on additional constraints, with elim.
+  - `elimmark` (1, [0,1]): retry only variables with a deleted constraint, with elim.
+  - `elimeffort` (0, [0,1e9]): inprocessing round budget in per mille of search ticks (0: off).
+  - `elimmineff` (10000000, [0,1e9]): smallest budget of an inprocessing round, with elimeffort.
+- Marks (`--elimmark`): `Flags::elim` says a variable is to be tried. All
+  candidates are marked before the first round and whenever the bound
+  grows; an attempt clears the mark; `mark_garbage` marks the variables of
+  a deleted constraint again (`mark_elim_removed`), those of a learnt one
+  only if their last attempt failed on a learnt constraint
+  (`Flags::elimblocked`). A due round without a marked variable is skipped
+  (`elimskipped`). A constraint stored later may subsume a resolvent and
+  bring an unmarked variable within the bound; that case is not tracked.
+- Budget (`--elimeffort`, off by default: every round may spend
+  `--elimticks`): the round before the search may spend
+  `--elimticks` literal visits; a later round `elimeffort` per mille of the
+  search ticks since the last round that ran, at least `--elimmineff` and
+  at most `--elimticks`. If that does not cover building the occurrence
+  lists (twice the words of the arena in use), the round is delayed
+  (`elimdelayed`) and the ticks keep adding up.
+- Occurrence lists are one array of references with an offset and a length
+  per literal and kind (`Occs`, 32 bytes per variable); a list that
+  receives a resolvent is copied into a vector of its own first.
+- `--no-elimmark` is the search of the version before these three changes
+  (same counters on the test corpus).
 
 **Vivification (M4, `vivify.{hpp,cpp}`, off by default).**
 

@@ -11,6 +11,16 @@
 // to 'elimint * (rounds + 1)' conflicts ahead with '--eliminp' (an
 // arithmetically growing interval, as in CaDiCaL) and to never without, so
 // 'eliminating ()' is false right after a round and the loop cannot spin.
+// A due round may do nothing: it is skipped when no variable is marked
+// and, with '--elimeffort', delayed when its budget does not cover the
+// occurrence lists (both below and at 'eliminate ()'); it counts as a round
+// of the schedule all the same.
+//
+// Marks ('--elimmark', as the 'elim' flag of CaDiCaL).  A pass tries only
+// marked variables.  All are marked before the first round and whenever
+// the bound grows; an attempt clears the mark, and the deletion of a
+// constraint marks its variables again ('mark_elim_removed', called by
+// 'mark_garbage').  With '--no-elimmark' every pass tries every candidate.
 //
 // Level 0.  A round runs at level 0 with propagation complete.  When one is
 // due above level 0 the search loop backtracks to level 0 and the next
@@ -112,17 +122,18 @@
 // without a proof alike.
 //
 // The occurrence lists are built per round, for the literals of candidates
-// only, and dropped at its end; the watches stay (no occurrence mode).  No
-// 'Constraint &' is held across 'new_constraint' and no arena collection
-// happens inside a round.  Candidates are visited from the innermost
-// variable outwards, in passes repeated while a pass eliminated something
-// and the round's budget of literal visits ('--elimticks') lasts.
+// only, in one array ('Occs' in 'elim.hpp'), and dropped at its end; the
+// watches stay (no occurrence mode).  No 'Constraint &' is held across
+// 'new_constraint' and no arena collection happens inside a round.
+// Candidates are visited from the innermost variable outwards, in passes
+// repeated while a pass eliminated something and the round's budget of
+// literal visits lasts ('--elimticks'; for inprocessing rounds a share of
+// the search ticks, '--elimeffort').
 //
-// Left out (ROADMAP "Left for later"): effort relative to search ticks,
-// delays after fruitless rounds, decision variables, QDIMACS input, mode 2,
-// gate-aware elimination, backward subsumption and strengthening with the
-// resolvents, schedule marks, candidates ordered by cost and occurrence
-// mode.
+// Left out (ROADMAP "Left for later"): decision variables, QDIMACS input,
+// mode 2, gate-aware elimination, backward subsumption and strengthening
+// with the resolvents, counting the resolvents before building them,
+// candidates ordered by cost and occurrence mode.
 
 #include "contract.hpp"
 #include "internal.hpp"
@@ -165,25 +176,97 @@ bool Internal::elim_candidate (Var v) const {
                                                          : opts.elimcube;
 }
 
-// Occurrence lists of both kinds, irredundant and learnt constraints.
-void Internal::connect_occs () {
-  for (Kind kind : {Kind::Clause, Kind::Cube})
-    for (const auto *lists : {&irredundant, &redundant})
-      for (const Ref ref : (*lists)[index (kind)]) {
-        const Constraint &c = deref (arena, ref);
-        if (c.garbage ())
-          continue;
-        eliminator.ticks += c.size ();
-        for (const Lit l : c)
-          if (elim_candidate (var (l)))
-            eliminator (kind, l).push_back (ref);
-      }
+// Whether deletions set the marks: elimination applies and '--elimmark'.
+bool Internal::elim_marking () const {
+  return opts.elim && opts.elimmark && complete && opts.mode != 2;
 }
 
-void Internal::flush_occs (std::vector<Ref> &occs) {
+// A constraint is deleted ('mark_garbage'): its variables may have become
+// eliminable.  Every side condition of a variable 'x' fails on constraints
+// containing 'x' only, and adding constraints never makes one hold, so a
+// failed attempt can only succeed after such a deletion (or with a larger
+// bound, 'mark_elim_all').  One exception is accepted, as in CaDiCaL: a
+// constraint stored later may subsume a resolvent on 'x' ('--elimsubsume')
+// and bring 'x' within the bound; 'x' is then tried again only when it is
+// marked for another reason.  Learnt constraints matter for E2 and E3
+// only, so their deletion marks only variables whose last attempt failed
+// on a learnt constraint.
+void Internal::mark_elim_removed (const Constraint &c) {
+  const bool learnt = c.redundant ();
+  for (const Lit l : c) {
+    const Var v = var (l);
+    Flags &f = ftab[v];
+    if (f.elim || f.eliminated || prefix.vars[v].decision)
+      continue;
+    if (learnt && !f.elimblocked)
+      continue;
+    if (val (l) && !level (v))
+      continue;
+    f.elim = true;
+    eliminator.scheduled++;
+  }
+}
+
+// Marks every variable that may be a candidate (before the first round and
+// when the bound grew), and counts the marks.
+void Internal::mark_elim_all () {
+  eliminator.scheduled = 0;
+  for (Var v = 0; v < prefix.size (); v++) {
+    Flags &f = ftab[v];
+    f.elim = !prefix.vars[v].decision && !f.eliminated;
+    eliminator.scheduled += f.elim;
+  }
+}
+
+// Occurrence lists of both kinds, irredundant and learnt constraints, in
+// two passes: the lengths, then the references.  Only the second pass
+// counts ticks, so that a round spends its budget as it did with one pass
+// ('--no-elimmark' is the search of the version before the marks).  False
+// if the lists do not fit 32-bit offsets.
+bool Internal::connect_occs () {
+  Occs &occs = eliminator.occs;
+  const size_t slots = 4 * (size_t) prefix.size ();
+  occs.start.assign (slots, 0);
+  occs.len.assign (slots, 0);
+  const auto each = [&] (bool count, const auto &visit) {
+    for (Kind kind : {Kind::Clause, Kind::Cube})
+      for (const auto *lists : {&irredundant, &redundant})
+        for (const Ref ref : (*lists)[index (kind)]) {
+          const Constraint &c = deref (arena, ref);
+          if (c.garbage ())
+            continue;
+          if (count)
+            eliminator.ticks += c.size ();
+          for (const Lit l : c)
+            if (elim_candidate (var (l)))
+              visit (Occs::slot (kind, l), ref);
+        }
+  };
+  each (false, [&] (size_t s, Ref) { occs.len[s]++; });
+  uint64_t total = 0;
+  for (size_t s = 0; s < slots; s++) {
+    occs.start[s] = (uint32_t) total;
+    total += occs.len[s];
+    occs.len[s] = 0;
+  }
+  if (total >= Occs::moved)
+    return false;
+  occs.refs.resize (total);
+  each (true, [&] (size_t s, Ref ref) {
+    occs.refs[occs.start[s] + occs.len[s]++] = ref;
+  });
+  return true;
+}
+
+// Drops the garbage references of a list.
+void Internal::flush_occs (Kind kind, Lit l) {
+  const std::span<Ref> occs = eliminator (kind, l);
   eliminator.ticks += (int64_t) occs.size ();
-  std::erase_if (occs,
-                 [&] (Ref ref) { return deref (arena, ref).garbage (); });
+  const auto end =
+      std::remove_if (occs.begin (), occs.end (), [&] (Ref ref) {
+        return deref (arena, ref).garbage ();
+      });
+  eliminator.occs.truncate (kind, l, (size_t) (end - occs.begin ()));
 }
 
 // Whether an earlier resolvent of this candidate has all its literals
@@ -207,16 +290,15 @@ bool Internal::subsumed_by_resolvent (size_t size) {
 // resolvents), which only misses opportunities; a parent never qualifies,
 // since its pivot is unmarked.
 bool Internal::subsumed_by_stored (Kind kind, std::span<const Lit> lits) {
-  const std::vector<Ref> *shortest = nullptr;
+  std::span<Ref> shortest;
   for (const Lit l : lits) {
-    const std::vector<Ref> &occs = eliminator (kind, l);
+    const std::span<Ref> occs = eliminator (kind, l);
     eliminator.ticks++;
-    if (!occs.empty () && (!shortest || occs.size () < shortest->size ()))
-      shortest = &occs;
+    if (!occs.empty () &&
+        (shortest.empty () || occs.size () < shortest.size ()))
+      shortest = occs;
   }
-  if (!shortest)
-    return false;
-  for (const Ref ref : *shortest) {
+  for (const Ref ref : shortest) {
     eliminator.ticks++;
     const Constraint &d = deref (arena, ref);
     if (d.garbage () || d.redundant () || d.size () > lits.size ())
@@ -281,9 +363,9 @@ bool Internal::resolve (Kind kind, Ref c_ref, Ref d_ref, Lit pivot) {
 // buffers of 'eliminator', or false if the bound is exceeded.
 bool Internal::find_resolvents (Kind kind, Var x) {
   const Lit pivot = mk_lit (x);
-  const std::vector<Ref> &pos = eliminator (kind, pivot);
-  const std::vector<Ref> &neg = eliminator (kind, ~pivot);
-  const auto irredundant_count = [&] (const std::vector<Ref> &occs) {
+  const std::span<Ref> pos = eliminator (kind, pivot);
+  const std::span<Ref> neg = eliminator (kind, ~pivot);
+  const auto irredundant_count = [&] (std::span<Ref> occs) {
     return (size_t) std::count_if (occs.begin (), occs.end (), [&] (Ref r) {
       return !deref (arena, r).redundant ();
     });
@@ -351,7 +433,7 @@ void Internal::add_resolvents (Kind kind, Var x) {
     rewind_root_propagation (ref);
     for (const Lit l : lits)
       if (elim_candidate (var (l)))
-        eliminator (kind, l).push_back (ref);
+        eliminator.occs.push (kind, l, ref);
     stats.resolvents[index (kind)]++;
   }
 }
@@ -364,23 +446,26 @@ bool Internal::try_eliminate (Var x) {
   stats.elimtried++;
   const Kind kind = primary_kind (prefix.quant (x));
   const Lit pivot = mk_lit (x);
+  Flags &flags = ftab[x];
+  flags.elimblocked = false;
   for (const Lit l : {pivot, ~pivot})
     for (const Kind k : {Kind::Clause, Kind::Cube})
-      flush_occs (eliminator (k, l));
-  if (!eliminator (other (kind), pivot).empty () ||
-      !eliminator (other (kind), ~pivot).empty ()) {
-    stats.elimblockedother++;
-    return false;
-  }
-  std::vector<Ref> &pos = eliminator (kind, pivot);
-  std::vector<Ref> &neg = eliminator (kind, ~pivot);
+      flush_occs (k, l);
+  for (const Lit l : {pivot, ~pivot})
+    if (const std::span<Ref> occs = eliminator (other (kind), l);
+        !occs.empty ()) {
+      flags.elimblocked = deref (arena, occs[0]).redundant ();
+      stats.elimblockedother++;
+      return false;
+    }
   const uint32_t depth = prefix.depth (x);
-  for (const std::vector<Ref> *occs : {&pos, &neg})
-    for (const Ref ref : *occs) {
+  for (const Lit p : {pivot, ~pivot})
+    for (const Ref ref : eliminator (kind, p)) {
       const Constraint &c = deref (arena, ref);
       eliminator.ticks += c.size ();
       for (const Lit l : c)
         if (prefix.depth (var (l)) > depth) {
+          flags.elimblocked = c.redundant ();
           stats.elimblockedright++;
           return false;
         }
@@ -396,10 +481,13 @@ bool Internal::try_eliminate (Var x) {
     return true;
   if (assertions_enabled)
     check_elimination_owner (x);
+  // Set before the deletions, which must not mark 'x' again.
+  flags.eliminated = true;
   // Each contains the unassigned 'x', so it is neither a unit nor a
-  // reason.
-  for (const std::vector<Ref> *occs : {&pos, &neg})
-    for (const Ref ref : *occs) {
+  // reason.  The lists of 'x' got no resolvent, but 'add_resolvents' may
+  // have moved them, so they are looked up here.
+  for (const Lit p : {pivot, ~pivot})
+    for (const Ref ref : eliminator (kind, p)) {
       const Constraint &c = deref (arena, ref);
       assert (!c.garbage ());
       assert (!is_root_reason (ref));
@@ -409,11 +497,10 @@ bool Internal::try_eliminate (Var x) {
         stats.elimdeleted[index (kind)]++;
       mark_garbage (ref);
     }
-  pos.clear ();
-  neg.clear ();
+  eliminator.occs.truncate (kind, pivot, 0);
+  eliminator.occs.truncate (kind, ~pivot, 0);
   if (opts.dl && (!depend.on[x].empty () || !depend.watching[x].empty ()))
     eliminator.dependent = true;
-  ftab[x].eliminated = true;
   stats.eliminated[index (kind)]++;
   return true;
 }
@@ -425,7 +512,15 @@ void Internal::grow_elim_bound () {
   if (bound >= opts.elimboundmax)
     return;
   bound = std::min<int64_t> (bound ? 2 * bound : 1, opts.elimboundmax);
+  mark_elim_all ();
   LOG ("elimination bound raised to %" PRId64, bound);
+}
+
+// The next round: 'elimint * (rounds + 1)' conflicts ahead, or never.
+void Internal::schedule_elim () {
+  lim.elim = opts.eliminp ? stats.conflicts + (int64_t) opts.elimint *
+                                                  (stats.elimrounds + 1)
+                          : INT64_MAX;
 }
 
 // Drops the occurrence lists and the garbage references of the databases
@@ -433,7 +528,7 @@ void Internal::grow_elim_bound () {
 // dependencies if one mentions an eliminated variable, and schedules the
 // next round.
 void Internal::finish_elim_round () {
-  std::vector<std::vector<Ref>> ().swap (eliminator.occs);
+  eliminator.occs.release ();
   for (Kind kind : {Kind::Clause, Kind::Cube})
     for (auto *lists : {&irredundant, &redundant})
       std::erase_if ((*lists)[index (kind)], [&] (Ref ref) {
@@ -447,41 +542,87 @@ void Internal::finish_elim_round () {
     eliminator.dependent = false;
     reset_dependencies ();
   }
-  lim.elim = opts.eliminp ? stats.conflicts + (int64_t) opts.elimint *
-                                                  (stats.elimrounds + 1)
-                          : INT64_MAX;
+  eliminator.last_ticks = stats.ticks;
+  schedule_elim ();
 }
 
 // One round; returns a root conflict or 'Ref::none'.  Every exit leaves
-// 'eliminating ()' false ('finish_elim_round' schedules the next one).
+// 'eliminating ()' false (the next round is scheduled).
+//
+// Skipped rounds ('--elimmark').  A due round does nothing when no variable
+// is marked: no constraint of a candidate was deleted since the last round
+// and the bound did not grow.
+//
+// Budget ('--elimeffort').  The round before the search may spend
+// '--elimticks' literal visits.  A later round may spend 'elimeffort' per
+// mille of the search ticks since the last round that ran, at least
+// '--elimmineff' and at most '--elimticks'.  Building the occurrence lists
+// visits every stored literal twice; when the budget does not cover that
+// (estimated by the words of the arena in use), the round is delayed to the
+// next point of the schedule and the search ticks keep adding up.
+// Off by default: '--elimeffort=0' gives every round '--elimticks'.
 Ref Internal::eliminate () {
   PROFILE_SCOPE (elim);
   assert (!decision_level () && propagated == trail.size ());
   assert (opts.mode != 2 && complete && simplifier.units.empty ());
-  if (!stats.elimrounds++)
+  if (!stats.elimrounds++) {
     eliminator.bound = opts.elimbound;
-  if (stats.conflicts)
+    mark_elim_all ();
+  }
+  const bool inprocessing = stats.conflicts != 0;
+  if (inprocessing)
     stats.eliminprounds++;
+  if (opts.elimmark && !eliminator.scheduled) {
+    stats.elimskipped++;
+    schedule_elim ();
+    return Ref::none;
+  }
+  eliminator.budget = opts.elimticks;
+  if (inprocessing && opts.elimeffort) {
+    const double relative = (double) (stats.ticks - eliminator.last_ticks) *
+                            1e-3 * (double) opts.elimeffort;
+    eliminator.budget = (int64_t) std::clamp (
+        relative, (double) std::min (opts.elimmineff, opts.elimticks),
+        (double) opts.elimticks);
+    const int64_t connect = 2 * (int64_t) (arena.size () - arena.wasted ());
+    if (eliminator.budget < connect) {
+      stats.elimdelayed++;
+      schedule_elim ();
+      return Ref::none;
+    }
+  }
   const size_t vars = prefix.size ();
   eliminator.ticks = 0;
-  eliminator.occs.resize (4 * vars);
   eliminator.pending.assign (vars, 0);
+  if (!connect_occs ()) {
+    VERBOSE (1, "elimination switched off: too many occurrences");
+    finish_elim_round ();
+    lim.elim = INT64_MAX;
+    return Ref::none;
+  }
   eliminator.marks.assign (2 * vars, 0);
   eliminator.marked.assign (2 * vars, 0);
-  connect_occs ();
   bool progress = true;
   while (progress && status == Status::Unknown &&
-         eliminator.ticks < opts.elimticks) {
+         eliminator.ticks < eliminator.budget) {
     progress = false;
     for (Var v = prefix.size (); v-- > 0;) {
-      if (status != Status::Unknown || eliminator.ticks >= opts.elimticks)
+      if (status != Status::Unknown ||
+          eliminator.ticks >= eliminator.budget)
         break;
+      if (opts.elimmark) {
+        Flags &f = ftab[v];
+        if (!f.elim)
+          continue;
+        f.elim = false;
+        eliminator.scheduled--;
+      }
       if (try_eliminate (v))
         progress = true;
     }
   }
   const int64_t bound = eliminator.bound;
-  if (!progress && eliminator.ticks < opts.elimticks)
+  if (!progress && eliminator.ticks < eliminator.budget)
     grow_elim_bound ();
   finish_elim_round ();
   if (status != Status::Unknown) {

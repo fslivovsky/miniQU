@@ -162,6 +162,8 @@ void Internal::mark_garbage (Ref ref) {
   LOG (ref, "delete");
   if (proof)
     proof->delete_constraint (c);
+  if (elim_marking ())
+    mark_elim_removed (c);
   c.set_garbage (true);
   arena.free (c.words ());
   const Kind kind = c.kind ();

@@ -505,9 +505,13 @@ static void test_duplicate_resolvents () {
 // The bound: 'elimbound' in the first round, doubled after each round at
 // a fixpoint up to 'elimboundmax' (0, 1, 2, 4, 8, 16, 16); never changed
 // with 'elimboundmax <= elimbound'; not raised when the ticks ran out.
+// Variable 2 stays a candidate (E3 fails on an original), and a larger
+// bound marks it again: six rounds try it, the seventh has no mark.
 static void test_bound_sequence () {
   {
-    Fixture f ("eE");
+    Fixture f ("eEae");
+    f.add (Clause, {2, 4});
+    f.add (Clause, {-2, 1});
     std::vector<int64_t> seen;
     for (int round = 0; round < 7; round++) {
       f.internal.lim.elim = 0;
@@ -515,6 +519,19 @@ static void test_bound_sequence () {
       seen.push_back (f.internal.eliminator.bound);
     }
     CHECK ((seen == std::vector<int64_t>{1, 2, 4, 8, 16, 16, 16}));
+    CHECK_EQ (f.internal.stats.elimtried, 6);
+    CHECK_EQ (f.internal.stats.elimskipped, 1);
+  }
+  {
+    // Without a candidate left the rounds are skipped and the bound stays.
+    Fixture f ("eE");
+    for (int round = 0; round < 3; round++) {
+      f.internal.lim.elim = 0;
+      CHECK (f.eliminate () == Ref::none);
+    }
+    CHECK (f.eliminated (2));
+    CHECK_EQ (f.internal.eliminator.bound, 1);
+    CHECK_EQ (f.internal.stats.elimskipped, 2);
   }
   {
     Fixture f ("eE");
@@ -533,6 +550,130 @@ static void test_bound_sequence () {
     CHECK (f.eliminate () == Ref::none);
     CHECK_EQ (f.internal.eliminator.bound, 0);
   }
+}
+
+// Marks ('--elimmark'): a variable that failed is tried again only after
+// a constraint containing it was deleted; a learnt one counts only if the
+// last attempt failed on a learnt constraint.  The bound is fixed, so it
+// marks nothing.
+static void test_marks () {
+  const auto round = [] (Fixture &f) {
+    f.internal.lim.elim = 0;
+    CHECK (f.eliminate () == Ref::none);
+  };
+  {
+    // E3 fails on the learnt (3 5) only.
+    Fixture f ("eeEae");
+    f.internal.opts.elimboundmax = 0;
+    f.add (Clause, {3, 1});
+    f.add (Clause, {-3, 2});
+    const Ref learnt = f.learn (Clause, {3, 5});
+    round (f);
+    CHECK (!f.eliminated (3));
+    CHECK_EQ (f.internal.stats.elimblockedright, 1);
+    round (f);
+    CHECK_EQ (f.internal.stats.elimskipped, 1);
+    CHECK_EQ (f.internal.stats.elimtried, 1);
+    f.internal.mark_garbage (learnt);
+    round (f);
+    CHECK_EQ (f.internal.stats.elimskipped, 1);
+    CHECK (f.eliminated (3));
+    CHECK (f.has (Clause, {1, 2}));
+    CHECK (f.garbage_free ());
+    round (f);
+    CHECK_EQ (f.internal.stats.elimskipped, 2);
+  }
+  {
+    // E3 fails on the original (3 5): a deleted learnt constraint does
+    // not mark, a deleted original does.
+    Fixture f ("eeEae");
+    f.internal.opts.elimboundmax = 0;
+    f.add (Clause, {3, 1});
+    f.add (Clause, {-3, 2});
+    const Ref original = f.add (Clause, {3, 5});
+    const Ref learnt = f.learn (Clause, {3, 1, 2});
+    round (f);
+    CHECK (!f.eliminated (3));
+    f.internal.mark_garbage (learnt);
+    CHECK_EQ (f.internal.eliminator.scheduled, 0);
+    f.internal.mark_garbage (original);
+    CHECK_EQ (f.internal.eliminator.scheduled, 1);
+    round (f);
+    CHECK (f.eliminated (3));
+    CHECK_EQ (f.internal.stats.elimskipped, 0);
+  }
+  {
+    // Without marks every round tries every candidate.
+    Fixture f ("eEae");
+    f.internal.opts.elimmark = 0;
+    f.internal.opts.elimboundmax = 0;
+    f.add (Clause, {2, 4});
+    f.add (Clause, {-2, 1});
+    for (int i = 0; i < 3; i++)
+      round (f);
+    CHECK_EQ (f.internal.stats.elimtried, 3);
+    CHECK_EQ (f.internal.stats.elimskipped, 0);
+  }
+}
+
+// Budget ('--elimeffort'): an inprocessing round whose share of the search
+// ticks does not cover the occurrence lists is delayed, and runs once the
+// search has spent enough; the round before the search and
+// '--elimeffort=0' are not limited that way.
+static void test_effort () {
+  const auto build = [] (Fixture &f) {
+    f.internal.opts.elimeffort = 1000;
+    f.internal.opts.elimmineff = 0;
+    f.add (Clause, {3, 1});
+    f.add (Clause, {-3, 2});
+  };
+  {
+    Fixture f ("eeEE");
+    build (f);
+    f.internal.stats.conflicts = 1;
+    f.internal.lim.elim = 0;
+    CHECK (f.eliminate () == Ref::none);
+    CHECK_EQ (f.internal.stats.elimdelayed, 1);
+    CHECK_EQ (f.internal.stats.elimtried, 0);
+    CHECK (!f.eliminated (3));
+    f.internal.stats.ticks = 1000;
+    f.internal.lim.elim = 0;
+    CHECK (f.eliminate () == Ref::none);
+    CHECK_EQ (f.internal.stats.elimdelayed, 1);
+    CHECK (f.eliminated (3));
+    CHECK_EQ (f.internal.eliminator.last_ticks, 1000);
+  }
+  {
+    Fixture f ("eeEE");
+    build (f);
+    f.internal.opts.elimeffort = 0;
+    f.internal.stats.conflicts = 1;
+    f.internal.lim.elim = 0;
+    CHECK (f.eliminate () == Ref::none);
+    CHECK (f.eliminated (3));
+  }
+  {
+    Fixture f ("eeEE");
+    build (f);
+    CHECK (f.eliminate () == Ref::none);
+    CHECK (f.eliminated (3));
+    CHECK_EQ (f.internal.stats.elimdelayed, 0);
+  }
+}
+
+// A list that received a resolvent is used by a later elimination: (-3 2)
+// from eliminating 4 is a parent when 3 goes.
+static void test_grown_list () {
+  Fixture f ("eeEE");
+  f.add (Clause, {3, 1});
+  f.add (Clause, {-3, 4});
+  f.add (Clause, {-4, 2});
+  CHECK (f.eliminate () == Ref::none);
+  CHECK (f.eliminated (4));
+  CHECK (f.eliminated (3));
+  CHECK (f.has (Clause, {1, 2}));
+  CHECK_EQ (f.live (Clause), 1u);
+  CHECK (f.garbage_free ());
 }
 
 int main () {
@@ -556,5 +697,8 @@ int main () {
   test_learnt_does_not_subsume ();
   test_duplicate_resolvents ();
   test_bound_sequence ();
+  test_marks ();
+  test_effort ();
+  test_grown_list ();
   return test_result ();
 }

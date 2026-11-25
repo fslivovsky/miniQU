@@ -324,8 +324,12 @@ struct Internal {
   void init_elim ();
   bool eliminating () const;
   bool elim_candidate (Var) const;
-  void connect_occs ();
-  void flush_occs (std::vector<Ref> &);
+  bool elim_marking () const;
+  void mark_elim_removed (const Constraint &);
+  void mark_elim_all ();
+  void schedule_elim ();
+  [[nodiscard]] bool connect_occs ();
+  void flush_occs (Kind, Lit);
   bool subsumed_by_resolvent (size_t size);
   bool subsumed_by_stored (Kind, std::span<const Lit>);
   bool resolvent_subsumed (Kind, std::span<const Lit>);

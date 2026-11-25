@@ -5,6 +5,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <span>
 #include <vector>
 
 namespace miniqu {
@@ -17,18 +18,65 @@ struct Resolvent {
   Ref parents[2];
 };
 
-// Scratch state of bounded variable elimination ('elim.cpp').  Everything
-// is empty outside a round, except 'pending', which stays sized; no
-// reference survives a round, so rounds cope with whatever happened to the
-// databases in between.
-struct Eliminator {
-  // Occurrence lists of the round, for the literals of candidates only, at
-  // '2 * index (lit) + index (kind)'.  They may hold garbage references,
-  // which are dropped when a list is used.
-  std::vector<std::vector<Ref>> occs;
-  std::vector<Ref> &operator() (Kind kind, Lit l) {
-    return occs[2 * (size_t) index (l) + index (kind)];
+// Occurrence lists of a round in one array: per literal and kind (slot
+// '2 * index (lit) + index (kind)') the offset and length of its list in
+// 'refs', filled in two passes over the databases.  That is 32 bytes per
+// variable where four 'std::vector' headers took 96 and one allocation per
+// non-empty list.  A list that gets a resolvent is copied into 'grown'
+// first ('len' is then 'moved' and 'start' its index there); few lists do.
+struct Occs {
+  static constexpr uint32_t moved = UINT32_MAX;
+  std::vector<uint32_t> start, len;
+  std::vector<Ref> refs;
+  std::vector<std::vector<Ref>> grown;
+
+  static size_t slot (Kind kind, Lit l) {
+    return 2 * (size_t) index (l) + index (kind);
   }
+  std::span<Ref> list (size_t s) {
+    if (len[s] == moved)
+      return grown[start[s]];
+    return {refs.data () + start[s], len[s]};
+  }
+  std::span<Ref> operator() (Kind kind, Lit l) {
+    return list (slot (kind, l));
+  }
+  void push (Kind kind, Lit l, Ref ref) {
+    const size_t s = slot (kind, l);
+    if (len[s] != moved) {
+      const std::span<Ref> old = list (s);
+      grown.emplace_back (old.begin (), old.end ());
+      start[s] = (uint32_t) (grown.size () - 1);
+      len[s] = moved;
+    }
+    grown[start[s]].push_back (ref);
+  }
+  // Keeps the first 'size' entries.
+  void truncate (Kind kind, Lit l, size_t size) {
+    const size_t s = slot (kind, l);
+    if (len[s] == moved)
+      grown[start[s]].resize (size);
+    else
+      len[s] = (uint32_t) size;
+  }
+  void release () {
+    std::vector<uint32_t> ().swap (start);
+    std::vector<uint32_t> ().swap (len);
+    std::vector<Ref> ().swap (refs);
+    std::vector<std::vector<Ref>> ().swap (grown);
+  }
+};
+
+// Scratch state of bounded variable elimination ('elim.cpp').  Everything
+// is empty outside a round, except 'pending', which stays sized, and the
+// scheduling state at the end; no reference survives a round, so rounds
+// cope with whatever happened to the databases in between.
+struct Eliminator {
+  // Occurrence lists of the round, for the literals of candidates only.
+  // They may hold garbage references, which are dropped when a list is
+  // used.
+  Occs occs;
+  std::span<Ref> operator() (Kind kind, Lit l) { return occs (kind, l); }
 
   // Per variable: a unit resolvent on it waits to be assigned at the end of
   // the round, so it is no candidate in this round.
@@ -44,7 +92,8 @@ struct Eliminator {
   std::vector<int8_t>
       marked; // per literal: in the resolvent ('elimsubsume')
 
-  int64_t ticks = 0; // literal visits of the round
+  int64_t ticks = 0;  // literal visits of the round
+  int64_t budget = 0; // of the round ('--elimticks', '--elimeffort')
 
   // E4: additional constraints an elimination may add.  Set to 'elimbound'
   // by the first round and doubled (0, 1, 2, 4, ...) up to 'elimboundmax'
@@ -54,6 +103,13 @@ struct Eliminator {
   // With '--dl': a variable eliminated in this round is mentioned by a
   // dependency, which the end of the round resets.
   bool dependent = false;
+
+  // Scheduling ('--elimmark', '--elimeffort'), kept between rounds: the
+  // number of variables whose 'Flags::elim' is set (non-decision and not
+  // eliminated when marked), and the search ticks at the end of the last
+  // round that ran.
+  int64_t scheduled = 0;
+  int64_t last_ticks = 0;
 };
 
 } // namespace miniqu

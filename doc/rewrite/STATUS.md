@@ -4257,3 +4257,84 @@ Time-box 60 minutes, started 03:11 UTC. No solver source, test or default change
    text, so a run with the default and one with the option are refused as different; the templates always pass it.
 5. No test, benchmark or code change beyond the above; the list of postponed tests and open decisions is
    HANDOFF sections 2 and 4.
+
+## Elimination: candidate marks, effort option, compact occurrence lists (2026-11-25)
+
+After the 900 s runs on Barkla (`ae0477b`, 376 instances, one seed: default 184 solved, `--elim` 196,
+`--vivify` 188, both 193; `--elim` costs 28% CPU time on the 6 searches it leaves identical, all `numeric`;
+`5.2-3` runs out of memory with `--elim` right after encoding). Three changes to `elim.cpp`, none to the
+reasoning: same side conditions, same resolvents, same proof steps.
+
+**Built**
+1. Marks (`--elimmark`, on). `Flags::elim`: a pass tries only marked variables. All are marked before the first
+   round and when the bound grows; an attempt clears the mark; `mark_garbage` marks the variables of a deleted
+   constraint (`mark_elim_removed`), those of a learnt constraint only if the last attempt failed on a learnt
+   constraint (`Flags::elimblocked`). A due round without a mark is skipped (`elimskipped`).
+2. Effort (`--elimeffort`, **off**, `--elimmineff=10000000`). An inprocessing round may spend `elimeffort` per
+   mille of the search ticks since the last round that ran, between `elimmineff` and `elimticks`; if that does
+   not cover the occurrence lists the round is delayed (`elimdelayed`).
+3. Occurrence lists in one array (`Occs` in `elim.hpp`): offset and length per literal and kind, 32 bytes per
+   variable instead of four vector headers (96 bytes) and an allocation per list.
+
+`--no-elimmark` is the search of `ae0477b`.
+
+**Why the effort option is off.** With `--elimeffort=1000 --elimmineff=1000000` (my first defaults) the
+inprocessing rounds of the search corpus eliminated almost nothing beyond the first round (table below): the
+instances whose first round ends on `elimticks` continue in later rounds, and a budget of 10^6 or 10^7 visits
+is mostly spent on the occurrence lists. Whether those later eliminations pay is a question for the benchmark
+set, which is not on this machine, so the default keeps the budget that was benchmarked.
+
+**Measured** (4-core cloud container, GCC 13.3, `-DCMAKE_BUILD_TYPE=Release`; corpus = `tests/corpus.py`, 150
+search seeds, plus 150 tiny seeds where stated; times are sums over the 150 search instances on a shared
+machine and only indicate the order of magnitude)
+
+| run | attempts (`elimtried`) | eliminated | time |
+|---|---:|---:|---:|
+| `--elim`, `ae0477b` | 4101090 | 760488 | 17.7 s |
+| `--elim`, new | 2227229 | 760441 | 14.0 s |
+| `--elim --elimint=20`, `ae0477b` | 11081512 | 1151662 | 54 s |
+| `--elim --elimint=20`, new (marks only) | 5792632 | 1198265 | 36 s |
+| `--elim --elimint=20 --elimeffort=1000 --elimmineff=1000000` | 2301806 | 761841 | 14 s |
+| `--elim --elimint=20 --elimeffort=1000 --elimmineff=10000000` | 3558744 | 939845 | 20 s |
+
+- `--elim`, new against `ae0477b`: same verdict on 150 of 150, same conflicts, decisions, propagations and
+  eliminated counts on 134; the 16 others differ by 47 eliminations in total (first round ending on the
+  tick budget, or the untracked subsumption case of `mark_elim_removed`).
+- Memory, generated instance with 3 million gates (9.35 million originals per kind): peak RSS without
+  `--elim` 1819 MB; with `--elim` 2726 MB at `ae0477b` and 2181 MB now (the round costs 355 MB instead of
+  907 MB); same 146520 eliminations, 14.1 s and 12.1 s.
+
+**Tests**
+- `--no-elimmark --elimeffort=0` against `ae0477b`, all `c stat` lines and the verdict, 300 instances (150
+  tiny, 150 search) x 7 option sets (`--elim`; `--elimint=1`; `--elimint=1 -dl`; `--elimbound=16
+  --rootsimpdelay=0`; `--no-elimpre --elimint=1 -mode=1`; the options of row `elim-inp-gc`; `--no-elimsubsume
+  --elimboundmax=0`): 2090 equal, 10 time-outs at 60 s (mode 1 with `--elimint=1`, machine loaded), 0 different.
+- `unit-elim`: `test_marks`, `test_effort`, `test_grown_list` added, `test_bound_sequence` changed (a variable
+  that stays a candidate; without one the rounds are skipped and the bound stays). Release and
+  sanitizer build (address, undefined, assertions): pass, with `unit-search`, `unit-simplify`, `unit-reduce`,
+  `unit-vivify`.
+- Sanitizer build with assertions (`check_elimination_owner`, `check_invariants`), 40 instances x 5 option
+  sets (`--elimint=1`; `-dl --check`; `--elimmineff=0 --elimeffort=1 --rootsimpdelay=0`; `--no-elimpre
+  -mode=1 --elimboundmax=0`; with `--vivify --vivifyint=1 --reduceint=10 --gcfrac=0`): 200 of 200 exit 10 or
+  20 with the verdict of `ae0477b`, no report.
+- Matrix rows added: `elim-nomark`, `elim-effort` (requires `elimdelayed`), `elim-skip` (requires
+  `elimskipped`). `tests/regress.sh -S -j 4 -s 1:40 -M default,<all elim* and vivify-elim* rows>` with
+  **`tests/qlrup_check.py` as the checker** (no Lean on this machine): passed, 20 rows, 790 proofs accepted, 7 proof checks reached the time limit of the (slow) Python checker, 3 solver time-outs in `elim-noearly` (known), no stress row over its limit.
+- `tests/run_regressions.sh` with the Python checker, with and without `--elim`: 14 instances, 0 failures.
+- `tests/fuzz_cert.sh` seeds 100:150 with `--elim --elimint=1`: 125 VALID, 79 WELLFORMED.
+
+**Not done / for the owner**
+1. No run on the benchmark set. Wanted on Barkla, same protocol as the 900 s runs: `--elim --no-elimmark`
+   (= `ae0477b`), `--elim`, `--elim --elimeffort=1000`; read the `numeric` identical-search ratio, `jctc8-pass`,
+   and the memory of `5.2-3`.
+2. No proof was checked by the Lean checker, the full matrix (67 + 3 rows, seeds 1:300) and the sanitizer
+   matrix were not run.
+3. `ctest` on this machine: `unit-propagate_ldq` does not compile with GCC 13.3 (`-Werror=free-nonheap-object`
+   in `test/unit/propagate_ldq.cpp`, also at `ae0477b`); `format` fails on `test/unit/checker.cpp` with
+   clang-format 18 (untouched file; the files of this change are clean under 18); `fuzz` and
+   `run-regressions*` need the Lean checker path.
+4. Learnt deletions by `reduce` still mark variables whose last attempt failed on a learnt constraint, so
+   rounds after a reduction are rarely skipped when many gate variables are blocked that way; not measured on
+   real instances.
+5. Still open from the comparison with CaDiCaL: counting resolvents before building them, candidate order by
+   occurrence count, gate-aware resolution from the encoder's definitions, backward subsumption.
