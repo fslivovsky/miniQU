@@ -122,10 +122,47 @@ static void test_irredundant_without_id () {
   CHECK (!c.redundant () && !c.has_id ());
   CHECK_EQ (c.glue (), 0u);
   CHECK_EQ (c.used (), 0u);
+  CHECK (!c.vivified ());
   CHECK_EQ (c.words (), 1u + 3u);
   CHECK_EQ (c.shrink (1), 2u);
   CHECK_EQ (c.words (), 2u);
   CHECK (same_lits (c, lits_of ({2})));
+}
+
+// The vivified bit of a learnt constraint: independent of glue, used and
+// id, and kept by 'shrink' and by a word-by-word copy.
+static void test_vivified () {
+  Arena arena (16);
+  const std::vector<Lit> ls = lits_of ({1, -2, 3, -4, 5});
+  const Ref r = alloc_constraint (arena, ls, Kind::Clause, true, 99);
+  Constraint &c = deref (arena, r);
+  CHECK (!c.vivified ());
+  c.set_glue (Constraint::glue_max);
+  c.set_used (2);
+  c.set_vivified (true);
+  CHECK (c.vivified ());
+  CHECK_EQ (c.glue (), Constraint::glue_max);
+  CHECK_EQ (c.used (), 2u);
+  CHECK_EQ (c.id (), 99u);
+  c.set_glue (UINT32_MAX);
+  c.set_used (0);
+  c.set_glue (3);
+  CHECK (c.vivified ());
+  CHECK_EQ (c.glue (), 3u);
+  CHECK_EQ (c.used (), 0u);
+  CHECK_EQ (c.shrink (3), 2u);
+  CHECK (c.vivified ());
+  CHECK_EQ (c.glue (), 3u);
+  CHECK_EQ (c.id (), 99u);
+  Arena other (16);
+  const Ref copy = copy_constraint (other, c);
+  CHECK (deref (other, copy).vivified ());
+  CHECK_EQ (deref (other, copy).glue (), 3u);
+  c.set_vivified (false);
+  CHECK (!c.vivified ());
+  CHECK_EQ (c.glue (), 3u);
+  CHECK_EQ (c.used (), 0u);
+  CHECK_EQ (c.id (), 99u);
 }
 
 // The buffer of 'model.cpp': the id stays valid while the size goes down to
@@ -191,6 +228,7 @@ int main () {
   test_words ();
   test_redundant_with_id ();
   test_irredundant_without_id ();
+  test_vivified ();
   test_set_size ();
   test_copy_and_forward ();
   return test_result ();

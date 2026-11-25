@@ -20,7 +20,7 @@ namespace miniqu {
 //                   has_id; bits 6-31: size
 //   words 1..size   literals
 //   if redundant    one word: bits 0-13 saturating glue, 14-15 used,
-//                   16-31 reserved
+//                   16 vivified, 17-31 reserved
 //   if has_id       two words: the 64-bit proof id, low word first
 //
 // This is MiniSat's scheme.  Under benchmark load (eight processes sharing
@@ -54,6 +54,7 @@ class Constraint {
   static constexpr uint32_t glue_mask = (1u << glue_bits) - 1;
   static constexpr unsigned used_shift = glue_bits;
   static constexpr uint32_t used_mask = 3u << used_shift;
+  static constexpr uint32_t vivified_bit = 1u << 16;
 
   bool test (uint32_t bit) const { return head & bit; }
   void set (uint32_t bit, bool value) {
@@ -177,6 +178,17 @@ public:
     assert (redundant () && u <= used_max);
     uint32_t &w = *word (glue_word ());
     w = (w & ~used_mask) | u << used_shift;
+  }
+
+  // Vivification tried a learnt constraint and left it unchanged
+  // (vivify.cpp): false for irredundant constraints.
+  bool vivified () const {
+    return redundant () && (*word (glue_word ()) & vivified_bit);
+  }
+  void set_vivified (bool v) {
+    assert (redundant ());
+    uint32_t &w = *word (glue_word ());
+    w = v ? (w | vivified_bit) : (w & ~vivified_bit);
   }
 
   uint64_t id () const {

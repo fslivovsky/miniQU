@@ -7,10 +7,19 @@
 // propagation, on a conflict schedule ('--vivifyint', growing
 // arithmetically), in modes 0 and 1, for QCIR and QDIMACS input alike.  For
 // each kind switched on ('--vivifyclause', '--vivifycube') it takes the
-// learnt constraints of that kind, newest first, until its share of
-// '--vivifyticks' (propagation ticks) is spent.  For a candidate C of kind
-// K that is live, has at least two literals and no literal disabling it at
-// the root, the literals of C are visited in order ('vivify_order'):
+// candidates of that kind ('vivify_select'), lower tier first and newest
+// first inside a tier, until its share of '--vivifyticks' (propagation
+// ticks) is spent.  Candidates are the learnt constraints of tier 1, up to
+// tier 2, or all ('--vivifytier'; the limits of 'tier.cpp').  A candidate
+// tried and left unchanged gets the 'vivified' bit; with '--vivifyonce'
+// such candidates are skipped until a pass finds none without the bit,
+// which then clears the bits of its candidates and takes them all
+// ('vivifyrescheduled'); a shortened candidate keeps the bit clear and is
+// tried again (CaDiCaL).  For a candidate C of kind K that is live, has at
+// least two literals and no literal disabling it at the root, the literals
+// of C are visited in descending number of occurrences among the
+// candidates of the pass, ties by literal index ('vivify_order', CaDiCaL's
+// heuristic; the stored order of C does not change):
 //
 //  (a) a literal that disables C (implied above the root) ends the walk;
 //      the analysis starts from its reason and keeps the literal;
@@ -62,10 +71,11 @@
 // back ('watch_root_simplified'); later candidates of the round then run
 // with incomplete root propagation, which is weaker but sound.
 //
-// Deliberately left out (M4-T1): irredundant constraints, mode 2 (a
-// notice, nothing done), decision reuse between candidates, sorting of
-// literals and candidates, tier selection and a 'vivified' bit (M4-T2),
-// deletion of subsumed or implied candidates, glue recomputation, tuning.
+// Deliberately left out (M4-T1, M4-T2): irredundant constraints, mode 2 (a
+// notice, nothing done), decision reuse between candidates and sorting of
+// candidates by literals, per-tier effort shares, effort relative to the
+// search ticks (the occurrence count is not counted either), deletion of
+// subsumed or implied candidates, glue recomputation, tuning.
 
 #include "contract.hpp"
 #include "internal.hpp"
@@ -85,11 +95,64 @@ bool Internal::vivifying () const {
   return opts.mode != 2 && stats.conflicts >= lim.vivify;
 }
 
-// The order in which the literals of the candidate are visited: the
-// stored one.  Marks the variables of the candidate.
+// The tier of a learnt constraint by its glue, with the current limits of
+// its kind.
+int Internal::vivify_tier (const Constraint &c) const {
+  assert (c.redundant ());
+  const size_t k = index (c.kind ());
+  const uint32_t glue = c.glue ();
+  if (glue <= (uint32_t) tiers.tier1[k])
+    return 1;
+  return glue <= (uint32_t) tiers.tier2[k] ? 2 : 3;
+}
+
+// The candidates of one pass into 'vivifier.candidates', visited from the
+// back: higher tiers first in the vector, newest last inside a tier.
+void Internal::vivify_select (Kind kind) {
+  std::vector<Ref> &candidates = vivifier.candidates;
+  candidates.clear ();
+  for (const Ref ref : redundant[index (kind)]) {
+    const Constraint &c = deref (arena, ref);
+    if (!c.garbage () && vivify_tier (c) <= opts.vivifytier)
+      candidates.push_back (ref);
+  }
+  if (opts.vivifyonce) {
+    const auto tried = [&] (Ref ref) {
+      return deref (arena, ref).vivified ();
+    };
+    if (!candidates.empty () &&
+        std::all_of (candidates.begin (), candidates.end (), tried)) {
+      stats.vivifyrescheduled++;
+      for (const Ref ref : candidates)
+        deref (arena, ref).set_vivified (false);
+    } else
+      std::erase_if (candidates, tried);
+  }
+  std::stable_sort (candidates.begin (), candidates.end (),
+                    [&] (Ref a, Ref b) {
+                      return vivify_tier (deref (arena, a)) >
+                             vivify_tier (deref (arena, b));
+                    });
+}
+
+// Occurrences of each literal among the candidates of the pass.
+void Internal::vivify_count () {
+  for (const Ref ref : vivifier.candidates)
+    for (const Lit l : deref (arena, ref))
+      vivifier.counts[index (l)]++;
+}
+
+// The order in which the literals of the candidate are visited: more
+// occurrences first, ties by literal index.  Marks the variables of the
+// candidate.
 void Internal::vivify_order (const Constraint &c) {
   std::vector<Lit> &order = vivifier.order;
+  const std::vector<uint32_t> &counts = vivifier.counts;
   order.assign (c.begin (), c.end ());
+  std::sort (order.begin (), order.end (), [&] (Lit a, Lit b) {
+    const uint32_t x = counts[index (a)], y = counts[index (b)];
+    return x != y ? x > y : index (a) < index (b);
+  });
   for (Lit l : order)
     vivifier.in_candidate[var (l)] = 1;
 }
@@ -167,8 +230,18 @@ bool Internal::vivify_analyze (Kind kind, Ref start, Lit kept) {
   return ok;
 }
 
+// Debug check before a rewrite: no two literals of D are equal or
+// complementary.
+[[maybe_unused]] static bool distinct_variables (std::vector<Lit> lits) {
+  std::sort (lits.begin (), lits.end (),
+             [] (Lit a, Lit b) { return var (a) < var (b); });
+  return std::adjacent_find (lits.begin (), lits.end (), [] (Lit a, Lit b) {
+           return var (a) == var (b);
+         }) == lits.end ();
+}
+
 // V5.  Replaces the candidate by the reduced D if it is shorter, as
-// 'strengthen_root' does.  At level 0.
+// 'strengthen_root' does, else marks it as tried.  At level 0.
 void Internal::vivify_apply (Ref ref) {
   Constraint &c = deref (arena, ref);
   const Kind kind = c.kind ();
@@ -176,8 +249,11 @@ void Internal::vivify_apply (Ref ref) {
   assert (std::all_of (lits.begin (), lits.end (), [&] (Lit l) {
     return std::find (c.begin (), c.end (), l) != c.end ();
   }));
-  if (lits.size () >= c.size ())
+  if (lits.size () >= c.size ()) {
+    c.set_vivified (true);
     return;
+  }
+  assert (distinct_variables (lits)); // with the above: a proper subset
   stats.vivified[index (kind)]++;
   stats.vivifiedlits[index (kind)] += (int64_t) (c.size () - lits.size ());
   LOG (ref, "vivified to %zu literals", lits.size ());
@@ -204,6 +280,7 @@ void Internal::vivify_apply (Ref ref) {
   const uint32_t size = static_cast<uint32_t> (lits.size ());
   shrink_constraint (ref, size);
   c.set_glue (std::min (c.glue (), size));
+  c.set_vivified (false);
   watch_root_simplified (ref);
 }
 
@@ -251,7 +328,8 @@ void Internal::vivify_constraint (Ref ref) {
   if (success) {
     prefix.qreduce (vivifier.lits, kind);
     vivify_apply (ref);
-  }
+  } else
+    deref (arena, ref).set_vivified (true);
   for (Lit l : vivifier.order)
     vivifier.in_candidate[var (l)] = 0;
   vivifier.order.clear ();
@@ -259,10 +337,11 @@ void Internal::vivify_constraint (Ref ref) {
   vivifier.chain.clear ();
 }
 
-// The learnt constraints of one kind, newest first, within 'ticks'.
+// The candidates of one kind within 'ticks'.
 void Internal::vivify_kind (Kind kind, int64_t ticks) {
   std::vector<Ref> &candidates = vivifier.candidates;
-  candidates = redundant[index (kind)];
+  vivify_select (kind);
+  vivify_count ();
   const int64_t limit = stats.ticks + ticks;
   while (!candidates.empty () && stats.ticks < limit &&
          status == Status::Unknown) {
@@ -271,6 +350,7 @@ void Internal::vivify_kind (Kind kind, int64_t ticks) {
     vivify_constraint (ref);
   }
   candidates.clear ();
+  std::fill (vivifier.counts.begin (), vivifier.counts.end (), 0u);
 }
 
 // One round; returns a root conflict or 'Ref::none'.  Every exit leaves
@@ -282,6 +362,7 @@ Ref Internal::vivify () {
   stats.vivifyrounds++;
   vivifier.phases = phases;
   vivifier.in_candidate.assign (prefix.size (), 0);
+  vivifier.counts.assign (2 * prefix.size (), 0);
   const int kinds = opts.vivifyclause + opts.vivifycube;
   for (const Kind kind : {Kind::Clause, Kind::Cube}) {
     const int on =
@@ -295,6 +376,7 @@ Ref Internal::vivify () {
   phases.swap (vivifier.phases);
   std::vector<int8_t> ().swap (vivifier.phases);
   std::vector<uint8_t> ().swap (vivifier.in_candidate);
+  std::vector<uint32_t> ().swap (vivifier.counts);
   lim.vivify =
       stats.conflicts + (int64_t) opts.vivifyint * (stats.vivifyrounds + 1);
   if (status != Status::Unknown) {

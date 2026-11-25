@@ -57,6 +57,7 @@ namespace miniqu {
   COUNTER (vivifyprops) \
   COUNTER (vivifyskipped) \
   COUNTER (vivifyunits) \
+  COUNTER (vivifyrescheduled) \
   KIND_COUNTER (vivifychecked) \
   KIND_COUNTER (vivified) \
   KIND_COUNTER (vivifiedlits) \

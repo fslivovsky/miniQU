@@ -335,6 +335,9 @@ struct Internal {
   // vivify.cpp
   void init_vivify ();
   bool vivifying () const;
+  int vivify_tier (const Constraint &) const;
+  void vivify_select (Kind);
+  void vivify_count ();
   void vivify_order (const Constraint &);
   [[nodiscard]] bool vivify_analyze (Kind, Ref start, Lit kept);
   void vivify_apply (Ref);

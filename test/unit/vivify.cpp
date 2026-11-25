@@ -31,7 +31,9 @@ struct Fixture {
     internal.opts.mode = mode;
     internal.opts.vivify = 1;
     internal.opts.gcfrac = 100;
+    internal.init_tiers ();
     declare (internal, prefix);
+    internal.size_watches ();
     if (!traced)
       return;
     auto owned = std::make_unique<Recorder> ();
@@ -62,7 +64,7 @@ struct Fixture {
     return deref (internal.arena, ref).garbage ();
   }
   std::vector<Lit> sorted (Ref ref) const {
-    std::vector<Lit> result = stored (internal, ref);
+    std::vector<Lit> result = ::stored (internal, ref);
     std::sort (result.begin (), result.end ());
     return result;
   }
@@ -76,7 +78,8 @@ struct Fixture {
   // (8): level 0, 'seen' clear, phases unchanged, the next round not due,
   // the invariants.  Returns the root conflict.
   Ref vivify () {
-    internal.init_model_cube ();
+    if (internal.model_cube == Ref::none)
+      internal.init_model_cube ();
     CHECK (internal.propagate () == Ref::none);
     internal.init_vivify ();
     internal.lim.vivify = 0;
@@ -272,6 +275,135 @@ static void test_unit_and_empty () {
   }
 }
 
+// A further round after the first, without the checks of 'vivify'.
+static void again (Fixture &f) {
+  f.internal.lim.vivify = 0;
+  CHECK (f.internal.vivify () == Ref::none);
+}
+
+static bool tried (Fixture &f, Ref ref) {
+  return deref (f.internal.arena, ref).vivified ();
+}
+
+// (9) The 'vivified' bit.  The learnts (1 2 3) and (4 5 6) cannot be
+// shortened: both get the bit.  With 'vivifyonce' the next round tries
+// only the new (1 4 5), the round after finds no candidate without the bit
+// and takes all three again; without it every round tries all.
+static void test_once () {
+  for (int once : {1, 0}) {
+    Fixture f ("eeeeee");
+    f.internal.opts.vivifyonce = once;
+    const Ref a = f.learn (Clause, {1, 2, 3});
+    const Ref b = f.learn (Clause, {4, 5, 6});
+    CHECK (!tried (f, a) && !tried (f, b));
+    CHECK (f.vivify () == Ref::none);
+    CHECK (tried (f, a) && tried (f, b));
+    CHECK_EQ (f.internal.stats.vivifychecked[0], 2);
+    const Ref c = f.learn (Clause, {1, 4, 5});
+    again (f);
+    CHECK (tried (f, c));
+    CHECK_EQ (f.internal.stats.vivifychecked[0], once ? 3 : 5);
+    CHECK_EQ (f.internal.stats.vivifyrescheduled, 0);
+    again (f);
+    CHECK_EQ (f.internal.stats.vivifychecked[0], once ? 6 : 8);
+    CHECK_EQ (f.internal.stats.vivifyrescheduled, once);
+    CHECK (tried (f, a) && tried (f, b) && tried (f, c));
+  }
+  // A shortened candidate keeps the bit clear.
+  Fixture f ("eeee");
+  f.add (Clause, {1, 3});
+  const Ref c = f.learn (Clause, {1, 2, 3, 4});
+  CHECK (f.vivify () == Ref::none);
+  CHECK_EQ (deref (f.internal.arena, c).size (), 2u);
+  CHECK (!tried (f, c));
+}
+
+// (10) 'vivifytier' with the limits 2 and 6: the learnts of glue 2, 5 and
+// 9 are tier 1, 2 and 3.  Tier 1 takes the first, 2 the first two, 3 all,
+// lower tier visited first (from the back of the candidates), newest
+// first inside a tier.
+static void test_tier () {
+  for (int tier : {1, 2, 3}) {
+    Fixture f ("eeeeeeeeeeee");
+    f.internal.opts.vivifytier = tier;
+    CHECK_EQ (f.internal.tiers.tier1[0], 2);
+    CHECK_EQ (f.internal.tiers.tier2[0], 6);
+    const Ref t3 = f.learn (Clause, {7, 8, 9});
+    deref (f.internal.arena, t3).set_glue (9);
+    const Ref t1 = f.learn (Clause, {1, 2, 3});
+    const Ref t2 = f.learn (Clause, {4, 5, 6});
+    deref (f.internal.arena, t2).set_glue (5);
+    const Ref u1 = f.learn (Clause, {10, 11, 12});
+    f.internal.vivify_select (Clause);
+    std::vector<Ref> expected = {t1, u1};
+    if (tier >= 2)
+      expected.insert (expected.begin (), t2);
+    if (tier == 3)
+      expected.insert (expected.begin (), t3);
+    CHECK (f.internal.vivifier.candidates == expected);
+    f.internal.vivifier.candidates.clear ();
+    CHECK (f.vivify () == Ref::none);
+    CHECK_EQ (f.internal.stats.vivifychecked[0], tier + 1);
+    CHECK_EQ (tried (f, t2), tier >= 2);
+    CHECK_EQ (tried (f, t3), tier == 3);
+  }
+}
+
+// (11) The literal order.  With (3 -1) stored, deciding -3 first forces -1
+// and then 2 by the learnt (1 2 3) itself, giving (2 3); the stored order
+// (and the order by literal index) decides -1, -2 and keeps all three.
+// The learnts (3 4 5) and (3 6 7) make 3 the most frequent literal.
+static void test_order () {
+  for (bool frequent : {false, true}) {
+    Fixture f ("eeeeeee");
+    f.add (Clause, {3, -1});
+    const Ref c = f.learn (Clause, {1, 2, 3});
+    if (frequent) {
+      f.learn (Clause, {3, 4, 5});
+      f.learn (Clause, {3, 6, 7});
+    }
+    CHECK (f.vivify () == Ref::none);
+    if (frequent)
+      CHECK (f.sorted (c) == Fixture::sorted ({2, 3}));
+    else
+      CHECK (f.sorted (c) == Fixture::sorted ({1, 2, 3}));
+  }
+}
+
+// (12) After an elimination round over QCIR input: the gate variable 4 is
+// eliminated together with the learnt (1 3 4), and the round that follows
+// neither assigns nor sees it; the invariants hold.
+static void test_after_elim () {
+  Fixture f ("eeeE");
+  f.internal.complete = true;
+  f.internal.opts.elim = 1;
+  f.add (Clause, {4, 1});
+  f.add (Clause, {4, 2});
+  f.add (Clause, {-4, 3});
+  const Ref c = f.learn (Clause, {1, 2, 3});
+  const Ref d = f.learn (Clause, {1, 3, 4});
+  f.internal.init_model_cube ();
+  CHECK (f.internal.propagate () == Ref::none);
+  CHECK (f.internal.eliminating ());
+  CHECK (f.internal.eliminate () == Ref::none);
+  CHECK (f.internal.ftab[var (L (4))].eliminated);
+  CHECK (f.garbage (d) || std::find (f.internal.redundant[0].begin (),
+                                     f.internal.redundant[0].end (),
+                                     d) == f.internal.redundant[0].end ());
+  (void) c;
+  CHECK (f.vivify () == Ref::none);
+  CHECK_EQ (f.internal.val (L (4)), 0);
+  for (const auto *lists : {&f.internal.irredundant, &f.internal.redundant})
+    for (const auto &list : *lists)
+      for (const Ref ref : list) {
+        const Constraint &k = deref (f.internal.arena, ref);
+        if (k.garbage ())
+          continue;
+        for (const Lit l : k)
+          CHECK (var (l) != var (L (4)));
+      }
+}
+
 // The schedule: the first round after 'vivifyint' conflicts, the next
 // 'vivifyint * (rounds + 1)' conflicts after the last; nothing in mode 2.
 static void test_schedule () {
@@ -304,5 +436,9 @@ int main () {
   test_root ();
   test_unit_and_empty ();
   test_schedule ();
+  test_once ();
+  test_tier ();
+  test_order ();
+  test_after_elim ();
   return test_result ();
 }

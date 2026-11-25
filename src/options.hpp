@@ -121,6 +121,10 @@ namespace miniqu {
       "conflicts between vivification rounds (growing arithmetically)") \
   OPTION (vivifyticks, 2000000, 0, 1000000000, \
           "propagation ticks one vivification round may spend") \
+  OPTION (vivifyonce, 1, 0, 1, \
+          "do not retry constraints that vivification left unchanged") \
+  OPTION (vivifytier, 2, 1, 3, \
+          "vivify learnt constraints of tier 1, up to tier 2, or all") \
   OPTION (profile, 0, 0, 3, "profiling level")
 
 struct Options {
