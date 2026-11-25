@@ -3,6 +3,7 @@
 // resolvents, and the proof steps, which the internal checker replays.
 
 #include "checker.hpp"
+#include "child.hpp"
 #include "internal_test.hpp"
 #include "proof.hpp"
 #include "recorder.hpp"
@@ -389,6 +390,49 @@ static void test_dependencies () {
   CHECK (f.internal.depend.watching[0].empty ());
 }
 
+// The invariants of 'check_invariants' hold after a round, with learnt
+// constraints of both kinds in the databases.
+static void test_invariants_after_round () {
+  Fixture f ("eeeE");
+  f.add (Clause, {4, 1});
+  f.add (Clause, {-4, 2});
+  f.learn (Clause, {4, 1, 3});
+  CHECK (f.eliminate () == Ref::none);
+  CHECK (f.eliminated (4));
+  f.internal.check_invariants ();
+  f.internal.check_elimination_owner (var (L (1)));
+}
+
+// Hand-made violations end the process through 'fatal': an eliminated
+// variable that still occurs, and the owner scan on a variable that occurs
+// in a cube or is not rightmost.
+static void test_violations_caught () {
+  CHECK (dies_with (
+      [] {
+        Fixture f ("eeeE");
+        f.add (Clause, {4, 1});
+        f.add (Clause, {-4, 2});
+        f.internal.ftab[var (L (4))].eliminated = true;
+        f.internal.check_invariants ();
+      },
+      "eliminated variable"));
+  CHECK (dies_with (
+      [] {
+        Fixture f ("eEaa");
+        f.add (Clause, {2, 1});
+        f.add (Cube, {2, 3});
+        f.internal.check_elimination_owner (var (L (2)));
+      },
+      "other kind"));
+  CHECK (dies_with (
+      [] {
+        Fixture f ("eae");
+        f.add (Clause, {1, 3});
+        f.internal.check_elimination_owner (var (L (1)));
+      },
+      "not rightmost"));
+}
+
 int main () {
   test_clauses ();
   test_bound ();
@@ -404,5 +448,7 @@ int main () {
   test_schedule ();
   test_above_root ();
   test_dependencies ();
+  test_invariants_after_round ();
+  test_violations_caught ();
   return test_result ();
 }

@@ -3790,3 +3790,61 @@ nothing, so it needs no proof step and is as safe as a restart.
 3. The `-dl` dependency reset path is covered only by the unit test (the fuzz runs never hit it, as argued:
    gate variables are never secondary); `elimlearnt.cube` was never nonzero in the fuzz run.
 4. `check_invariants` for eliminated variables is still M3-T3.
+
+## M3-T3 (worker, 2026-11-25)
+
+Invariant checks, matrix rows, sanity runs, ARCHITECTURE as built. Elimination algorithm unchanged.
+
+**Built**
+- `check.cpp`, `check_invariants ()`: (a) no live constraint of the four lists contains an eliminated variable;
+  (b) an eliminated variable is not a decision variable and is unassigned; (c) lists without garbage after a round
+  was already checked (`list refers to a moved constraint` / clean lists; `finish_elim_round` erases garbage), not added.
+- `Internal::check_elimination_owner (Var)` (check.cpp), called from `try_eliminate ()` under `assertions_enabled`
+  after the resolvents are added and before the parents are marked garbage: direct scan of all four lists, no live
+  constraint of the other kind contains x, and in each live constraint of the primary kind containing x no variable
+  is deeper (`prefix.depth`). `fatal` on violation. Quadratic, comment says so.
+- `test/unit/elim.cpp`: `test_invariants_after_round`, `test_violations_caught` (3 death tests via `dies_with`: eliminated
+  variable still occurring, x in a cube of the other kind, x not rightmost). ctest release 44/44, debug 44/44, 0 warnings.
+- `tests/matrix.txt`: rows `elim-clause-only`, `elim-cube-only`, `elim-pre-only`, `elim-ccmin` as specified.
+- ARCHITECTURE.md: module table 3.4 marked, new 10.0 "As built". The option list of 9.1 is an excerpt, not edited
+  (10.0 names the elimination options); the 8.2 proof rows for BVE already exist.
+
+**Runs** (machine has 48 cores now; heavy runs `taskset -c 0-47`, `-j 40`; scratch in `/home/ec2-user/miniqu-work/m3t3`)
+- Release matrix: `tests/regress.sh -S -j 40 -s 1:30 -M <12 elim* rows> build/release/miniQU`: PASSED, 1 warning
+  (2 timeouts in `elim-noearly`, 20 s limit), 360 proofs accepted by the Lean checker, no wrong verdict. Log `m3t3/rel.log`.
+- By hand, five instances (add20y.sat, klieber2017q-060-15-eq, test_5_5_tic.pg-7, bt2nd-2x4_8.ig,
+  connect-3x3_9_connect3.ig; `--elim --no-elimcube` / `--no-elimclause`): `eliminated.cube 0` / `eliminated.clause 0` on
+  the four instances that print statistics, other counter 313-727 (add20y.sat printed nothing within 30 s: unknown
+  before statistics).
+- Debug binary, `tests/regress.sh -S -n -j 40 -s 1:10 -t 60 -M <same rows>`: no assertion/invariant failure, no wrong verdict
+  (`m3t3/dbg.log`), but the run is marked FAILED (18 problems): 1-2 of 5 search instances time out at 60 s in 6 rows
+  (stress limit 2% exceeded in the inp rows) and the required counters `eliminated.*` are 0% in 7 rows because the
+  few finished instances (3-4 of 5) have no eliminations. Seeds 6..10 are only 5 search instances; this is slowness of the debug
+  build (now also with the quadratic owner scan before every commit; not measured separately) and a too small sample,
+  not a found bug. Needs a rerun with a larger limit or more seeds.
+- `tests/fuzz_cert.sh build/release/miniQU 1 30 --elim --elimint=1` (JOBS=16): VALID 72, WELLFORMED 48, no INVALID/MALFORMED/ERROR.
+- QDIMACS (qbfuzz seeds 3, 7, 11, parameters of fuzz_cert LARGE): `--elim` prints "elimination is not applied to QDIMACS input",
+  same verdict (UNSAT) and same `c stat conflicts` as without, with and without `-mode=2` (6/6).
+- Real files, `-verb=1 --cpulim=60`, release build, with and without `--elim`: verdicts agree (6 SAT in both, add20y.sat
+  and the ci.e#1 instance unknown in both). The six solved `--elim` runs re-run with `--proof ... --proofbinary` and checked by
+  `qlrup-check`: all `s VERIFIED TRUE`; proofs deleted. Files are the smallest per family (all verdicts are SAT, so no UNSAT file
+  was covered). Command: `miniQU -verb=1 --cpulim=60 [--elim] FILE`.
+
+| file | verdict | elim.clause | elim.cube | resolvents cl+cu | blockedother | blockedright | blockedbound | modelcubes |
+|---|---|---|---|---|---|---|---|---|
+| 5-5-6-3-3-81-EdAu | SATISFIABLE | 371 | 349 | 638+562 | 0 | 178 | 690 | 0 |
+| add20y.sat | unknown | 289 | 350 | 702+675 | 0 | 2009 | 15338 | 0 |
+| arbiter_with_buffer5.tlsf | SATISFIABLE | 942 | 902 | 2516+3302 | 0 | 38 | 7359 | 0 |
+| bt2nd-2x4_8.ig | SATISFIABLE | 550 | 433 | 1498+1393 | 0 | 770 | 951 | 0 |
+| ci.e#1.a#3.E#40.A#60.c#312.w#2.s#3.asp | unknown | 624 | 0 | 624+0 | 0 | 0 | 29422 | 0 |
+| connect-4x4_9_connect3.ig | SATISFIABLE | 688 | 600 | 1709+1751 | 0 | 3029 | 2859 | 0 |
+| klieber2017q-060-15-eq | SATISFIABLE | 420 | 418 | 2089+2085 | 0 | 0 | 4512 | 0 |
+| test_5_5_tic.pg-7 | SATISFIABLE | 384 | 313 | 772+1241 | 0 | 24 | 917 | 0 |
+
+**Blocking:** none found.
+
+**Not done / not tested**
+1. Debug fuzz run not clean on coverage/stress limits (see above); rerun with `-t 240` and seeds 1:30 and measure the cost of the debug owner scan.
+2. No UNSAT real file in the sanity set; no timing comparison; no asan run; seeds beyond 1:30; no full matrix.
+3. 9.1 option list not extended (excerpt); `check_invariants` does not check the state of occurrence lists (none outlive a round).
+4. `elim-clause-only`/`elim-cube-only` rows require only their own counter; "other counter is 0" is not enforced by matrix.txt (checked by hand only).

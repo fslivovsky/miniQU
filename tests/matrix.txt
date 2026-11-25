@@ -97,6 +97,10 @@ elim         | --elim                           | yes | conflicts eliminated.cla
 elim-noearly | --elim -no-earlytseitin          | yes | eliminated.clause eliminated.cube | normal
 elim-mode1-dl | --elim -mode=1 -dl              | yes | eliminated.clause eliminated.cube | normal
 elim-bound   | --elim --elimbound=16 --rootsimpdelay=0 | yes | eliminated.clause eliminated.cube | normal
+elim-clause-only | --elim --no-elimcube | yes | eliminated.clause | normal
+elim-cube-only | --elim --no-elimclause | yes | eliminated.cube | normal
+elim-pre-only | --elim --no-eliminp | yes | eliminated.clause eliminated.cube | normal
+elim-ccmin | --elim --elimint=1 -ccminmode=3 | yes | eliminated.clause eliminated.cube minimized | normal
 elim-inp     | --elim --no-elimpre --elimint=1      | yes | conflicts eliminprounds eliminated.clause eliminated.cube | stress | 2
 elim-inp-dl  | --elim --no-elimpre --elimint=1 -dl  | yes | conflicts eliminprounds eliminated.clause eliminated.cube dependencies | stress | 4
 elim-inp-gc  | --elim --elimint=1 --elimbound=16 --reduceint=2 --tier1glue=0 --tier2glue=0 --gcfrac=0 --rootsimpdelay=0 | yes | conflicts eliminprounds reductions collections | stress | 2

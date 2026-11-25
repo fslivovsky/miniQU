@@ -353,6 +353,7 @@ struct Internal {
   // check.cpp
   void check_invariants () const;
   void check_root_simplified () const;
+  void check_elimination_owner (Var) const;
 
 #ifdef MINIQU_LOGGING
   // logging.cpp; 'LOG' calls these inside member functions.

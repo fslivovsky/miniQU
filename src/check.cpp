@@ -129,6 +129,11 @@ void Internal::check_invariants () const {
         if (c.garbage ())
           continue;
         CHECK_INVARIANT (c.kind () == kind, "constraint in a wrong list");
+        for (Lit l : c)
+          CHECK_INVARIANT (var (l) < vars && !ftab[var (l)].eliminated,
+                           "constraint %lu contains the eliminated "
+                           "variable %u",
+                           (unsigned long) message_id (c), var (l) + 1);
         Var rightmost = 0;
         for (Lit l : c) {
           CHECK_INVARIANT (var (l) < vars, "unknown variable");
@@ -193,6 +198,10 @@ void Internal::check_invariants () const {
     const Lit l = mk_lit (v);
     CHECK_INVARIANT (val (l) == -val (~l), "values of %u differ", v + 1);
     const bool decision = prefix.vars[v].decision;
+    CHECK_INVARIANT (!ftab[v].eliminated || (!decision && !val (l)),
+                     "eliminated variable %u is a decision variable or "
+                     "assigned",
+                     v + 1);
     if (!val (l)) {
       if (decision) {
         unassigned[prefix.depth (v)]++;
@@ -272,6 +281,39 @@ void Internal::check_root_simplified () const {
                            "unit",
                            (unsigned long) message_id (c));
         }
+      }
+}
+
+// Debug builds, called by 'try_eliminate' right before a variable is
+// committed: re-verifies the owner's conditions for 'x' by a direct scan of
+// all four lists, independent of the occurrence lists.  With K the kind in
+// which 'x' is primary, no live constraint of the other kind contains 'x',
+// and in every live constraint of kind K containing 'x' no other variable
+// is deeper in the prefix.  The scan is quadratic over a whole run (one
+// pass over the databases per eliminated variable), so it is for debug
+// builds and fuzz-size instances only.
+void Internal::check_elimination_owner (Var x) const {
+  const Kind primary =
+      prefix.is_primary (Kind::Clause, x) ? Kind::Clause : Kind::Cube;
+  for (Kind kind : {Kind::Clause, Kind::Cube})
+    for (const auto *lists : {&irredundant, &redundant})
+      for (Ref ref : (*lists)[index (kind)]) {
+        const Constraint &c = deref (arena, ref);
+        if (c.garbage ())
+          continue;
+        const bool occurs = std::any_of (
+            c.begin (), c.end (), [&] (Lit l) { return var (l) == x; });
+        if (!occurs)
+          continue;
+        if (kind != primary)
+          fatal ("eliminating %u, which occurs in live constraint %lu of "
+                 "the other kind",
+                 x + 1, (unsigned long) message_id (c));
+        for (Lit l : c)
+          if (prefix.depth (var (l)) > prefix.depth (x))
+            fatal ("eliminating %u, which is not rightmost in live "
+                   "constraint %lu",
+                   x + 1, (unsigned long) message_id (c));
       }
 }
 

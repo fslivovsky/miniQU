@@ -306,6 +306,8 @@ bool Internal::try_eliminate (Var x) {
   add_resolvents (kind, x);
   if (status != Status::Unknown)
     return true;
+  if (assertions_enabled)
+    check_elimination_owner (x);
   // Each contains the unassigned 'x', so it is neither a unit nor a
   // reason.
   for (const std::vector<Ref> *occs : {&pos, &neg})

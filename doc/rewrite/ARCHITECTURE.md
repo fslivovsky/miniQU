@@ -211,11 +211,11 @@ and deleted only through `constraint.cpp`, assignments only through
 
 | file | contents |
 |---|---|
-| `inprocess.cpp` | scheduling of passes, effort budgets, entering/leaving "occurrence mode" (10.1) |
-| `flags.hpp` | per-variable status (active/fixed/eliminated) and scheduling marks |
-| `occs.{hpp,cpp}` | full occurrence lists per literal and kind (10.2) |
-| `elim.cpp` | bounded variable elimination (clause and cube distribution) |
-| `extend.cpp` | extension stack in internal literals and reconstruction (10.4); only built with QDIMACS elimination (ROADMAP M3.6) |
+| `inprocess.cpp` (not built) | scheduling of passes, effort budgets, entering/leaving "occurrence mode" (10.1) |
+| `flags.hpp` (built) | per-variable status (active/fixed/eliminated) and scheduling marks |
+| `occs.{hpp,cpp}` (not built) | full occurrence lists per literal and kind (10.2) |
+| `elim.{hpp,cpp}` (built) | bounded variable elimination (clause and cube distribution); `Eliminator` in `elim.hpp` |
+| `extend.cpp` (not built) | extension stack in internal literals and reconstruction (10.4); only built with QDIMACS elimination (ROADMAP M3.6) |
 | `subsume.cpp` | subsumption and strengthening |
 | `vivify.cpp` | vivification of clauses and cubes |
 | later: `block.cpp`, `probe.cpp`, `decompose.cpp`, `gates.cpp`, `expand.cpp` | see ROADMAP M5+ |
@@ -1207,6 +1207,37 @@ referenced) run at root level in debug builds, after every pass.
 ---------------------------------------------------------------------------
 
 ## 10. Inprocessing framework (M3+)
+
+### 10.0 As built (M3 initial version)
+
+Only bounded variable elimination exists; 10.1-10.4 below describe the
+design, which is not built yet. What is built:
+
+- Elimination is off by default (`--elim`). It is scheduled from the search
+  loop: `eliminating ()` says a round is due (option on, a kind switch on,
+  mode != 2, `complete`, and `stats.conflicts >= lim.elim`), the loop
+  backtracks to level 0, propagates and calls `eliminate ()`. The first
+  round runs before the search (`--elimpre`), later ones every
+  `elimint * (rounds + 1)` conflicts (`--eliminp`).
+- There is no occurrence mode and no `inprocess.cpp`: `eliminate ()` builds
+  occurrence lists of the candidate variables for the round only, next to
+  the watches, from all four lists (both kinds, irredundant and learnt), and
+  drops them at the end of the round. No `Ref` survives a round.
+- Candidates are non-decision variables only (gate variables of QCIR
+  inputs). An existential variable is eliminated only if it occurs in no
+  cube, a universal one only if it occurs in no clause, and only if it is
+  rightmost in every constraint of its own kind that contains it. Learnt
+  constraints block a variable like irredundant ones and are deleted with it.
+- QDIMACS input and mode 2 are excluded (no extension stack, so no
+  certificates; ROADMAP M3.6). Proofs are complete: resolvents are derived
+  from their two parents, parents deleted (8.2).
+- Checks: `check_invariants ()` finds no live constraint with an eliminated
+  variable, and an eliminated variable unassigned and not a decision
+  variable; debug builds re-scan all four lists before each commit
+  (`check_elimination_owner ()`, quadratic).
+- The options of 9.1 are an excerpt; the elimination options (`elim`,
+  `elimclause`, `elimcube`, `elimpre`, `eliminp`, `elimint`, `elimbound`,
+  `elimocclim`, `elimclslim`, `elimticks`) are in `src/options.hpp`.
 
 ### 10.1 Scheduling
 
