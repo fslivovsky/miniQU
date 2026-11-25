@@ -13,10 +13,13 @@
 // Root simplification is an iteration of its own: it can assign root
 // literals or find a root conflict, and a decision must not come before
 // their propagation.  It runs only when root literals are new, so it cannot
-// repeat without progress.  When no decision variable is left, the
-// clauses are satisfied (QDIMACS) and the initial cube taken from the
-// assignment is analysed like any satisfied cube (4.5).  Analysis ends the
-// search by deriving an empty constraint, which sets 'status'.
+// repeat without progress.  Bounded variable elimination ('elim.cpp')
+// follows it under the same conditions: one round before the first
+// decision, after root simplification had its turn, which may again assign
+// root literals or return a root conflict.  When no decision variable is
+// left, the clauses are satisfied (QDIMACS) and the initial cube taken from
+// the assignment is analysed like any satisfied cube (4.5).  Analysis ends
+// the search by deriving an empty constraint, which sets 'status'.
 
 #include "internal.hpp"
 
@@ -31,6 +34,7 @@ Var Internal::add_var (Quant quant, bool decision, int proof_number) {
   // The initial phase is false (porting note 6).
   phases.push_back (-1);
   seen.push_back (0);
+  ftab.push_back (Flags{});
   if (opts.dl) {
     add_dependency_var ();
     if (heaps.empty ())
@@ -64,6 +68,9 @@ void Internal::search () {
   init_reduce ();
   init_tiers ();
   init_model_cube ();
+  if (opts.elim && (opts.mode == 2 || !complete))
+    VERBOSE (1, "elimination is not applied %s",
+             complete ? "in mode 2" : "to QDIMACS input");
   while (status == Status::Unknown) {
     if (const Ref conflict = propagate (); conflict != Ref::none)
       analyze (conflict);
@@ -76,6 +83,10 @@ void Internal::search () {
     } else if (simplifying ()) {
       // It may assign root literals, which are propagated first.
       if (const Ref root_conflict = simplify_root ();
+          root_conflict != Ref::none)
+        analyze (root_conflict);
+    } else if (eliminating ()) {
+      if (const Ref root_conflict = eliminate ();
           root_conflict != Ref::none)
         analyze (root_conflict);
     } else {

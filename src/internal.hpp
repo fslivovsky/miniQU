@@ -3,7 +3,9 @@
 
 #include "arena.hpp"
 #include "constraint.hpp"
+#include "elim.hpp"
 #include "ema.hpp"
+#include "flags.hpp"
 #include "heap.hpp"
 #include "limit.hpp"
 #include "lit.hpp"
@@ -156,6 +158,7 @@ struct Internal {
   Random random;              // initial scores with '--seed'
   std::vector<Heap> heaps;    // per block (one with '--dl'), decisions only
   std::vector<int8_t> phases; // per variable: saved value, 1 or -1
+  std::vector<Flags> ftab;    // per variable: status (flags.hpp)
 
   // Conflict analysis.  'seen' (per variable) is all zero outside
   // 'analyze' and 'initial_cube'; so are 'level_count' and, at 'no_var',
@@ -174,6 +177,7 @@ struct Internal {
 
   Depend depend;
   Simplifier simplifier;
+  Eliminator eliminator;
 
   Ref model_cube = Ref::none; // buffer of 'initial_cube'
   std::vector<Lit> model;     // literals of the next initial cube
@@ -298,11 +302,25 @@ struct Internal {
   const Constraint *root_unit (Kind, Lit) const;
   bool is_root_reason (Ref) const;
   void materialize_root_units (size_t end);
+  void order_root_watches (Kind, std::span<Lit>) const;
+  void rewind_root_propagation (Ref);
   void watch_root_simplified (Ref);
   void strengthen_root (Ref);
   void simplify_constraint (Ref);
   [[nodiscard]] Ref add_root_units ();
   [[nodiscard]] Ref simplify_root ();
+
+  // elim.cpp
+  bool eliminating () const;
+  bool elim_candidate (Var) const;
+  void connect_occs ();
+  void flush_occs (std::vector<Ref> &);
+  [[nodiscard]] bool resolve (Kind, Ref, Ref, Lit pivot);
+  [[nodiscard]] bool find_resolvents (Kind, Var);
+  void add_resolvents (Kind, Var);
+  bool try_eliminate (Var);
+  void finish_elim_round ();
+  [[nodiscard]] Ref eliminate ();
 
   // collect.cpp
   bool collecting () const;

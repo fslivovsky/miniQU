@@ -185,14 +185,11 @@ void Internal::materialize_root_units (size_t end) {
   }
 }
 
-// Positions 0 and 1 get the literals that are best for propagation:
-// disabling, then unassigned, then the latest vanished.  If the second one
-// vanished in a propagation that is over and the first does not disable the
-// constraint, the constraint is unit or conflicting, and propagation has to
-// visit it again from there.
-void Internal::watch_root_simplified (Ref ref) {
-  Constraint &c = deref (arena, ref);
-  const Kind kind = c.kind ();
+// Positions 0 and 1 get the literals that are best for propagation under
+// the root assignment: disabling, then unassigned, then the latest
+// vanished.  At least two literals.
+void Internal::order_root_watches (Kind kind, std::span<Lit> lits) const {
+  assert (lits.size () > 1);
   const auto rank = [&] (Lit l) -> int64_t {
     const int value = kval (kind, l);
     if (value > 0)
@@ -202,12 +199,28 @@ void Internal::watch_root_simplified (Ref ref) {
     return vtab[var (l)].trail;
   };
   const auto by_rank = [&] (Lit a, Lit b) { return rank (a) < rank (b); };
-  std::iter_swap (c.begin (),
-                  std::max_element (c.begin (), c.end (), by_rank));
-  std::iter_swap (c.begin () + 1,
-                  std::max_element (c.begin () + 1, c.end (), by_rank));
+  std::iter_swap (lits.begin (),
+                  std::max_element (lits.begin (), lits.end (), by_rank));
+  std::iter_swap (
+      lits.begin () + 1,
+      std::max_element (lits.begin () + 1, lits.end (), by_rank));
+}
+
+// For a constraint ordered by 'order_root_watches': if the second literal
+// vanished in a propagation that is over and the first does not disable
+// the constraint, the constraint is unit or conflicting, and propagation
+// has to visit it again from there.
+void Internal::rewind_root_propagation (Ref ref) {
+  const Constraint &c = deref (arena, ref);
+  const Kind kind = c.kind ();
   if (kval (kind, c[0]) <= 0 && kval (kind, c[1]) < 0)
     propagated = std::min (propagated, (size_t) vtab[var (c[1])].trail);
+}
+
+void Internal::watch_root_simplified (Ref ref) {
+  Constraint &c = deref (arena, ref);
+  order_root_watches (c.kind (), c.lits ());
+  rewind_root_propagation (ref);
   attach (ref);
 }
 

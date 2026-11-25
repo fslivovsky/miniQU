@@ -88,6 +88,22 @@ namespace miniqu {
           "reset dependencies every n conflicts, with restartmode=1") \
   OPTION (reusetrail, 1, 0, 1, \
           "keep the trail prefix whose decisions a restart would redo") \
+  OPTION (elim, 0, 0, 1, \
+          "bounded variable elimination (QCIR input, modes 0 and 1)") \
+  OPTION ( \
+      elimclause, 1, 0, 1, \
+      "eliminate existential variables by clause resolution, with elim") \
+  OPTION (elimcube, 1, 0, 1, \
+          "eliminate universal variables by cube resolution, with elim") \
+  OPTION (elimpre, 1, 0, 1, "eliminate before the search, with elim") \
+  OPTION (eliminp, 1, 0, 1, "eliminate in inprocessing rounds, with elim") \
+  OPTION (elimbound, 0, 0, 1000000000, \
+          "additional constraints an elimination may add") \
+  OPTION (elimocclim, 100, 1, 1000000000, \
+          "occurrence limit per literal of an eliminated variable") \
+  OPTION (elimclslim, 100, 2, 1000000000, "size limit of a resolvent") \
+  OPTION (elimticks, 100000000, 0, 1000000000, \
+          "literal visits one elimination round may spend") \
   OPTION (profile, 0, 0, 3, "profiling level")
 
 struct Options {

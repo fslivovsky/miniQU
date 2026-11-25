@@ -40,6 +40,15 @@ namespace miniqu {
   COUNTER (rootconflicts) \
   COUNTER (rootlits) \
   COUNTER (rootdeleted) \
+  COUNTER (elimrounds) \
+  COUNTER (elimtried) \
+  COUNTER (elimblockedother) \
+  COUNTER (elimblockedright) \
+  COUNTER (elimblockedbound) \
+  COUNTER (elimunits) \
+  KIND_COUNTER (eliminated) \
+  KIND_COUNTER (resolvents) \
+  KIND_COUNTER (elimdeleted) \
   COUNTER (collections) \
   COUNTER (relocated) \
   COUNTER (modelcubes) \

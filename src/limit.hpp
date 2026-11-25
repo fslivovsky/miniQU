@@ -15,6 +15,7 @@ struct Limit {
   int64_t reduce = 0;
   int64_t retier = 0;
   int64_t simplify = 0;   // a propagation count ('--rootsimpdelay')
+  int64_t elim = 0;       // next elimination round
   double max_learnts = 0; // size trigger of 'reduce' (old policy)
   int64_t adjust = 0;     // conflicts until 'max_learnts' grows
 };
