@@ -4198,8 +4198,8 @@ PASSED, 0 of 25 timeouts, 50 proofs checked. Not a solver change.
 
 **List for the owner**
 1. Mode 1 certificates are wrong independently of B1: `fuzz_cert.sh` seeds 100:400 with `-mode=1` (plus `--vivify
-   --elim` options) gives 36 INVALID; `-mode=1` alone 28 INVALID of those 37 kept files, and the **frozen baseline with
-   `-mode=1` is INVALID on the same files** (so pre-existing, inherited). Files in `/home/ec2-user/miniqu-work/b1fix/keep-d/`
+   --elim` options) gives 36 INVALID; `-mode=1` alone 28 INVALID of those 37 kept files, and the **frozen baseline with `-mode=1` is INVALID on 29 of
+   them** (so pre-existing, inherited). Files in `/home/ec2-user/miniqu-work/b1fix/keep-d/`
    (bad.txt). Not investigated; `-cert -mode=1` should be refused or fixed.
 2. `tests/check_cert.py` takes the first prefix line as the outermost block; the solver (and the baseline) merge a
    `free` block with the following `exists` block, so `free-block.sat.qcir` is MALFORMED for both. That is why
