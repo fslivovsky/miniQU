@@ -3676,3 +3676,55 @@ Open for the owner (also listed in ROADMAP under "Left for later"): whether E3 m
 as M3.2 proposed; the yield measurement M3.0 and all benchmarks of elimination; gate-aware elimination,
 backward subsumption, the relaxation of the rightmost condition; elimination of decision variables and for
 QDIMACS input; the full test gates of ROADMAP M3.5.
+
+## M3-T1 (worker, 2026-11-25)
+
+**Built** (commits c28dd41, 358a96c): bounded variable elimination before the search, `src/elim.cpp`,
+`src/elim.hpp` (`Eliminator`: occurrence lists per kind and literal, `pending`, resolvent buffers, marks,
+ticks), `src/flags.hpp` (`Flags::eliminated`, `Internal::ftab`). One round (`eliminating ()` /
+`eliminate ()`) in the search loop after the `simplifying ()` branch, before the first decision; QCIR input in
+modes 0 and 1; clauses and cubes through one code path over `Kind`; side conditions E1-E4 exactly as in the
+"M3 execution plan" (E3 against every live constraint of the kind, learnt ones included; E2 against original
+and learnt constraints of the other kind); root-assigned literals are ordinary literals; resolvents of two or
+more literals stored irredundant with the watch order and rewind of root simplification; unit resolvents
+through `simplifier.units` / `add_root_units ()`; the empty resolvent decides. Proof: one derived step per
+resolvent with the two parent ids, before the `d` steps of `mark_garbage`; ids consumed with and without a
+proof. `--elim` with `-mode=2` or QDIMACS input prints "c elimination is not applied in mode 2" / "... to
+QDIMACS input" at `-verb=1` and does nothing. Options `elim` (0), `elimclause`, `elimcube`, `elimpre`,
+`eliminp` (declared, unused), `elimbound`, `elimocclim`, `elimclslim`, `elimticks`; counters `elimrounds`,
+`elimtried`, `elimblockedother`, `elimblockedright`, `elimblockedbound`, `elimunits`, per kind `eliminated`,
+`resolvents`, `elimdeleted`; `Limit::elim`; profile `elim`. `Internal::watch_root_simplified` split into
+`order_root_watches (Kind, std::span<Lit>)` and `rewind_root_propagation (Ref)` (behaviour unchanged, see the
+equivalence check below). Matrix rows `elim`, `elim-noearly`, `elim-mode1-dl`, `elim-bound` as specified (all
+required counters hold, no row lowered).
+
+**Deviations from the spec:** none in substance. Extra private helpers `flush_occs`, `find_resolvents`,
+`finish_elim_round`. `lim.elim` is declared but never advanced (the round is gated by `!stats.elimrounds`).
+
+**Tests run** (release build, 0 warnings):
+- `ctest --preset release` and `ctest --preset debug` (assertions, `check_invariants` after the round): 44/44
+  pass, including the new `unit-elim` (8 tests: clauses, bound 0/3 on a 3x3 case, cubes, E2, E3 deeper block vs.
+  same block, tautological / unit / empty resolvent, proof steps replayed by the internal checker, decision
+  variables and `elimclause=0` / `elimcube=0`, no round with `elim=0`, mode 2 or QDIMACS).
+- `tests/regress.sh -S -j 40 -s 1:30 -M elim,elim-noearly,elim-mode1-dl,elim-bound` (release): PASSED, 0 wrong
+  verdicts, 117 proofs accepted by the Lean checker, 3 timeouts in `elim-noearly`, which the plain `noearly`
+  row has on the same seeds as well (checked with `-M noearly -n`). Elimination fires on 40% of the
+  search-tier instances (gate-free QCNF instances have nothing to eliminate); `elimblockedother` stayed 0
+  (QCIR gate variables occur in one kind only).
+- Search unchanged without `--elim`: 20 corpus search-tier instances (seeds 101-120) in the four modes `''`,
+  `-dl`, `-mode=1`, `-mode=2`: the verdict and `c stat conflicts/decisions/propagations/ticks` equal those of
+  the binary before the change (`/home/ec2-user/miniqu-work/m3/miniQU.before`), 80/80. Script:
+  `/home/ec2-user/miniqu-work/m3/t1/eq.sh`. `tests/m1_equiv.sh` was not run (too long for the time-box).
+- Sanity only (not a benchmark, lower cores, 60 s, no timing claims): the 32 smallest files of the benchmark set
+  with and without `--elim`: no verdict disagreement, no unknown/missing-cube exit; 400-700 variables per kind
+  eliminated per instance.
+
+**Not done / not tested (for the owner):**
+1. Inprocessing rounds (`--eliminp`, `lim.elim`, backtrack to level 0), dependency reset after a round: M3-T2.
+2. `check_invariants` entries for eliminated variables (no live constraint mentions one; never assigned): M3-T3.
+3. Not run: full matrix, sanitizer (asan) fuzz, seeds beyond 1:30, `-cert` runs with `--elim` (`tests/
+   fuzz_cert.sh`), smoke set, `tests/m1_equiv.sh` with `--elim=0` added to EQUIV, `modelcubes == 0` on the
+   benchmark set, any benchmark or yield measurement.
+4. INV-COMPLETE after elimination is not checked beyond the fuzz/sanity runs above (no missing-cube exit seen).
+5. Resolvents are not checked for subsumption or duplicates (M3-T4); elimination of decision variables, QDIMACS
+   input and mode 2 are left out as planned.
