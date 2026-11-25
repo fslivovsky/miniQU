@@ -153,6 +153,10 @@ set_tests_properties(fuzz PROPERTIES ENVIRONMENT REGRESS_WORK=${CMAKE_BINARY_DIR
 add_test(NAME run-regressions
          COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/tests/run_regressions.sh $<TARGET_FILE:miniQU>
          WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+# Elimination makes root-cert-elim.sat.qcir decided at the root (B1).
+add_test(NAME run-regressions-elim
+         COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/tests/run_regressions.sh $<TARGET_FILE:miniQU> --elim
+         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
 
 # The tooling's own tests: paired statistics of bench/compare.py, evaluator.
 find_package(Python3 REQUIRED COMPONENTS Interpreter)

@@ -38,7 +38,9 @@ struct Eliminator {
   std::vector<Lit> lits;
   std::vector<Resolvent> resolvents;
   std::vector<Lit> resolvent; // the one being built
-  std::vector<int8_t> marks;  // per literal: in the first parent
+  // An empty resolvent of the round before reduction ('found_empty').
+  std::vector<Lit> move;
+  std::vector<int8_t> marks; // per literal: in the first parent
   std::vector<int8_t>
       marked; // per literal: in the resolvent ('elimsubsume')
 

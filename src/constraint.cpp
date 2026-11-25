@@ -36,8 +36,11 @@
 
 namespace miniqu {
 
-void Internal::found_empty (Kind kind) {
+// 'move' is the derived constraint before reduction when reduction emptied
+// it (all its literals are secondary); 'record_certificate' needs it.
+void Internal::found_empty (Kind kind, std::span<const Lit> move) {
   LOG ("empty %s", kind == Kind::Clause ? "clause" : "cube");
+  root_move.assign (move.begin (), move.end ());
   status = kind == Kind::Clause ? Status::False : Status::True;
   if (proof)
     proof->conclude (kind);
@@ -66,6 +69,8 @@ void Internal::add_original (Kind kind, std::vector<Lit> &lits, int gate) {
   if (proof)
     proof->add_original (id, kind, gate, lits);
   const size_t size = prefix.reduced_size (lits, kind);
+  if (!size && status == Status::Unknown)
+    root_move = lits; // for 'found_empty' below
   if (size < lits.size ()) {
     const uint64_t original = id;
     id = next_id++;
@@ -78,7 +83,8 @@ void Internal::add_original (Kind kind, std::vector<Lit> &lits, int gate) {
   if (status != Status::Unknown)
     return;
   if (lits.empty ()) {
-    found_empty (kind);
+    const std::vector<Lit> move = std::move (root_move);
+    found_empty (kind, move);
     return;
   }
   const Ref ref = new_constraint (id, kind, lits, false, 0);

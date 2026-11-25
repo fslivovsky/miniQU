@@ -261,6 +261,8 @@ bool Internal::resolve (Kind kind, Ref c_ref, Ref d_ref, Lit pivot) {
     if (!eliminator.marks[index (l)])
       lits.push_back (l);
   }
+  if (prefix.reduces_to_empty (lits, kind))
+    eliminator.move = lits; // for 'found_empty' (certificate)
   prefix.qreduce (lits, kind);
   if (opts.elimsubsume && resolvent_subsumed (kind, lits)) {
     stats.elimsubsumed[index (kind)]++;
@@ -334,7 +336,7 @@ void Internal::add_resolvents (Kind kind, Var x) {
       if (proof)
         proof->add_derived (id, kind, lits, parents);
       if (lits.empty ()) {
-        found_empty (kind);
+        found_empty (kind, eliminator.move);
         return;
       }
       stats.elimunits++;

@@ -176,7 +176,7 @@ void Internal::materialize_root_units (size_t end) {
     if (proof)
       proof->add_derived (id, kind, lits, ids);
     if (lits.empty ()) {
-      found_empty (kind);
+      found_empty (kind, {&c[0], 1});
       return;
     }
     stats.rootunits++;
@@ -242,6 +242,8 @@ void Internal::strengthen_root (Ref ref) {
     else if (proof)
       ids.push_back (unit->id ());
   }
+  if (prefix.reduces_to_empty (lits, kind))
+    simplifier.move = lits; // for 'found_empty' below
   prefix.qreduce (lits, kind);
   assert (lits.size () < c.size ());
   stats.rootstrengthened++;
@@ -252,7 +254,7 @@ void Internal::strengthen_root (Ref ref) {
     if (proof)
       proof->add_derived (id, kind, lits, ids);
     if (lits.empty ()) {
-      found_empty (kind);
+      found_empty (kind, simplifier.move);
       return;
     }
     stats.rootstrunits++;

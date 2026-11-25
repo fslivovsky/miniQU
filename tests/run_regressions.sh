@@ -8,8 +8,13 @@
 #
 # The expected verdict is part of the file name (NAME.sat.qcir, NAME.unsat.qdimacs).
 # .qcir instances are also solved with -proof-binary -proof=FILE and the proof
-# must be accepted with the same verdict. Exit status 1 on any failure; the
-# reproducing command is printed.
+# must be accepted with the same verdict.  The certificate (-cert) of every
+# *-cert-*.qcir instance is validated with tests/check_cert.py (VALID or
+# WELLFORMED; also with -n).  Only those: check_cert.py takes the first
+# prefix line as the outermost block, while the solver merges a free block
+# with the existential block after it (free-block.sat.qcir is MALFORMED for
+# that reason, as with the baseline). Exit status 1 on any failure; the reproducing command is
+# printed.
 
 CHECKER=/home/ec2-user/qu-check/.lake/build/bin/qlrup-check
 PROOFS=1
@@ -46,6 +51,14 @@ for file in "$DIR"/*.qcir "$DIR"/*.qdimacs; do
     if [ "$code" -ne "$expected" ]; then
         fail "$name: expected $verdict (exit $expected), exit code $code" "$SOLVER -verb=0 $* $file"
         continue
+    fi
+    if [[ $name == *-cert-*.qcir ]]; then
+        cert=$(python3 "$DIR/../check_cert.py" "$SOLVER" "$file" "$@" 2>/dev/null | tail -1)
+        case $cert in
+            VALID\ *|WELLFORMED\ *) ;;
+            *) fail "$name: certificate check said '${cert:-nothing}'" \
+                    "python3 tests/check_cert.py $SOLVER $file $*" ;;
+        esac
     fi
     if [ -n "$PROOFS" ] && [[ $name == *.qcir ]]; then
         rm -f "$TMP/p"

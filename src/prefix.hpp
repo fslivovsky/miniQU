@@ -52,6 +52,14 @@ struct Prefix {
   // The number of literals of sorted 'lits' that 'qreduce' keeps (a
   // prefix); for callers that need to know which ones it removes.
   size_t reduced_size (std::span<const Lit> lits, Kind) const;
+
+  // Whether 'qreduce' empties 'lits' (any order): no primary literal.
+  bool reduces_to_empty (std::span<const Lit> lits, Kind kind) const {
+    for (const Lit l : lits)
+      if (is_primary (kind, var (l)))
+        return false;
+    return true;
+  }
 };
 
 } // namespace miniqu

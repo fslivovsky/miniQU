@@ -83,6 +83,8 @@ struct Simplifier {
   std::vector<RootUnit> units;
   std::vector<Lit> lits;
   std::vector<uint64_t> chain;
+  std::vector<Lit> move; // step 2 result before reduction, if it reduces
+                         // to the empty constraint ('found_empty')
 };
 
 // The resolvent of 'analyze_qu' as variables per block, so that the
@@ -185,6 +187,9 @@ struct Internal {
   std::vector<Lit> model;     // literals of the next initial cube
 
   std::vector<Lit> certificate; // values of the certificate block
+  // The literals of the constraint that reduced to the empty constraint
+  // deciding the formula, before reduction (certificate.cpp).
+  std::vector<Lit> root_move;
 
   Proof *proof = nullptr;
   // The input carries both encodings (QCIR, ARCHITECTURE 4.5): reaching
@@ -220,7 +225,7 @@ struct Internal {
   void shrink_constraint (Ref, uint32_t new_size);
   void attach (Ref);
   void detach (Ref);
-  void found_empty (Kind);
+  void found_empty (Kind, std::span<const Lit> move = {});
   // What a new constraint stores of its id: nothing unless a tracer is
   // connected (ARCHITECTURE 5.2).
   std::optional<uint64_t> stored_id (uint64_t id) const {

@@ -263,7 +263,7 @@ void Internal::vivify_apply (Ref ref) {
     if (proof)
       proof->add_derived (id, kind, lits, ids);
     if (lits.empty ()) {
-      found_empty (kind);
+      found_empty (kind, vivifier.unreduced);
       return;
     }
     stats.vivifyunits++;
@@ -326,6 +326,7 @@ void Internal::vivify_constraint (Ref ref) {
   }
   backtrack (0);
   if (success) {
+    vivifier.unreduced = vivifier.lits; // for 'found_empty'
     prefix.qreduce (vivifier.lits, kind);
     vivify_apply (ref);
   } else

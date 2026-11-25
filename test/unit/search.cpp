@@ -276,6 +276,49 @@ static void test_solver () {
   CHECK ((cert[0] > 0) != (cert[1] > 0));
 }
 
+// B1 of the hand-over review: a formula decided at the root by reducing a
+// constraint to the empty one.  The certificate is the move that makes the
+// reduced literals vanish, not the trail values (unassigned: true).
+static void test_certificate_by_reduction () {
+  { // An original clause of universal literals only: false, u1 = u2 = 0.
+    Solver solver;
+    solver.add_var (1, Quant::Forall);
+    solver.add_var (2, Quant::Forall);
+    solver.add_var (3, Quant::Exists);
+    solver.add_original (Clause, std::vector<int>{1, 2});
+    CHECK_EQ (solver.solve (), 20);
+    CHECK (solver.certificate () == (std::vector<int>{-1, -2}));
+  }
+  { // An original cube of existential literals only: true, x1 = 1, x2 = 0.
+    Solver solver;
+    solver.add_var (1, Quant::Exists);
+    solver.add_var (2, Quant::Exists);
+    solver.add_var (3, Quant::Forall);
+    solver.add_original (Cube, std::vector<int>{1, -2});
+    CHECK_EQ (solver.solve (), 10);
+    CHECK (solver.certificate () == (std::vector<int>{1, -2}));
+  }
+  { // Root simplification: the unit (-e) strengthens (u1 | -u2 | e) to
+    // (u1 | -u2), which reduces to the empty clause with u1, u2
+    // unassigned: false, u1 = 0, u2 = 1.  With '--no-rootsimp' the search
+    // decides it instead.
+    for (const int rootsimp : {1, 0}) {
+      Solver solver;
+      CHECK (solver.set ("rootsimp", rootsimp));
+      CHECK (solver.set ("rootsimpdelay", 0));
+      solver.add_var (1, Quant::Forall);
+      solver.add_var (2, Quant::Forall);
+      solver.add_var (3, Quant::Exists);
+      solver.add_original (Clause, std::vector<int>{1, -2, 3});
+      solver.add_original (Clause, std::vector<int>{-3});
+      CHECK_EQ (solver.solve (), 20);
+      CHECK (solver.certificate () == (std::vector<int>{-1, 2}));
+      if (rootsimp)
+        CHECK (internal_of (solver).stats.rootstrengthened > 0);
+    }
+  }
+}
+
 int main () {
   test_luby ();
   test_glue ();
@@ -291,5 +334,6 @@ int main () {
   test_missing_cube (false);
   test_missing_cube (true);
   test_solver ();
+  test_certificate_by_reduction ();
   return test_result ();
 }

@@ -1405,6 +1405,14 @@ Who does what (all in the internal layer, in internal literals):
   search), `certificate.cpp` is the one place that implements it, and it
   hands `extend ()` a **total** assignment of the non-eliminated variables of
   the block.
+- Decided by reduction (fix of review B1, hand-over): when the deciding
+  empty constraint of kind K comes from reducing a derived constraint D
+  (an original, root simplification steps 1 and 2, an empty vivification
+  result, an empty resolvent), `found_empty (kind, D)` keeps D in
+  `root_move`. All literals of D are secondary and D is implied, so the
+  secondary player wins by making them vanish; `record_certificate` gives
+  the variables of D in the certificate block (if it is the secondary
+  player's block) the vanishing value, overriding the trail.
 - `extend.cpp` then reconstructs the eliminated variables of the block.
 - `Solver::val` and `Solver::certificate` only translate internal variables
   to user numbers.

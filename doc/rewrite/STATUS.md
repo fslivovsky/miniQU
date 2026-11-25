@@ -4153,3 +4153,59 @@ pattern; not observed. Files in `/home/ec2-user/miniqu-work/handover-review/cert
 4. Runs of the review had no failure besides B1: about 28 minutes of `tests/fuzz.sh` in five configurations
    (debug, asan, release; no totals, the runs were killed before their summary), 600 QDIMACS runs with `--check`,
    80 Lean-verified proofs of 28 benchmark files.
+
+## Hand-over defects: B1 (`-cert` after a root reduction) and row `elim-inp-gc` (worker, 2026-11-25)
+
+Time-box 90 minutes, started 02:49 UTC, finished about 03:15. Machine: 48 cores; heavy commands on cores 0-39 (tests,
+nproc-8), the 100-instance stress measurement on 24-47. Scratch: `/home/ec2-user/miniqu-work/b1fix/` (`cert-*.log`,
+`stress/res.txt`, `stress/one.sh`, `reg/`).
+
+**B1 fixed at the root cause.** `found_empty (Kind, std::span<const Lit> move = {})` now receives the derived
+constraint D *before* reduction whenever reduction emptied it, and keeps it in `Internal::root_move`. Call sites:
+`add_original` (an original of secondary literals only), root simplification step 1 (the propagated secondary
+literal) and step 2 (`simplifier.move`), `vivify_apply` (`vivifier.unreduced`), `add_resolvents` (`eliminator.move`,
+set in `resolve` for an all-secondary resolvent). `record_certificate` then overrides, in the certificate block only and
+only when that block belongs to the secondary player of K, each variable of D with the value that makes its literal
+vanish (clause: false, cube: true). Argument: D is implied by the formula and has secondary literals only, so making
+its outer literals vanish by the move and the inner ones later wins (comment in `certificate.cpp`, ARCHITECTURE 10.4).
+`learn_empty` and the unit-versus-unit case pass no move (their literals are assigned; unchanged behaviour). Helper
+`Prefix::reduces_to_empty` (any order; `reduced_size` needs sorted literals and asserted in the debug build).
+No proof change (the certificate has no proof steps); the search is unchanged: verdict and
+`conflicts decisions propagations ticks` equal the hand-over binary on 60 runs (search seeds 26-45 x default, `--elim`,
+`--vivify --vivifyint=50`).
+
+Tests:
+- Unit test `test_certificate_by_reduction` (`test/unit/search.cpp`): an original clause of universals, an original cube
+  of existentials, root strengthening to an empty clause (with and without `rootsimp`); all three fail on the old
+  `certificate.cpp`, pass now.
+- Regressions `root-cert-reduce.sat.qcir` (tiny 140, default) and `root-cert-elim.sat.qcir` (tiny 245, `--elim`);
+  `tests/run_regressions.sh` now validates the certificate of every `*-cert-*.qcir` with `check_cert.py`; new ctest
+  `run-regressions-elim` runs the set with `--elim`. The hand-over binary fails both with `--elim`.
+- `tests/fuzz_cert.sh`, release, seeds 100:400 (1204 instances each): default VALID 764 / WELLFORMED 440;
+  `--elim --elimint=1 --vivify --vivifyint=1 --vivifytier=3 --no-vivifyonce` 764 / 440 (was 11 INVALID);
+  `--elim --elimint=1 -dl` 764 / 440; seeds 401:1000 with the long option set 1500 / 900. The 11 kept files of the
+  review are VALID with and without the options. Debug build, seeds 100:250: default 371 / 233; long option set
+  366 / 180 / 58 TIMEOUT (debug slowness at 60 s), no ERROR after the `reduces_to_empty` fix.
+- `ctest --preset release`: 46/46. Release and debug builds: 0 warnings.
+- `tests/regress.sh -S -j 40 -s 1:30 -M default,dl,mode1,elim,elim-sub-inp,elim-inp-dl,vivify-int1,vivify-elim-inp,vivify-gc`
+  and `-M default,elim,elim-inp-gc,vivify-elim-inp` after the last change: PASSED, every proof Lean-checked (30 per row).
+
+**Row `elim-inp-gc`: `--reduceint=2` changed to `--reduceint=10`** (as D1 did for `gc-dl` / `gc-mode2`; limit stays
+2%). Measured on search seeds 26-125 (100 instances, 20 s, 24 jobs on cores 24-47): reduceint 2: 1 timeout, max
+20.0 s; reduceint 10: 0 timeouts, max 9.9 s, `reductions` nonzero on 91%, `collections` 98%, `eliminprounds` 96%;
+reduceint 30: 0, 7.1 s, 88 / 98 / 96%. `tests/regress.sh -s 1:50 -M elim-inp-gc -S -j 40` (the hand-over repro):
+PASSED, 0 of 25 timeouts, 50 proofs checked. Not a solver change.
+
+**List for the owner**
+1. Mode 1 certificates are wrong independently of B1: `fuzz_cert.sh` seeds 100:400 with `-mode=1` (plus `--vivify
+   --elim` options) gives 36 INVALID; `-mode=1` alone 28 INVALID of those 37 kept files, and the **frozen baseline with
+   `-mode=1` is INVALID on the same files** (so pre-existing, inherited). Files in `/home/ec2-user/miniqu-work/b1fix/keep-d/`
+   (bad.txt). Not investigated; `-cert -mode=1` should be refused or fixed.
+2. `tests/check_cert.py` takes the first prefix line as the outermost block; the solver (and the baseline) merge a
+   `free` block with the following `exists` block, so `free-block.sat.qcir` is MALFORMED for both. That is why
+   `run_regressions.sh` checks certificates of `*-cert-*` files only. Fix the checker (merge adjacent blocks of the same
+   kind) and then check every file.
+3. No unit test reaches the vivification and elimination paths of the fix (empty vivified D, empty resolvent); they are
+   covered only by the fuzz runs above, which do not show whether these paths fired.
+4. Not run: sanitizer fuzz, full matrix, `m1_equiv`, smoke set, benchmarks, QDIMACS-only certificate runs beyond the
+   QDIMACS instances inside `fuzz_cert.sh`.
