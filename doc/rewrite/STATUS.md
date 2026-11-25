@@ -3926,3 +3926,79 @@ Decisions:
 - Proofs fit the existing QLRUP format (one derived step and one deletion per strengthened constraint), so nothing
   is refused with `--proof`, `--check` or `-cert`.
 - No benchmark configurations for M4 on this machine (wrap-up decision).
+
+## M4-T1 (worker, 2026-11-25)
+
+**Built** (commit 1e8aa4c, `rewrite/cadical-style`): vivification of learnt clauses and learnt cubes in inprocessing
+rounds, one code path over `Kind`, off by default (`--vivify`).
+- `src/vivify.hpp` (`Vivifier` scratch state, member `Internal::vivifier`), `src/vivify.cpp` (header comment with the
+  walk, side conditions V1/V2/V4/V5, soundness argument and what is left out): `init_vivify`, `vivifying`,
+  `vivify_order` (stored order, T2 replaces it), `vivify_analyze` (decision-only analysis), `vivify_apply`
+  (empty / unit / in-place rewrite exactly as `strengthen_root`), `vivify_constraint`, `vivify_kind`, `vivify`.
+- `propagate.cpp`: `propagate_kind (Kind, size_t &head)` selects one of four instances of the private template
+  `propagate_kind_trail<K, R>` (R = `Lone::Ignore` in mode 0, `Lone::Propagate` in mode 1) outside the trail loop and
+  reuses `propagate_watches<K, R>`; it touches neither `propagated`, `depend.propagated`, `lone` nor
+  `stats.propagations` (counts `vivifyprops`).
+- Search loop: `else if (vivifying ())` branch after the `eliminating ()` one, same shape; header of internal.cpp
+  updated; VERBOSE(1) notice "vivification is not applied in mode 2". Options `vivify`, `vivifyclause`, `vivifycube`,
+  `vivifyint`, `vivifyticks`; counters `vivifyrounds`, `vivifydecisions`, `vivifyprops`, `vivifyskipped`,
+  `vivifyunits`, per kind `vivifychecked`, `vivified`, `vivifiedlits`; `lim.vivify`; profile `vivify` (level 2).
+- Proofs: one derived step (plus `d` of the old id via `Proof::strengthen`) per shortened candidate; chain = conflict
+  or reason of the kept literal, reasons in reverse trail order, then the K-unit ids. Nothing new in the format,
+  nothing refused (`--proof`, `--check`, `-cert` all work with `--vivify`).
+- Matrix rows `vivify` and `vivify-int1` exactly as specified (all required counters are well above 10%, see below).
+
+**Deviations from the spec:**
+- The analysis walks the trail only down to the start of level 1; the marked root variables are then taken from the
+  list of touched variables (unit ids appended after all reason ids, one per variable, as specified). Walking the
+  whole root trail for every candidate would cost O(root trail) per candidate, which is outside the tick budget.
+  Same result.
+- `propagate_kind` selects the instance with an `if` on the kind and a `?:` on the mode instead of a `switch`; it is
+  still one selection per call, outside the loop.
+- The round's budget counts propagation ticks only (`stats.ticks`); the analysis walk and the candidate scan are not
+  counted.
+
+**Tests** (48 cores; heavy commands on cores 0-23; logs in `/home/ec2-user/miniqu-work/m4t1/`):
+- `cmake --build --preset release -j 16`: 0 warnings; `ctest --preset release` 45/45 (incl. `format`, new
+  `unit-vivify`); debug build 0 warnings, `ctest --preset debug` 45/45 (assertions on, `check_invariants` after every
+  round). `test/unit/vivify.cpp`: (1) clause (1 2 3) with (1 -2) -> (1 3), checker replays, one id consumed;
+  (2) dual cube case; (3) case (a) via another reason, (1 2 3 4) with (1 3) -> (1 3); (4) V1 both ways (a cube cannot
+  shorten a clause, a clause cannot shorten a cube); (5) V2: mode 0 leaves (2 3 4) unchanged, mode 1 derives (2 3)
+  by QU-resolution over the universal pivot, checker replays; (6) clause unit removes a root literal and its id ends
+  the chain; a cube unit does not; a root literal without K-unit outside C gives the candidate up (`vivifyskipped`);
+  (7) unit result (candidate garbage, unit assigned with unit reason after the round) and empty result
+  (`status` False, `forall 1`); (8) after every round in the fixture: level 0, `seen` clear, phases unchanged,
+  `vivifying ()` false, `check_invariants ()`; plus the schedule (5, then 15 with `vivifyint=5`; off in mode 2).
+- `tests/regress.sh -S -j 40 -s 1:30 -M vivify,vivify-int1 build/release/miniQU`: PASSED, 0 warnings, 0 wrong
+  verdicts, 60 proofs accepted by the Lean checker (`regress1.log`). Coverage over 15 search instances: `vivify` row
+  vivifyrounds 87%, vivified.clause 80%, vivified.cube 87%; `vivify-int1` row vivifyrounds 93%, vivifychecked.clause
+  93%, vivifychecked.cube 80%; vivifyskipped 13%/13%, vivifyunits 27%/53%.
+- Same rows with the debug binary (`-t 120 -j 20`): PASSED, 60 proofs accepted (`regress-debug.log`).
+- Extra explicit configurations, seeds 1:60, release: `--vivify --vivifyint=1` with `-mode=1`, `-dl`, `-mode=1 -dl`,
+  `--elim`, `--no-vivifyclause`, `-mode=2`: PASSED, 0 wrong verdicts, 300 proofs accepted (mode 2 has no proofs)
+  (`regress-extra.log`).
+- `tests/fuzz_cert.sh build/release/miniQU 1 30 --vivify --vivifyint=1`: 72 VALID, 48 WELLFORMED, no INVALID /
+  MALFORMED / ERROR (`cert.log`). `tests/fuzz_qdimacs.sh ... 1 30 --vivify --vivifyint=1`: 60 instances agreed,
+  0 failures (`qdimacs.log`).
+- `--check` (internal checker) on 6 corpus instances with `--vivify --vivifyint=50`: no error.
+- Option off: 12 search-tier corpus instances (`corpus.py --tier search --seed 101..112`, in `m4t1/eq/`) x modes
+  `''`, `-dl`, `-mode=1`, `-mode=2`: conflicts/decisions/propagations/ticks equal to the binary built from bc96a5a
+  (`m4t1/before-build/miniQU`), 48/48 (`m4t1/eq.log`, script `m4t1/eq1.sh`).
+- **Finding about an earlier check:** the M3-T4 equality check (`m3t4/eq.log`, "80/80") was void. The job list fed
+  to `xargs -L1` had lines ending in a blank for the empty mode, so xargs joined them with the next line, and the
+  solver took the next instance as its output file and overwrote it with "SAT"; all files in
+  `/home/ec2-user/miniqu-work/m3/t1/eq/` contain only "SAT", so both binaries printed the same parse error. My
+  check uses fresh instances and "-verb=1" instead of an empty mode and was verified to print real statistics. The
+  M3 option-off equality (elimination off) should be re-run by the owner.
+
+**Not done / not tested (for the owner):**
+1. Left out by design (T1): irredundant constraints, mode 2, decision reuse between candidates, sorting of literals
+   and candidates, tier selection and a `vivified` bit (M4-T2), deletion of subsumed or implied candidates, glue
+   recomputation, all tuning.
+2. Analysis and candidate-scan cost are not counted in the tick budget; no measurement of the time vivification
+   takes (no benchmark, no ablation, no `vivifyint`/`vivifyticks` tuning).
+3. A shortened constraint that is unit or conflicting at the root moves `propagated` back; later candidates of the
+   same round then run with incomplete root propagation (sound, weaker). Not measured how often this happens.
+4. Not run: asan fuzz, full matrix, seeds beyond 1:60, smoke set, m1_equiv, any real benchmark file, Lean check of
+   proofs from QDIMACS input with `--vivify` (fuzz_qdimacs checks verdicts only).
+5. Re-run of the M3 option-off equality check (see the finding above).
