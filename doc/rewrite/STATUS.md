@@ -3728,3 +3728,65 @@ required counters hold, no row lowered).
 4. INV-COMPLETE after elimination is not checked beyond the fuzz/sanity runs above (no missing-cube exit seen).
 5. Resolvents are not checked for subsumption or duplicates (M3-T4); elimination of decision variables, QDIMACS
    input and mode 2 are left out as planned.
+
+## M3-T2 (worker, 2026-11-25)
+
+**Built** (commit 8bf85cd): elimination as inprocessing. `Internal::init_elim ()` (called in `search ()` after
+`init_reduce ()`) sets `lim.elim`; `eliminating ()` no longer tests the decision level or `elimrounds`, only
+`elim`, a kind switch, mode != 2, `complete` and `stats.conflicts >= lim.elim`. `finish_elim_round ()` (reached
+on every exit of `eliminate ()`, also when the formula was decided or a root conflict is returned) sets
+`lim.elim = eliminp ? conflicts + elimint * (elimrounds + 1) : INT64_MAX`. Search-loop branch: `if
+(decision_level ()) backtrack (0); else if (eliminate () returns a conflict) analyze`. New option `elimint`
+(2000), counters `eliminprounds` and per kind `elimlearnt`; `elimdeleted` now counts irredundant parents only
+(learnt ones go to `elimlearnt`). With `-dl`, a dependency (`depend.on[x]` or `depend.watching[x]`) on a
+variable eliminated in the round sets `Eliminator::dependent` and the end of the round calls
+`reset_dependencies ()`. `learn.cpp` asserts (debug builds) that no learnt constraint mentions an eliminated
+variable. The header of `elim.cpp` documents schedule, level 0, learnt constraints and dependencies. Matrix
+rows `elim-inp`, `elim-inp-dl`, `elim-inp-gc`, `elim-inp-mode1` as specified (all required counters hold).
+
+**E2/E3 check (verified, unchanged from M3-T1):** occurrence lists are rebuilt every round from all four lists
+(both kinds, irredundant and redundant, garbage skipped), so E2 sees learnt constraints of the other kind and E3
+checks every live constraint of the variable's kind, learnt ones included; learnt ones are never parents
+(`find_resolvents` skips redundant constraints) and are deleted with the variable. No `Ref` survives a round in
+`Eliminator` (`occs` swapped out, buffers cleared), and `finish_elim_round` erases garbage from all four lists.
+
+**Deviations:** `init_elim` with `--no-elimpre --no-eliminp` sets `lim.elim = INT64_MAX` (the spec's formula
+would run one round at `elimint` conflicts although both switches are off).
+
+**Backtrack argument:** the branch is reached only after this iteration's `propagate ()` found no conflict (so no
+lone literal is pending and nothing is in flight), which is exactly the state in which `restart ()` calls
+`backtrack (level)`, and it backtracks to 0 itself whenever trail reuse keeps nothing (`--no-reusetrail`, or a
+pending dependency reset). `backtrack` only undoes assignments, re-inserts decision variables into their heaps
+(with `-dl` under `stays_eligible`) and moves the trail heads of propagation and `depend.cpp` back, and derives
+nothing, so it needs no proof step and is as safe as a restart.
+
+**Tests run:**
+- Release build 0 warnings; `ctest --preset release` 44/44; `ctest --preset debug` 44/44. `unit-elim` has 6 new
+  tests: learnt cube blocks an existential gate (E2); learnt clause with a deeper literal blocks (E3) and after its
+  deletion the next round eliminates; a passing learnt clause is deleted (`elimlearnt` 1, no garbage in any list);
+  the schedule (no round right after one, due after `elimint * (rounds + 1)` conflicts, never with
+  `--no-eliminp`, first round at `elimint` with `--no-elimpre`); a round due at level 1 (backtrack, propagate,
+  round); `-dl` dependency on an eliminated variable resets dependencies.
+- `tests/regress.sh -S -j 30 -s 1:30 -M elim,elim-inp,elim-inp-dl,elim-inp-gc,elim-inp-mode1` (release): PASSED,
+  0 warnings, 0 timeouts, 150 proofs accepted by the Lean checker, no wrong verdict, no unknown. Measured shares:
+  `eliminprounds` 93% (20% in the `elim` row with the default interval), `eliminated.*` 33-40%, `elimlearnt.clause`
+  7% (`elim-inp`, `elim-inp-gc`) and 13% (`elim-inp-dl`), `elimlearnt.cube` 0% (not required in any row),
+  `elimunits` 0-7%.
+- Same seeds and rows with the debug build (`-n`, `-t 60`, assertions and `check_invariants` after every round):
+  no assertion failure, no wrong verdict; 2 timeouts in `elim-inp-gc`, 1 in `elim-inp-mode1` (FAIL of the stress
+  limit). Rerun without the limit: all 15 search instances finish in both rows in the debug build (slowest 145 s,
+  s25 of `elim-inp-gc`), so this is debug slowness with a round and an invariant check after every conflict, not
+  a hang. Script `/home/ec2-user/miniqu-work/m3/t2/dbg.sh`.
+- Search unchanged without `--elim`: `/home/ec2-user/miniqu-work/m3/t1/eq.sh` (20 corpus instances, modes `''`,
+  `-dl`, `-mode=1`, `-mode=2`): verdicts and conflicts/decisions/propagations/ticks equal to
+  `/home/ec2-user/miniqu-work/m3/miniQU.before`, 80/80.
+
+**Not done / not tested (for the owner):**
+1. No benchmark, no tuning of `elimint`; with the default interval and the `--elimticks` budget a round rebuilds
+   occurrence lists over the whole database (no effort relative to search ticks, no schedule marks, no delay
+   after fruitless rounds), so rounds may be expensive on large instances; not measured.
+2. Not run: full matrix, asan fuzz, seeds beyond 1:30, `-cert` with inprocessing, smoke set, m1_equiv, debug
+   regress with a longer timeout through regress.sh.
+3. The `-dl` dependency reset path is covered only by the unit test (the fuzz runs never hit it, as argued:
+   gate variables are never secondary); `elimlearnt.cube` was never nonzero in the fuzz run.
+4. `check_invariants` for eliminated variables is still M3-T3.
