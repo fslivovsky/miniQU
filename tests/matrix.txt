@@ -104,7 +104,7 @@ elim-ccmin | --elim --elimint=1 -ccminmode=3 | yes | eliminated.clause eliminate
 elim-nosub | --elim --no-elimsubsume --elimboundmax=0 | yes | eliminated.clause eliminated.cube | normal
 elim-inp     | --elim --no-elimpre --elimint=1      | yes | conflicts eliminprounds eliminated.clause eliminated.cube | stress | 2
 elim-inp-dl  | --elim --no-elimpre --elimint=1 -dl  | yes | conflicts eliminprounds eliminated.clause eliminated.cube dependencies | stress | 4
-elim-inp-gc  | --elim --elimint=1 --elimbound=16 --reduceint=2 --tier1glue=0 --tier2glue=0 --gcfrac=0 --rootsimpdelay=0 | yes | conflicts eliminprounds reductions collections | stress | 2
+elim-inp-gc  | --elim --elimint=1 --elimbound=16 --reduceint=10 --tier1glue=0 --tier2glue=0 --gcfrac=0 --rootsimpdelay=0 | yes | conflicts eliminprounds reductions collections | stress | 2
 elim-inp-mode1 | --elim --no-elimpre --elimint=1 -mode=1 | yes | conflicts eliminprounds eliminated.clause eliminated.cube | stress | 2
 elim-sub-inp | --elim --elimint=1 --rootsimpdelay=0 | yes | eliminprounds eliminated.clause eliminated.cube | stress | 2
 # Vivification of learnt constraints (M4-T1).
