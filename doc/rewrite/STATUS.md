@@ -4127,3 +4127,29 @@ not list options (no change); no HANDOFF.md exists (not created). Section 9.1 is
    -s 1:30 -M vivify-mode1-dl build/release/miniQU` and a longer checker limit. (b) M4-T1: the harness pitfall of `xargs -L1`
    with an empty option field (see M4-T1 entry; avoid empty mode arguments). (c) M3-T3's unresolved debug fuzz rerun is
    unrelated to vivification.
+
+## Hand-over review of M3 (elimination) and M4 (vivification) (reviewer, 2026-11-25)
+
+Report: `doc/rewrite/reviews/handover.md` (branch at `36ffcfa`, 75-minute time-box). Verdict: not approved as it
+stands, one blocking defect; nothing else found in the two units.
+
+**Blocking, B1: invalid `-cert` output when the formula is decided at level 0 by a reduction.** Present with
+default options since root simplification (M2-T4): `record_certificate ()` prints unassigned outermost variables as
+true, and the literals `qreduce` drops at the root are the move the certificate needs. `tests/fuzz_cert.sh`, seeds
+100:400: 11 INVALID of 1204 with `--elim --elimint=1 --vivify --vivifyint=1 --vivifytier=3 --no-vivifyonce`, 10 of
+them also with no option and with the pre-M3 binary (baseline valid), 0 INVALID with `--no-rootsimp` added.
+Reproduce: `python3 tests/corpus.py --tier tiny --seed 140 --out f.qcir; python3 tests/check_cert.py
+build/release/miniQU f.qcir` (INVALID; VALID with `--no-rootsimp`); seed 245 is VALID by default and INVALID with
+`--elim`. `vivify_apply` (empty D after `backtrack (0)`) and `add_resolvents` (empty resolvent) have the same
+pattern; not observed. Files in `/home/ec2-user/miniqu-work/handover-review/cert-keep/`.
+
+**List for the owner**
+1. Fix B1 in one place (certificate from the literals before reduction when an empty constraint is derived at
+   level 0), or refuse `-cert` with `rootsimp`, `--elim`, `--vivify` until then. Not fixed by the reviewer.
+2. Row `elim-inp-gc` (hand-over test failure): slowness, not a hang; all 25 instances of seeds 26:50 finish within
+   23 s. Decide the row's limit.
+3. Suggestions 1-7 and the list of missing tests (section 6) of the report; in particular no paired benchmark of
+   either technique exists, and two real files timed out at 120 s with a technique on (not attributed).
+4. Runs of the review had no failure besides B1: about 28 minutes of `tests/fuzz.sh` in five configurations
+   (debug, asan, release; no totals, the runs were killed before their summary), 600 QDIMACS runs with `--check`,
+   80 Lean-verified proofs of 28 benchmark files.
