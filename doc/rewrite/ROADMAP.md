@@ -1225,6 +1225,16 @@ T2: `vivifytier` (2: glue at most the tier-2 limit; 1: tier 1 only; 3: all learn
 **Counters:** `vivifyrounds`, `vivifydecisions`, `vivifyprops`, `vivifyskipped`, `vivifyunits`, per kind
 `vivifychecked`, `vivified`, `vivifiedlits`.
 
+**As built** (M4-T1 to T3; ARCHITECTURE 10.0 describes the code). Everything of the plan is built as written except:
+the analysis walks the trail only down to level 1 and takes the marked root variables from the list of touched variables
+(same chain, no O(root trail) cost per candidate); `propagate_kind (Kind, size_t &head)` selects its instance with an
+`if` and a `?:`, not a `switch`; the tick budget counts propagation ticks only (analysis, candidate selection and the
+occurrence count are not charged); when candidates are rescheduled only the bits of the selected tiers are cleared;
+with `--no-vivifyonce` the bit is still maintained. The T2 options `vivifyonce` and `vivifytier` and the counter
+`vivifyrescheduled` were added as planned. Checked at T3: `-cert` fuzz (VALID 72, WELLFORMED 48 with and without
+`--elim`), 12 real files with five configurations and 6 Lean-checked proofs (`bench/results/m4-sanity/`), option-off
+equality with the pre-M4 binary (STATUS.md, M4-T3). No benchmark or tuning was done.
+
 **Left for later** (nothing of it is started on this machine):
 
 1. Irredundant constraints (sound for QCIR as a class-D replacement; for QDIMACS the "replace `C` by `C' ⊂ C`"

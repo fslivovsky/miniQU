@@ -4070,3 +4070,60 @@ rounds, one code path over `Kind`, off by default (`--vivify`).
    with a longer limit.
 5. Not run: asan build, full matrix, seeds beyond 1:30 for the matrix rows, smoke set, m1_equiv, `-cert` fuzz with
    the new options, Lean check of proofs from QDIMACS input, any real benchmark file.
+
+## M4-T3 (worker, 2026-11-25)
+
+Runs and documentation for vivification; no solver logic changed (no change in `src/` at all, the format check passed
+unchanged). Machine: 48 cores; heavy commands on cores 0-23, sanity jobs on cores 24-47; scratch in
+`/home/ec2-user/miniqu-work/m4t3` (script `cert.sh`, `one.sh`, `parse.py`, `eq1.sh`, logs `cert-a.log`, `cert-b.log`,
+`eq.log`, `runs/`).
+
+**1. Build.** `cmake --build --preset release -j 16`: 0 warnings. `ctest --preset release`: 45/45 (includes `format`, so
+`src/vivify.*` and `test/unit/vivify.cpp` are clang-format clean).
+
+**2. Certificates.** `JOBS=11 tests/fuzz_cert.sh build/release/miniQU 1 30 --vivify --vivifyint=5` (about 1 minute):
+VALID 72, WELLFORMED 48, no INVALID/MALFORMED/ERROR (`cert-a.log`); same with `--elim` added: VALID 72, WELLFORMED 48,
+none bad (`cert-b.log`).
+
+**3. Real files** (`bench/results/m4-sanity/`, README there says it is a sanity run). 12 files from `baseline-t180`
+(6 SAT, 6 UNSAT by that file, wall 0.5-7 s there), 5 configurations (default, `--vivify`, `--vivify -dl`, `--vivify --elim`,
+`--vivify --vivifytier=3 --vivifyint=500`), `-verb=1`, timeout 120, `ulimit -v 8 GB`, 16 jobs. All 60 verdicts equal the
+default run and `baseline-t180`; 0 mismatches, every run finished (longest 10.4 s). Vivification ran (vivifyrounds > 0) on
+9 of 12 files in (b); the three others end before the first round (`vivifyint` 2000). Six proofs (the six fastest, with
+`--vivify --proof=FILE --proofbinary`) checked with `qlrup-check`: 6/6 `VERIFIED` (4 TRUE, 2 FALSE); proofs deleted.
+Caveat: the files are easy, so the counters are small; no UNSAT proof contains many vivified steps on its own account
+(not measured per proof).
+
+**4. Option-off equality.** 20 corpus instances (`corpus.py --tier search --seed 201..220`) x `-verb=1`, `-dl`, `-mode=1`,
+`-mode=2`: verdict and `conflicts decisions propagations ticks` of the current binary without `--vivify` equal those of
+the binary built from bc96a5a (the commit before M4-T1, `m4t1/before-build/miniQU`): 80/80 (`eq.log`). `--vivify -mode=2`
+prints "vivification is not applied in mode 2" and has the same four statistics as `-mode=2` (5/5 instances s201-s205
+compared, all counters `vivify*` 0).
+
+**5. Docs.** ARCHITECTURE.md: 3.4 row, 7.2 (`propagate_kind (Kind, size_t &head)` as built, table), 8.2 (rows for
+shorter / unit / empty result), 10.0 (heading, vivification paragraph with schedule, scope, side conditions,
+candidates, effort, options, counters, not built). ROADMAP.md: "As built" paragraph under the M4 plan. The README does
+not list options (no change); no HANDOFF.md exists (not created). Section 9.1 is an excerpt and was not extended.
+
+**List for the owner (everything open for M4)**
+1. Left out by design: irredundant constraints; mode 2 (notice only); decision reuse between candidates and sorting
+   for it; per-tier effort shares; effort relative to search ticks; deletion of candidates subsumed by the conflict or
+   implied by an irredundant reason; glue recomputation/promotion of shortened constraints; instantiation.
+2. Not charged to the tick budget: analysis walk, candidate selection and sorting, occurrence count.
+3. A rewritten constraint that is unit or conflicting at the root moves `propagated` back; later candidates of the round
+   then run with incomplete root propagation (sound, weaker); frequency not measured.
+4. Tests not run: full matrix, sanitizer (asan) fuzz, seeds beyond 1:30 (fuzz_cert, matrix) and 1:60 (extra), smoke set,
+   m1_equiv, any benchmark or ablation, Lean check of proofs from QDIMACS input (not supported by the format
+   path; only verdicts of QDIMACS runs were compared), `-cert` on real files, hard instances with long vivification
+   time (no timing was taken).
+5. Proof gaps: none known. Lean-checked: 6 real-file proofs (M4-T3), 60 (T1 matrix) + 300 (T1 extra) + 297 (T2 matrix)
+   fuzz proofs, 120 certificates of the T3 fuzz runs (72 VALID, 48 WELLFORMED each run; WELLFORMED means the checker
+   was not applicable, see `tests/check_cert.py`) and about the same in T1/T2.
+6. Open decisions on defaults, untuned: `vivifyint` 2000, `vivifyticks` 2000000, `vivifytier` 2, `vivifyonce` 1, and
+   whether vivification should be on by default (it is off). M4-T2 saw `vivified.cube` drop from 87% to 20% of
+   instances in the `vivify` row under tier 2 and `vivifyonce`; undecided whether that is wanted.
+7. Failures seen in M4 tasks: none that is a solver bug. Items to know: (a) M4-T2: 3 proofs of matrix row
+   `vivify-mode1-dl` were not checked (checker timed out at the harness limit); rerun with `tests/regress.sh -S -j 40
+   -s 1:30 -M vivify-mode1-dl build/release/miniQU` and a longer checker limit. (b) M4-T1: the harness pitfall of `xargs -L1`
+   with an empty option field (see M4-T1 entry; avoid empty mode arguments). (c) M3-T3's unresolved debug fuzz rerun is
+   unrelated to vivification.

@@ -217,7 +217,7 @@ and deleted only through `constraint.cpp`, assignments only through
 | `elim.{hpp,cpp}` (built) | bounded variable elimination (clause and cube distribution); `Eliminator` in `elim.hpp` |
 | `extend.cpp` (not built) | extension stack in internal literals and reconstruction (10.4); only built with QDIMACS elimination (ROADMAP M3.6) |
 | `subsume.cpp` | subsumption and strengthening |
-| `vivify.cpp` | vivification of clauses and cubes |
+| `vivify.{hpp,cpp}` (built) | vivification of learnt clauses and cubes (M4); `Vivifier` in `vivify.hpp` holds the scratch state of a round |
 | later: `block.cpp`, `probe.cpp`, `decompose.cpp`, `gates.cpp`, `expand.cpp` | see ROADMAP M5+ |
 
 ### 3.5 API, frontend, app
@@ -805,6 +805,14 @@ and `stats.ticks` approximating cache lines touched (one per watch list, one
 per dereferenced constraint), which is the unit in which inprocessing effort
 is budgeted (10.1).
 
+`propagate_kind (Kind, size_t &head)` is the vivification driver as built: it
+takes a trail head of its own (`propagated` and `depend.propagated` stay
+untouched, `head` stays at the literal that caused a conflict), counts
+`stats.vivifyprops` instead of `stats.propagations`, and picks one of four
+instances of the private template `propagate_kind_trail<K, R>` with an `if`
+on the kind and a `?:` on the mode (`Lone::Ignore` in mode 0,
+`Lone::Propagate` in mode 1), once per call. Modes 0 and 1 only.
+
 **Propagation variants.** By M4 the solver propagates in six situations.
 They differ in two things only: which kinds take part, and what happens to a
 constraint whose single non-vanished literal is *secondary* (the "lone
@@ -814,8 +822,8 @@ secondary" rule):
 |---|---|---|---|---|
 | search, mode 0 | `propagate ()` | both | conflict, completed after the loop (4.7) | watch loop, `Lone::Conflict` |
 | search, mode 1 | `propagate ()` | both | propagated | watch loop, `Lone::Propagate` |
-| vivify, mode 0 | `propagate_kind (K)` | `K` only | ignored (ROADMAP M4, V2) | watch loop, `Lone::Ignore` |
-| vivify, mode 1 | `propagate_kind (K)` | `K` only | propagated | watch loop, `Lone::Propagate` |
+| vivify, mode 0 | `propagate_kind (K, head)` | `K` only | ignored (ROADMAP M4, V2) | watch loop, `Lone::Ignore` |
+| vivify, mode 1 | `propagate_kind (K, head)` | `K` only | propagated | watch loop, `Lone::Propagate` |
 | search, mode 2 | `propagate_ldq ()` | both | prefix-aware unit rule, other watch invariant (6.3) | its own loop in `propagate_ldq.cpp` |
 | occurrence mode | `propagate_occs ()` | both | root units only, no watches (10.2) | `occs.cpp` |
 
@@ -830,7 +838,7 @@ template <Lone R> Ref Internal::propagate_trail ();                  // both kin
 with kind and rule as compile-time parameters (`kval` and the rule fold to
 straight code in each instance). The functions in the table are thin drivers
 in `propagate.cpp`: they select the instance **outside** the loop over the
-trail (one `switch` on the mode per call, never per watch) and own everything
+trail (one selection on the mode or kind per call, never per watch) and own everything
 that is not the loop: the trail heads, conflict completion for mode 0, the
 `ticks` accounting. Mode 2 and occurrence propagation are not instances of
 the template, because their data structures differ; they must not grow a
@@ -1013,7 +1021,9 @@ the proof ids do not reproduce) and writes no deletions
 | BVE parents removed | `elim.cpp` | `d` |
 | subsumed constraint removed | `subsume.cpp` | `d` |
 | strengthening by self-subsumption | `subsume.cpp` | `strengthen`, chain = strengthened id, subsuming id |
-| vivified constraint | `vivify.cpp` | `strengthen`, chain = the constraint/conflict id and the reason ids in reverse trail order |
+| vivified constraint, shorter result of two or more literals | `vivify.cpp` (`vivify_apply`) | `Proof::strengthen`: one derived step, chain = the conflict id (or the reason id of the kept literal), then the reason ids in reverse trail order, then the ids of the root units of the candidate's kind; the old id is deleted by `d` (one `a`, one `d`), exactly as for root-literal removal |
+| vivified constraint, unit result | `vivify.cpp` | derived unit under a fresh id with the same chain, `d` of the candidate; the unit is assigned after the round (`add_root_units`), which logs nothing more |
+| vivified constraint, empty result | `vivify.cpp` | derived empty constraint with the same chain; ends the proof |
 
 `mark_garbage` is the only function that emits deletions, so no deletion can
 be forgotten. Proof files are written through a 1 MiB buffer and flushed at
@@ -1208,10 +1218,11 @@ referenced) run at root level in debug builds, after every pass.
 
 ## 10. Inprocessing framework (M3+)
 
-### 10.0 As built (M3 initial version)
+### 10.0 As built (M3 and M4 initial versions)
 
-Only bounded variable elimination exists; 10.1-10.4 below describe the
-design, which is not built yet. What is built:
+Bounded variable elimination (M3) and vivification (M4, below) exist;
+10.1-10.4 describe the design, which is only partly built. What is built
+for elimination:
 
 - Elimination is off by default (`--elim`). It is scheduled from the search
   loop: `eliminating ()` says a round is due (option on, a kind switch on,
@@ -1249,6 +1260,56 @@ design, which is not built yet. What is built:
   `elimocclim`, `elimclslim`, `elimticks`) are in `src/options.hpp`, and:
   - `elimsubsume` (1, [0,1]): do not add resolvents subsumed by a stored constraint, with elim.
   - `elimboundmax` (16, [0,1e9]): largest bound on additional constraints, with elim.
+
+**Vivification (M4, `vivify.{hpp,cpp}`, off by default).**
+
+- Schedule. `vivifying ()` says a round is due (`--vivify`, a kind switched
+  on, mode != 2, `stats.conflicts >= lim.vivify`); the search loop
+  backtracks to level 0, propagates and calls `vivify ()` in an `else if`
+  branch after the elimination one. The first round comes after
+  `--vivifyint` conflicts, round `n` is followed by one `vivifyint * (n + 1)`
+  conflicts later. Mode 2 prints a notice (verbosity 1) and does nothing.
+  A round ends with root-unit assignment (`add_root_units`) and, if due,
+  garbage collection, else with `check_invariants ()` in debug builds.
+- Scope. Learnt constraints only (irredundant ones are never touched), both
+  kinds through one code path parameterised by `Kind`, QCIR and QDIMACS input
+  alike, modes 0 and 1, with or without `--dl`, `--elim`, `--proof`,
+  `--check` and `--cert`. Every candidate starts at level 0; there is no
+  decision reuse. The saved phases are restored after the round, and no
+  `Ref` is held across it.
+- Side conditions as built. Only constraints of the candidate's kind
+  propagate (`propagate_kind`); in mode 0 a constraint whose single
+  non-vanished literal is secondary does nothing (`Lone::Ignore`), in mode 1
+  it propagates. The analysis walks the trail backwards and resolves with
+  reasons of the candidate's kind only. A root literal is resolved away only
+  through a unit of the same kind (`root_unit (K, l)`); a root literal
+  without such a unit stays in the result if its variable occurs in the
+  candidate, otherwise the candidate is given up (`vivifyskipped`). The
+  decision order is irrelevant, so no prefix check is needed. The result is
+  reduced (`qreduce`) and must be a strictly shorter subset of the
+  candidate (asserted in debug builds).
+- Candidates (M4-T2). Per kind, the learnt constraints whose tier (glue
+  against `tiers.tier1/tier2`) is at most `--vivifytier`; with `--vivifyonce`
+  those with the `vivified` bit (bit 16 of the glue word) are skipped, and
+  when all candidates have it the bits are cleared and all are taken
+  (`vivifyrescheduled`). Lower tiers are visited first, newest first within
+  a tier. A candidate left unchanged gets the bit, a rewritten one keeps it
+  clear. Literals of a candidate are visited in descending number of
+  occurrences among the candidates of the pass, ties by literal index.
+- Effort. `--vivifyticks` propagation ticks per round, split evenly between
+  the kinds that are on; only ticks of `propagate_kind` count, the analysis,
+  the selection and the occurrence count do not.
+- Options: `vivify` (0), `vivifyclause` (1), `vivifycube` (1), `vivifyint`
+  (2000, [1,1e9]), `vivifyticks` (2000000, [0,1e9]), `vivifyonce` (1),
+  `vivifytier` (2, [1,3]). Counters: `vivifyrounds`, `vivifydecisions`,
+  `vivifyprops`, `vivifyskipped`, `vivifyunits`, `vivifyrescheduled`, and per
+  kind `vivifychecked`, `vivified`, `vivifiedlits`; profile `vivify`.
+- Proofs: one derived step and one deletion per shortened candidate (8.2);
+  nothing new in the format, nothing refused.
+- Not built: irredundant constraints, mode 2, decision reuse and sorting of
+  candidates for it, effort shares per tier, effort relative to search
+  ticks, deletion of subsumed or implied candidates, glue recomputation,
+  instantiation, any tuning.
 
 ### 10.1 Scheduling
 
