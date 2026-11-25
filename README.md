@@ -9,9 +9,15 @@ watch lists are kept in memory in the order of their accesses, as in MiniSat. Th
 the sources is described in `doc/rewrite/ARCHITECTURE.md`; where the previous implementation lives
 is said at the end of "Building".
 
+State of the rewrite: `doc/rewrite/REPORT.md` (what was built and how it was verified) and
+`doc/rewrite/HANDOFF.md` (set-up on a fresh machine, postponed tests, benchmark plan, open
+decisions). Bounded variable elimination (`--elim`) and vivification (`--vivify`) are initial
+versions, off by default and not benchmarked.
+
 ## Building
 
-A C++20 compiler (GCC 11 or clang), CMake 3.22 and zlib are required. The presets of
+A C++20 compiler (GCC 11 or clang 15), CMake 3.22 and zlib are required; the tests also need
+Python 3 (standard library), `clang-format`, `taskset` and `prlimit`. The presets of
 `CMakePresets.json` put the build trees next to the repository, in `../miniqu-work/build/<preset>`:
 
 | preset | use |
@@ -28,9 +34,11 @@ cmake --build --preset release -j8     # ../miniqu-work/build/release/miniQU
 ctest --preset release                 # unit tests, formatting, encoding, tooling, regressions, fuzzing
 ```
 
-`ctest` needs the Lean proof checker (`qlrup-check`, see `bench/README.md`) and the frozen
-baseline binary for the end-to-end tests. Without CMake presets, `cmake -S . -B build` builds the
-same targets: `miniQU`, `qlrup-trim` (proof trimmer) and the unit tests.
+`ctest` (46 tests) needs the Lean proof checker (`qlrup-check`) and the frozen baseline binary for
+the end-to-end tests; how to get both, and the absolute paths the test scripts expect, is in
+`doc/rewrite/HANDOFF.md`, section 1. Without CMake presets, `cmake -S . -B build
+-DCMAKE_BUILD_TYPE=Release` builds the same targets: `miniQU`, `qlrup-trim` (proof trimmer) and the
+unit tests.
 
 The previous implementation (commit c39005a, MiniSat layout) is no longer in the tree: its sources are
 `git show c39005a:minisat/core/Solver.cc` and the worktree `/home/ec2-user/miniqu-work/baseline-src`, and
@@ -59,7 +67,11 @@ option with its default and range. The most important ones:
 | `--ccminmode=<0..3>` | 0 | Minimization of learnt clauses and terms: none (0), local (1) and recursive (2) minimization, or recursive minimization that takes reduction into account (3). Proofs and traces cover minimization (chain extension, `doc/proof-format.md`). |
 | `--earlytseitin` / `--no-earlytseitin` | on | QCIR only: quantify the variables that represent gates right after the innermost variable the gate depends on (see below). |
 | `--legacyanalyze` | off | Use the analysis of the previous solver (`analyze_qu`) in mode 0. |
-| `--cert` | off | Print the assignment of the decision variables of the outermost block (`V` line). |
+| `--elim` | off | Bounded variable elimination before the search and in inprocessing rounds (QCIR input, modes 0 and 1): existential gate variables by clause resolution, universal ones by cube resolution; a variable is eliminated only if it is rightmost in every constraint of its kind and occurs in no constraint of the other kind. Sub-options `--elimclause`, `--elimcube`, `--elimpre`, `--eliminp`, `--elimint`, `--elimbound`, `--elimboundmax`, `--elimsubsume`, `--elimocclim`, `--elimclslim`, `--elimticks`. |
+| `--vivify` | off | Vivification of learnt clauses and cubes in inprocessing rounds (modes 0 and 1). Sub-options `--vivifyclause`, `--vivifycube`, `--vivifyint`, `--vivifyticks`, `--vivifyonce`, `--vivifytier`. |
+| `--rootsimp`, `--tiers`, `--glueupdate`, `--reusetrail` | on | Root-level simplification, tiers of learnt constraints by glue (`--tier1glue=2`, `--tier2glue=6`, reductions every `--reduceint=300` conflicts, growing), glue update in analysis, trail reuse at restarts. |
+| `--restartmode=<0,1>` | 0 | Luby (or geometric) restarts (0), or restarts by glue averages per kind (1). |
+| `--cert` | off | Print the assignment of the decision variables of the outermost block (`V` line). Not reliable with `--mode=1` (`doc/rewrite/REPORT.md`, section 6). |
 | `--proof=<file>` | | Write a proof in the QLRUP format (QCIR input, modes 0 and 1); see `doc/proof-format.md`. |
 | `--proofbinary` | off | Write the proof in the binary format. |
 | `--trace=<file>` | | Write a trace in the older format (modes 0 and 1). |
@@ -68,7 +80,9 @@ option with its default and range. The most important ones:
 | `--verb=<0..3>` | 1 | Verbosity; `--verb=1` also prints the `c stat` counters. |
 
 The remaining options (restart, reduction, tier and stress parameters, `--check`, `--log`,
-`--profile`) are described by `--help` and in `doc/rewrite/ARCHITECTURE.md`.
+`--profile`) are described by `--help` and in `doc/rewrite/ARCHITECTURE.md` (9.1, and 10.0 for
+elimination and vivification). Both new techniques write complete proofs; in mode 2, and for
+elimination on QDIMACS input, they are not applied (a notice is printed at `--verb=1`).
 
 Whether dependency learning pays off depends on the instance: it can be
 essential when following the quantifier prefix forces bad decisions, and it
@@ -153,8 +167,8 @@ the lower half (`taskset -c 0-47`). Both are computed from the number of cores; 
 `ctest --preset release` (or `asan`, `debug`) runs the unit tests of `test/unit`, the format check
 (`clang-format`), the comparison of the encoder with the original constraints of the baseline's
 proofs, the tests of the benchmark statistics (`bench/test_compare.py`), the regression instances of
-`tests/regressions/` and a 20-seed run of `tests/regress.sh` over the default and the `--dl`
-configurations. `tests/regress.sh` is the end-to-end driver: it compares verdicts with the
+`tests/regressions/` (also with `--elim`) and a 20-seed run of `tests/regress.sh` over the default
+and the `--dl` configurations. `tests/regress.sh` is the end-to-end driver: it compares verdicts with the
 brute-force evaluator and the baseline, checks every proof with the Lean checker and asserts that the
 fuzz instances reach restarts, reductions and garbage collection (`tests/matrix.txt` lists the
 configurations). Examples:
@@ -172,7 +186,9 @@ tests/fuzz_cert.sh ../miniqu-work/build/release/miniQU 1 500           # -cert c
 - `tests/qcir_eval.py` evaluates a small QCIR instance by brute force.
 - `tests/qdimacs2qcir.py` converts QDIMACS to QCIR.
 - `tests/check_cert.py` validates the certificate printed by `--cert`.
-- `bench/` holds the benchmark harness; see `bench/README.md`.
+- `bench/` holds the benchmark harness; see `bench/README.md`. `bench/cluster/` has Slurm
+  templates (one run per node, or one job per instance with `merge.py`); the plan for them is in
+  `doc/rewrite/HANDOFF.md`, section 3.
 
 ## License
 

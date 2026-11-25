@@ -4209,3 +4209,51 @@ PASSED, 0 of 25 timeouts, 50 proofs checked. Not a solver change.
    covered only by the fuzz runs above, which do not show whether these paths fired.
 4. Not run: sanitizer fuzz, full matrix, `m1_equiv`, smoke set, benchmarks, QDIMACS-only certificate runs beyond the
    QDIMACS instances inside `fuzz_cert.sh`.
+
+## Hand-over documents (coordinator, 2026-11-25)
+
+Time-box 60 minutes, started 03:11 UTC. No solver source, test or default changed.
+
+**Written**
+- `doc/rewrite/REPORT.md`: what was built, options and defaults, what was verified per technique and where the
+  evidence is, the benchmark results that exist, the reviews, 13 known defects and limits.
+- `doc/rewrite/HANDOFF.md`: (1) set-up on a fresh machine (dependencies, Lean checker repository and commit, baseline
+  and M1 binary from their commits, the table of absolute paths in the scripts and their overrides); (2) the
+  postponed tests as commands in order of importance, with measured or estimated run times; (3) the cluster
+  benchmark plan (stage A: final binary against the baseline at 900 s; stage B: every feature on and off; cost
+  estimate; how to run per node or as a job array); (4) 13 open decisions and items not started, each with its place
+  in STATUS or ROADMAP.
+- `bench/cluster/node.sbatch`, `bench/cluster/array.sbatch` (Slurm; lines to change are marked `ADAPT`) and
+  `bench/cluster/merge.py`. `bench/compare.py` reads one directory per tag and, in paired mode, compares `jobs`,
+  `cores`, `mem_gb`, `timeout` and the hash of the instance list, so it cannot read per-instance results directly;
+  `merge.py` joins `RESULTS/TAG.parts/*/` into `RESULTS/TAG/` with a `meta.json` that has `jobs` 1, `cores`
+  "array" and the hash `run.py` computes for the whole list. No change to `run.py`, `compare.py` or `paired.py`.
+- `README.md` (documents, dependencies, options `--elim`, `--vivify` and the M2 switches, note on `-cert` in
+  mode 1, `bench/cluster/`), `bench/README.md` (section `cluster/`).
+
+**Checked**
+- `array.sbatch` executed by hand (no Slurm on this machine) with `SLURM_ARRAY_TASK_ID` 1..6 for 6 smoke
+  instances and three tags (new default, new `-dl`, baseline with `-rnd-init -rnd-seed={seed}`), 10 s: 18 tasks
+  exit 0; `merge.py` wrote the three runs; `compare.py` (plain, three tags) and `compare.py --paired` (baseline
+  against new, with the "Identical searches" section) printed their reports, exit 0. With one part removed
+  `merge.py` names the instance and exits 1; with `--allow-missing` it merges and `compare.py --paired` against the
+  complete run exits 3 ("instance list differs"). Scratch deleted.
+- `ctest --preset release` at `95bfa16` (release build up to date): 46/46, 22 s with 16 jobs.
+- The `sed` that rewrites `/home/ec2-user` in `bench/` and `tests/` scripts (HANDOFF 1.5) leaves no occurrence
+  on a copy; the rewritten scripts were not run.
+
+**Not done / not checked (for the owner)**
+1. `sbatch`, the `#SBATCH` lines and `node.sbatch` were never executed; `array.sbatch` with `EXTRA` (proof
+   checking inside an array task) was not tried.
+2. Nothing was run on the desktop or on a cluster; run times in HANDOFF section 2 are those of M2-T8 (48-core
+   machine, 16 jobs, 43 rows) and scalings of them, and the core-hour figures of section 3.2 are estimates from the
+   counts of `baseline-t900`.
+3. The set-up commands of HANDOFF 1.3 (clone and build of the checker, baseline and M1 binary from their commits)
+   are those of `bench/README.md` and of the commit ids in STATUS; they were not replayed on a fresh machine. The
+   branch `rewrite/cadical-style` exists only in this clone (never pushed): push or copy it before the machine
+   is given up, together with what is wanted from `/home/ec2-user/miniqu-work` (kept failing instances:
+   `b1fix/keep-d/`, `handover-review/cert-keep/`; logs named in STATUS).
+4. `mem_gb` is recorded as given (`8` by default, `8.0` when `--mem-gb 8` is passed) and paired mode compares the
+   text, so a run with the default and one with the option are refused as different; the templates always pass it.
+5. No test, benchmark or code change beyond the above; the list of postponed tests and open decisions is
+   HANDOFF sections 2 and 4.

@@ -135,6 +135,24 @@ over the seeds (geometric mean over the seeds of an instance first), a per-famil
 `> 1.10` for families of at least 3 instances above 1.10), and the 15 largest and 5 smallest
 ratios. Without `stats.csv` it says `no instance with equal conflict counts`.
 
+## cluster/ (Slurm templates, merge.py)
+
+    sbatch bench/cluster/node.sbatch TAG SEED "SOLVER ARGS"                    # one run on one exclusive node
+    sbatch --array=1-376 bench/cluster/array.sbatch TAG SEED "SOLVER ARGS"     # one job per instance
+    python3 bench/cluster/merge.py [--results-dir DIR] [--list instances.txt] [--allow-missing] TAG [TAG ...]
+
+`node.sbatch` calls `run.py` once for all instances; its result directory is an ordinary run.
+`array.sbatch` calls `run.py` once per instance (one job on the core the scheduler assigned) and
+writes `DIR/TAG.parts/<index>/`; `merge.py` joins the parts into `DIR/TAG/` (`results.csv`,
+`stats.csv`, `meta.json` with `jobs` 1, `cores` "array" and the hash of the whole instance list), so
+that `compare.py`, `compare.py --paired` and `gate.py` read it like any run. It refuses parts that
+differ in solver hash, options, seed, time-out or memory limit, an instance in two parts, and
+(without `--allow-missing`) an instance of `--list` without a row. Paths and limits come from the
+environment (`REPO`, `WORK`, `SOLVER`, `BENCH_DIR`, `RESULTS`, `TIMEOUT`, `MEM_GB`, `SEED_ARGS`,
+`EXTRA`); lines marked `ADAPT` are specific to the cluster or the scheduler. Tested by executing
+`array.sbatch` by hand with `SLURM_ARRAY_TASK_ID` set, never under Slurm. Plan and examples:
+`doc/rewrite/HANDOFF.md`, section 3.
+
 ## gate.py
 
     python3 bench/gate.py --pair default:BASE_TAGS:NEW_TAGS --pair dl:... --report mode1:... [--out FILE]
