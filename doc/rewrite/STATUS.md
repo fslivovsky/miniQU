@@ -3910,3 +3910,19 @@ unchanged.
    1:30, full matrix, m1_equiv, real benchmark files.
 5. Defaults: `elimsubsume=1`, `elimboundmax=16` follow the spec; they only act under `--elim` (off). The owner may
    prefer them at 0/elimbound until benchmarked.
+
+## M4 plan (coordinator, 2026-11-25)
+
+Plan in ROADMAP.md, "M4 execution plan": vivification of learnt clauses and learnt cubes as inprocessing rounds on a
+conflict schedule (`--vivify`, off by default; `--vivifyclause`, `--vivifycube`), one code path over `Kind` in
+`src/vivify.cpp`, in three tasks (T1 core with proofs, T2 candidate selection and rows with elimination / `-dl` /
+mode 1 / QDIMACS, T3 `-cert`, sanity runs, docs).
+
+Decisions:
+- Learnt constraints only; irredundant ones, mode 2, decision reuse, per-tier effort shares, glue recomputation and
+  all tuning and benchmarks are left for later (list in the ROADMAP section).
+- One-kind propagation (`propagate_kind`, V1) with `Lone::Ignore` in mode 0 (V2); a root literal is resolved away only
+  through a unit of the candidate's kind, otherwise it stays (if in the candidate) or the candidate is given up.
+- Proofs fit the existing QLRUP format (one derived step and one deletion per strengthened constraint), so nothing
+  is refused with `--proof`, `--check` or `-cert`.
+- No benchmark configurations for M4 on this machine (wrap-up decision).

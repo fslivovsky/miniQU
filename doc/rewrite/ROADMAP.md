@@ -1164,6 +1164,79 @@ unless a benchmark argues otherwise.
 
 ## M4. Vivification of clauses and cubes
 
+### M4 execution plan (coordinator, 2026-11-25; supersedes the work packages, the scheduling paragraph and the acceptance paragraph below)
+
+Written under the owner's wrap-up decision (STATUS.md, "Owner decision: wrap up in 24 hours") and the owner's
+scope note of 2026-11-24 (vivification runs as inprocessing; clauses and cubes both, one code path over `Kind`,
+one option per kind). Initial version, off by default, little testing. V1-V5 below stay the reference for the
+side conditions; this plan fixes how they are built. Three tasks, executed in order:
+
+| task | model | content |
+|---|---|---|
+| M4-T1 | opus | `vivify.cpp`, `vivify.hpp`, `propagate_kind` in `propagate.cpp`: rounds on a conflict schedule at level 0, learnt constraints of both kinds, decision-only analysis, proof steps, options, counters, unit tests, two matrix rows |
+| M4-T2 | opus | candidate selection (`vivified` bit, tier limit, newest first), literal order by occurrence count, matrix rows with elimination, `-dl`, mode 1, QDIMACS, invariant checks |
+| M4-T3 | sonnet | `-cert` run, sanity run on a few benchmark files, option-off equality check, ARCHITECTURE as built, list for the owner |
+
+**Design of the initial version.**
+
+- *Where it runs.* `vivifying ()` and `vivify ()` in the search loop, one `else if` branch after the
+  `eliminating ()` branch and of the same shape: a round is due at `stats.conflicts >= lim.vivify`
+  (`--vivifyint`, growing arithmetically: after round `n` the next is `vivifyint * (n + 1)` conflicts ahead);
+  above level 0 the loop backtracks to level 0 first, so propagation, root simplification and a due elimination
+  round have their turn before it. No round before the first conflict (nothing is learnt yet). Returns a root
+  conflict or `Ref::none` like `eliminate ()`.
+- *Applies to* learnt constraints only, in modes 0 and 1, for QCIR and QDIMACS input alike (a learnt constraint
+  is replaced by a constraint derived from stored constraints of its kind; no database invariant of ARCH 11.1 is
+  touched). Mode 2: a notice, nothing done (V6).
+- *One round*, for each kind `K` switched on (`--vivifyclause`, `--vivifycube`), with half of `--vivifyticks`
+  each (all of it if one kind): for each candidate `C` (learnt, live, at least two literals, no literal that
+  disables it at the root):
+  1. For each literal `l` of `C` in the chosen order: if `l` already disables `C` (implied), analyse from the
+     reason of `l`, keeping `l`, and stop; if `l` has vanished (implied or root), go on; otherwise open a level,
+     assign `l` its vanishing value without reason, and run `propagate_kind (K)`; on a conflict analyse it and
+     stop. `C` itself stays watched and may be the conflict or the reason (then its id is in the chain).
+  2. *V1.* `propagate_kind (K)` visits the watch lists of `K` only, from a trail head of its own
+     (`Internal::propagated` is not moved forward). *V2.* Mode 0 uses `Lone::Ignore`, mode 1 `Lone::Propagate`.
+     Every reason above level 0 is therefore a `K`-constraint whose other literals have all vanished.
+  3. *V4, decision-only analysis.* Walk the trail backwards from its end to the root; a marked literal that is a
+     decision goes into `D` (it is a literal of `C`), a marked implied literal contributes its reason's id and
+     marks the reason's other literals. A marked root literal contributes the id of its unit **of kind `K`**
+     (`root_unit (K, l)`); without such a unit it stays in `D` if its variable is in `C`, otherwise the candidate
+     is given up (`vivifyskipped`): a root literal of the other kind's making is no consequence in `K`'s calculus.
+  4. *V5.* `qreduce (D, K)`, then `backtrack (0)`. `D` is a subset of `C`. If it is smaller: empty decides the
+     formula (`found_empty`); one literal is a unit, derived under a fresh id, `C` deleted, assigned after the
+     round through `simplifier.units` / `add_root_units ()`; otherwise `C` is rewritten in place exactly as
+     `strengthen_root` does it (`Proof::strengthen` or `next_id++`, detach, copy, `shrink_constraint`, glue at
+     most the new size, `watch_root_simplified`).
+- *No decision reuse:* every candidate starts from level 0. No `Ref` is held across a round; no arena
+  collection inside one. The saved phases are copied before a round and put back after it, so that vivification
+  decisions do not leak into the search.
+- *Proofs.* One derived step per strengthened constraint, in the existing format: chain = conflict or reason id,
+  the reason ids in reverse trail order, then the root unit ids; each step clashes on one pivot and no resolvent
+  is tautological (every other literal of a reason has vanished). `d` for the replaced constraint. Ids are
+  consumed with and without a proof alike. Nothing is refused: `--vivify` works with `--proof`, `--check`, `-cert`.
+- *Dependency learning, elimination.* The analysis does not look at the prefix order of the decisions (V3), so
+  `-dl` needs nothing; `backtrack` restores heaps and dependency heads as after a restart. Eliminated variables
+  occur in no live constraint, so they are never decided or propagated here; vivification only shortens or
+  deletes learnt constraints, which can only help E2/E3 of the next elimination round.
+
+**Options:** `vivify` (0), `vivifyclause` (1), `vivifycube` (1), `vivifyint` (2000), `vivifyticks` (2000000);
+T2: `vivifytier` (2: glue at most the tier-2 limit; 1: tier 1 only; 3: all learnt constraints), `vivifyonce` (1).
+**Counters:** `vivifyrounds`, `vivifydecisions`, `vivifyprops`, `vivifyskipped`, `vivifyunits`, per kind
+`vivifychecked`, `vivified`, `vivifiedlits`.
+
+**Left for later** (nothing of it is started on this machine):
+
+1. Irredundant constraints (sound for QCIR as a class-D replacement; for QDIMACS the "replace `C` by `C' ⊂ C`"
+   row of ARCH 11.1 applies but was not built or tested); mode 2.
+2. Decision reuse between candidates sharing a literal prefix (candidates sorted for it), CaDiCaL's separate
+   effort shares per tier, effort relative to search ticks, deletion of a candidate subsumed by the conflict or
+   implied by an irredundant reason, instantiation, re-vivification policy.
+3. Glue recomputation and promotion of a shortened constraint (glue is only capped by the new size).
+4. All tuning (`vivifyint`, `vivifyticks`, tier choice, literal order) and every benchmark and ablation of
+   0.3; the coverage table per kind and tier.
+5. Tests not run: full matrix, sanitizer fuzz, seeds beyond 1:30, smoke set, m1_equiv.
+
 Class (D). For a candidate constraint `C` of kind `K`: at level 0, decide the
 *vanishing* value of its literals one by one (for a clause: the literal
 false; for a cube: the literal true), propagating after each, and use what
