@@ -112,6 +112,12 @@ void Internal::learn (Kind kind, Var asserting) {
 void Internal::learn_watched (Kind kind) {
   const int jump = derived.size () > 1 ? level (var (derived[1])) : 0;
   assert (jump < level (var (derived[0])));
+  // No constraint mentions an eliminated variable, so no analysis meets
+  // one (elim.cpp).
+#ifndef NDEBUG
+  for (const Lit l : derived)
+    assert (!ftab[var (l)].eliminated);
+#endif
   const uint32_t glue = compute_glue (derived);
   stats.learned[index (kind)]++;
   stats.learnedlits[index (kind)] += (int64_t) derived.size ();

@@ -2,9 +2,39 @@
 // ARCHITECTURE 10, 11.1).  CaDiCaL's 'elim.cpp' gives the names and the
 // shape (occurrence lists, a bound on the resolvents, resolvents added
 // before the parents are deleted); clauses and cubes take the same code
-// path over 'Kind'.  Initial version: one round before the first decision
-// (the preprocessing, '--elimpre'), QCIR input ('complete') in modes 0 and
-// 1 only, off by default ('--elim').
+// path over 'Kind'.  Initial version: QCIR input ('complete') in modes 0
+// and 1 only, off by default ('--elim').
+//
+// Schedule.  'lim.elim' is the conflict count at which the next round is
+// due: 0 with '--elimpre' (the preprocessing round before the first
+// decision), else '--elimint'.  Every round, whatever its outcome, sets it
+// to 'elimint * (rounds + 1)' conflicts ahead with '--eliminp' (an
+// arithmetically growing interval, as in CaDiCaL) and to never without, so
+// 'eliminating ()' is false right after a round and the loop cannot spin.
+//
+// Level 0.  A round runs at level 0 with propagation complete.  When one is
+// due above level 0 the search loop backtracks to level 0 and the next
+// iterations propagate and simplify at the root before the round.  That
+// backtrack is as safe as the one of 'restart ()': both are taken in the
+// same state (the propagation of this iteration found no conflict, so no
+// lone literal is pending, and nothing else is in flight), 'restart ()'
+// backtracks to level 0 itself whenever trail reuse keeps nothing, and
+// 'backtrack' undoes assignments only, putting decision variables back
+// into their heaps and, with '--dl', moving the trail head of 'depend.cpp'
+// back so that waiting variables become eligible again as after a restart.
+// A backtrack derives nothing, so it has no proof step.
+//
+// Learnt constraints.  E2 and E3 below are checked against every live
+// constraint at the time of the round, learnt ones included.  Learnt
+// 'K'-constraints containing 'x' are never parents; they are deleted with
+// 'x' ('elimlearnt').  None of them is a reason: 'x' is unassigned and a
+// root reason has no unassigned literal.  Constraints learnt later never
+// mention 'x', since no live constraint does and 'x' stays unassigned
+// ('learn.cpp' asserts it).  Dependencies ('--dl') are between a decision
+// variable and a secondary variable of a learnt constraint, and a gate
+// variable is primary wherever it occurs, so none should mention 'x'; a
+// round that finds one all the same resets the dependencies, since a
+// variable waiting for 'x' would never become eligible again.
 //
 // Classes (D) and (R).  A variable 'x' is eliminated in the kind 'K' in
 // which it is primary (an existential variable by clause resolution, a
@@ -62,10 +92,10 @@
 // variable outwards, in passes repeated while a pass eliminated something
 // and the round's budget of literal visits ('--elimticks') lasts.
 //
-// Left out (ROADMAP "Left for later"): inprocessing rounds, decision
-// variables, QDIMACS input, mode 2, gate-aware elimination, subsumption,
-// schedule marks, candidates ordered by cost, a growing bound and
-// occurrence mode.
+// Left out (ROADMAP "Left for later"): effort relative to search ticks,
+// delays after fruitless rounds, decision variables, QDIMACS input, mode 2,
+// gate-aware elimination, subsumption, schedule marks, candidates ordered
+// by cost, a growing bound and occurrence mode.
 
 #include "contract.hpp"
 #include "internal.hpp"
@@ -74,6 +104,7 @@
 #include <algorithm>
 #include <cassert>
 #include <cinttypes>
+#include <cstdint>
 
 namespace miniqu {
 
@@ -82,13 +113,17 @@ static Kind primary_kind (Quant quant) {
   return quant == Quant::Exists ? Kind::Clause : Kind::Cube;
 }
 
+void Internal::init_elim () {
+  if (opts.elimpre)
+    lim.elim = 0;
+  else
+    lim.elim = opts.eliminp ? opts.elimint : INT64_MAX;
+}
+
 bool Internal::eliminating () const {
   if (!opts.elim || (!opts.elimclause && !opts.elimcube))
     return false;
-  if (opts.mode == 2 || !complete || decision_level ())
-    return false;
-  // Only the round before the first decision in this version.
-  if (!opts.elimpre || stats.elimrounds)
+  if (opts.mode == 2 || !complete)
     return false;
   return stats.conflicts >= lim.elim;
 }
@@ -275,20 +310,28 @@ bool Internal::try_eliminate (Var x) {
   // reason.
   for (const std::vector<Ref> *occs : {&pos, &neg})
     for (const Ref ref : *occs) {
-      assert (!deref (arena, ref).garbage ());
+      const Constraint &c = deref (arena, ref);
+      assert (!c.garbage ());
       assert (!is_root_reason (ref));
+      if (c.redundant ())
+        stats.elimlearnt[index (kind)]++;
+      else
+        stats.elimdeleted[index (kind)]++;
       mark_garbage (ref);
-      stats.elimdeleted[index (kind)]++;
     }
   pos.clear ();
   neg.clear ();
+  if (opts.dl && (!depend.on[x].empty () || !depend.watching[x].empty ()))
+    eliminator.dependent = true;
   ftab[x].eliminated = true;
   stats.eliminated[index (kind)]++;
   return true;
 }
 
 // Drops the occurrence lists and the garbage references of the databases
-// ('reduce.cpp' and 'check.cpp' expect lists without garbage).
+// ('reduce.cpp' and 'check.cpp' expect lists without garbage), resets the
+// dependencies if one mentions an eliminated variable, and schedules the
+// next round.
 void Internal::finish_elim_round () {
   std::vector<std::vector<Ref>> ().swap (eliminator.occs);
   for (Kind kind : {Kind::Clause, Kind::Cube})
@@ -300,15 +343,24 @@ void Internal::finish_elim_round () {
   eliminator.lits.clear ();
   eliminator.resolvents.clear ();
   eliminator.resolvent.clear ();
+  if (eliminator.dependent) {
+    eliminator.dependent = false;
+    reset_dependencies ();
+  }
+  lim.elim = opts.eliminp ? stats.conflicts + (int64_t) opts.elimint *
+                                                  (stats.elimrounds + 1)
+                          : INT64_MAX;
 }
 
 // One round; returns a root conflict or 'Ref::none'.  Every exit leaves
-// 'eliminating ()' false ('elimrounds' counts at entry).
+// 'eliminating ()' false ('finish_elim_round' schedules the next one).
 Ref Internal::eliminate () {
   PROFILE_SCOPE (elim);
   assert (!decision_level () && propagated == trail.size ());
   assert (opts.mode != 2 && complete && simplifier.units.empty ());
   stats.elimrounds++;
+  if (stats.conflicts)
+    stats.eliminprounds++;
   const size_t vars = prefix.size ();
   eliminator.ticks = 0;
   eliminator.occs.resize (4 * vars);

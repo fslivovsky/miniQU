@@ -18,7 +18,9 @@ struct Resolvent {
 };
 
 // Scratch state of bounded variable elimination ('elim.cpp').  Everything
-// is empty outside a round, except 'pending', which stays sized.
+// is empty outside a round, except 'pending', which stays sized; no
+// reference survives a round, so rounds cope with whatever happened to the
+// databases in between.
 struct Eliminator {
   // Occurrence lists of the round, for the literals of candidates only, at
   // '2 * index (lit) + index (kind)'.  They may hold garbage references,
@@ -39,6 +41,10 @@ struct Eliminator {
   std::vector<int8_t> marks;  // per literal: in the first parent
 
   int64_t ticks = 0; // literal visits of the round
+
+  // With '--dl': a variable eliminated in this round is mentioned by a
+  // dependency, which the end of the round resets.
+  bool dependent = false;
 };
 
 } // namespace miniqu

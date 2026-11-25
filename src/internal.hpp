@@ -311,6 +311,7 @@ struct Internal {
   [[nodiscard]] Ref simplify_root ();
 
   // elim.cpp
+  void init_elim ();
   bool eliminating () const;
   bool elim_candidate (Var) const;
   void connect_occs ();

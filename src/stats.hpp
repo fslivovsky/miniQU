@@ -41,6 +41,7 @@ namespace miniqu {
   COUNTER (rootlits) \
   COUNTER (rootdeleted) \
   COUNTER (elimrounds) \
+  COUNTER (eliminprounds) \
   COUNTER (elimtried) \
   COUNTER (elimblockedother) \
   COUNTER (elimblockedright) \
@@ -49,6 +50,7 @@ namespace miniqu {
   KIND_COUNTER (eliminated) \
   KIND_COUNTER (resolvents) \
   KIND_COUNTER (elimdeleted) \
+  KIND_COUNTER (elimlearnt) \
   COUNTER (collections) \
   COUNTER (relocated) \
   COUNTER (modelcubes) \

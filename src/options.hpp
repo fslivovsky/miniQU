@@ -97,6 +97,8 @@ namespace miniqu {
           "eliminate universal variables by cube resolution, with elim") \
   OPTION (elimpre, 1, 0, 1, "eliminate before the search, with elim") \
   OPTION (eliminp, 1, 0, 1, "eliminate in inprocessing rounds, with elim") \
+  OPTION (elimint, 2000, 1, 1000000000, \
+          "conflicts between elimination rounds (growing arithmetically)") \
   OPTION (elimbound, 0, 0, 1000000000, \
           "additional constraints an elimination may add") \
   OPTION (elimocclim, 100, 1, 1000000000, \

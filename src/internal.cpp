@@ -14,12 +14,15 @@
 // literals or find a root conflict, and a decision must not come before
 // their propagation.  It runs only when root literals are new, so it cannot
 // repeat without progress.  Bounded variable elimination ('elim.cpp')
-// follows it under the same conditions: one round before the first
-// decision, after root simplification had its turn, which may again assign
-// root literals or return a root conflict.  When no decision variable is
-// left, the clauses are satisfied (QDIMACS) and the initial cube taken from
-// the assignment is analysed like any satisfied cube (4.5).  Analysis ends
-// the search by deriving an empty constraint, which sets 'status'.
+// follows it: a round is due before the first decision ('--elimpre') and
+// then on a conflict schedule ('--eliminp'); a round due above level 0
+// backtracks to level 0 first, and runs once propagation and root
+// simplification had their turn.  It may assign root literals or return a
+// root conflict, and the next round is never due right after one.  When no
+// decision variable is left, the clauses are satisfied (QDIMACS) and the
+// initial cube taken from the assignment is analysed like any satisfied
+// cube (4.5).  Analysis ends the search by deriving an empty constraint,
+// which sets 'status'.
 
 #include "internal.hpp"
 
@@ -66,6 +69,7 @@ void Internal::search () {
   init_restart ();
   size_watches ();
   init_reduce ();
+  init_elim ();
   init_tiers ();
   init_model_cube ();
   if (opts.elim && (opts.mode == 2 || !complete))
@@ -86,8 +90,12 @@ void Internal::search () {
           root_conflict != Ref::none)
         analyze (root_conflict);
     } else if (eliminating ()) {
-      if (const Ref root_conflict = eliminate ();
-          root_conflict != Ref::none)
+      // A round needs level 0: backtrack first, then propagation and root
+      // simplification have their turn before the round (elim.cpp).
+      if (decision_level ())
+        backtrack (0);
+      else if (const Ref root_conflict = eliminate ();
+               root_conflict != Ref::none)
         analyze (root_conflict);
     } else {
       // The size trigger of 'reduce' may stay true, so the loop goes on
