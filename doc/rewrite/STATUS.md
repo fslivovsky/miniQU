@@ -3984,12 +3984,12 @@ rounds, one code path over `Kind`, off by default (`--vivify`).
 - Option off: 12 search-tier corpus instances (`corpus.py --tier search --seed 101..112`, in `m4t1/eq/`) x modes
   `''`, `-dl`, `-mode=1`, `-mode=2`: conflicts/decisions/propagations/ticks equal to the binary built from bc96a5a
   (`m4t1/before-build/miniQU`), 48/48 (`m4t1/eq.log`, script `m4t1/eq1.sh`).
-- **Finding about an earlier check:** the M3-T4 equality check (`m3t4/eq.log`, "80/80") was void. The job list fed
-  to `xargs -L1` had lines ending in a blank for the empty mode, so xargs joined them with the next line, and the
-  solver took the next instance as its output file and overwrote it with "SAT"; all files in
-  `/home/ec2-user/miniqu-work/m3/t1/eq/` contain only "SAT", so both binaries printed the same parse error. My
-  check uses fresh instances and "-verb=1" instead of an empty mode and was verified to print real statistics. The
-  M3 option-off equality (elimination off) should be re-run by the owner.
+- Note on the harness: a first attempt of this check fed `xargs -L1` lines ending in a blank (empty mode); xargs then
+  joins a line with the next one, the solver takes the second instance as its output file and overwrites it with
+  "SAT". That attempt overwrote `/home/ec2-user/miniqu-work/m3/t1/eq/s101.qcir` (restored from `corpus.py --seed 101`,
+  identical to the original generator output); its results were discarded. The check above uses "-verb=1" in place
+  of an empty mode and was verified to print real statistics. `m3t4/eq1.sh` has the same pitfall when called
+  through `xargs -L1` with an empty mode.
 
 **Not done / not tested (for the owner):**
 1. Left out by design (T1): irredundant constraints, mode 2, decision reuse between candidates, sorting of literals
@@ -4001,4 +4001,3 @@ rounds, one code path over `Kind`, off by default (`--vivify`).
    same round then run with incomplete root propagation (sound, weaker). Not measured how often this happens.
 4. Not run: asan fuzz, full matrix, seeds beyond 1:60, smoke set, m1_equiv, any real benchmark file, Lean check of
    proofs from QDIMACS input with `--vivify` (fuzz_qdimacs checks verdicts only).
-5. Re-run of the M3 option-off equality check (see the finding above).
