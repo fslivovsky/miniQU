@@ -39,8 +39,15 @@ struct Eliminator {
   std::vector<Resolvent> resolvents;
   std::vector<Lit> resolvent; // the one being built
   std::vector<int8_t> marks;  // per literal: in the first parent
+  std::vector<int8_t>
+      marked; // per literal: in the resolvent ('elimsubsume')
 
   int64_t ticks = 0; // literal visits of the round
+
+  // E4: additional constraints an elimination may add.  Set to 'elimbound'
+  // by the first round and doubled (0, 1, 2, 4, ...) up to 'elimboundmax'
+  // after a round that reached a fixpoint within its tick budget.
+  int64_t bound = 0;
 
   // With '--dl': a variable eliminated in this round is mentioned by a
   // dependency, which the end of the round resets.

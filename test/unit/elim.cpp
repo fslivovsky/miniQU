@@ -433,6 +433,108 @@ static void test_violations_caught () {
       "not rightmost"));
 }
 
+// '--elimsubsume': 3x2 occurrences of the gate variable 8 give 6
+// resolvents for 5 parents, blocked with the bound 0; with the stored
+// (1 2 7), which equals the resolvent (1 2 7), that one is dropped and not
+// counted, so 8 is eliminated.  (The stored constraint is found through the
+// occurrence list of the gate variable 7, which the clause (7 10) with
+// the deeper 10 keeps from being eliminated itself.)
+static void test_subsumed_by_stored () {
+  for (int subsume : {0, 1}) {
+    Fixture f ("eeeeeeEEae");
+    f.internal.opts.elimsubsume = subsume;
+    f.internal.opts.elimboundmax = 0;
+    f.add (Clause, {7, 10});
+    f.add (Clause, {1, 2, 7});
+    for (int other : {1, 4, 6})
+      f.add (Clause, {8, other});
+    f.add (Clause, {-8, 2, 7});
+    f.add (Clause, {-8, 5});
+    CHECK (f.eliminate () == Ref::none);
+    CHECK_EQ (f.eliminated (8), subsume == 1);
+    CHECK_EQ (f.internal.stats.elimsubsumed[0], subsume);
+    CHECK_EQ (f.internal.stats.elimblockedbound, 1 - subsume);
+    if (subsume) {
+      CHECK_EQ (f.internal.stats.resolvents[0], 5);
+      CHECK_EQ (f.live (Clause), 7u);
+      CHECK (f.has (Clause, {1, 2, 7}) && f.has (Clause, {1, 5}));
+      CHECK (f.has (Clause, {6, 2, 7}) && f.has (Clause, {6, 5}));
+    }
+  }
+}
+
+// A learnt (1 2 7) does not subsume: the round is as without the option.
+static void test_learnt_does_not_subsume () {
+  Fixture f ("eeeeeeEEae");
+  f.internal.opts.elimboundmax = 0;
+  f.add (Clause, {7, 10});
+  for (int other : {1, 4, 6})
+    f.add (Clause, {8, other});
+  f.add (Clause, {-8, 2, 7});
+  f.add (Clause, {-8, 5});
+  f.learn (Clause, {1, 2, 7});
+  CHECK (f.eliminate () == Ref::none);
+  CHECK (!f.eliminated (8));
+  CHECK_EQ (f.internal.stats.elimsubsumed[0], 0);
+  CHECK_EQ (f.internal.stats.elimblockedbound, 1);
+}
+
+// Equal resolvents of one candidate are stored once, and a resolvent
+// subsumed by an earlier one is dropped; the proof (ids consecutive, no
+// step for a dropped one) is replayed by the checker.
+static void test_duplicate_resolvents () {
+  Fixture f ("eeeE", true);
+  f.add (Clause, {4, 1});
+  f.add (Clause, {4, 1, 2});
+  f.add (Clause, {-4, 3});
+  const size_t before = f.recorder->steps.size ();
+  CHECK (f.eliminate () == Ref::none);
+  CHECK (f.eliminated (4));
+  CHECK_EQ (f.internal.stats.resolvents[0], 1);
+  CHECK_EQ (f.internal.stats.elimsubsumed[0], 1);
+  CHECK_EQ (f.live (Clause), 1u);
+  CHECK (f.has (Clause, {1, 3}));
+  const std::vector<std::string> expected = {"a 4 c: 1 3 : 1 3", "d 1",
+                                             "d 2", "d 3"};
+  const std::vector<std::string> steps (
+      f.recorder->steps.begin () + (long) before, f.recorder->steps.end ());
+  CHECK (steps == expected);
+  CHECK_EQ (f.internal.next_id, (uint64_t) 5);
+}
+
+// The bound: 'elimbound' in the first round, doubled after each round at
+// a fixpoint up to 'elimboundmax' (0, 1, 2, 4, 8, 16, 16); never changed
+// with 'elimboundmax <= elimbound'; not raised when the ticks ran out.
+static void test_bound_sequence () {
+  {
+    Fixture f ("eE");
+    std::vector<int64_t> seen;
+    for (int round = 0; round < 7; round++) {
+      f.internal.lim.elim = 0;
+      CHECK (f.eliminate () == Ref::none);
+      seen.push_back (f.internal.eliminator.bound);
+    }
+    CHECK ((seen == std::vector<int64_t>{1, 2, 4, 8, 16, 16, 16}));
+  }
+  {
+    Fixture f ("eE");
+    f.internal.opts.elimbound = 5;
+    f.internal.opts.elimboundmax = 3;
+    for (int round = 0; round < 3; round++) {
+      f.internal.lim.elim = 0;
+      CHECK (f.eliminate () == Ref::none);
+      CHECK_EQ (f.internal.eliminator.bound, 5);
+    }
+  }
+  {
+    Fixture f ("eE");
+    f.internal.opts.elimticks = 0;
+    f.internal.lim.elim = 0;
+    CHECK (f.eliminate () == Ref::none);
+    CHECK_EQ (f.internal.eliminator.bound, 0);
+  }
+}
+
 int main () {
   test_clauses ();
   test_bound ();
@@ -450,5 +552,9 @@ int main () {
   test_dependencies ();
   test_invariants_after_round ();
   test_violations_caught ();
+  test_subsumed_by_stored ();
+  test_learnt_does_not_subsume ();
+  test_duplicate_resolvents ();
+  test_bound_sequence ();
   return test_result ();
 }

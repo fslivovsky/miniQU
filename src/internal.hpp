@@ -316,10 +316,14 @@ struct Internal {
   bool elim_candidate (Var) const;
   void connect_occs ();
   void flush_occs (std::vector<Ref> &);
+  bool subsumed_by_resolvent (size_t size);
+  bool subsumed_by_stored (Kind, std::span<const Lit>);
+  bool resolvent_subsumed (Kind, std::span<const Lit>);
   [[nodiscard]] bool resolve (Kind, Ref, Ref, Lit pivot);
   [[nodiscard]] bool find_resolvents (Kind, Var);
   void add_resolvents (Kind, Var);
   bool try_eliminate (Var);
+  void grow_elim_bound ();
   void finish_elim_round ();
   [[nodiscard]] Ref eliminate ();
 

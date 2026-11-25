@@ -101,6 +101,11 @@ namespace miniqu {
           "conflicts between elimination rounds (growing arithmetically)") \
   OPTION (elimbound, 0, 0, 1000000000, \
           "additional constraints an elimination may add") \
+  OPTION (elimboundmax, 16, 0, 1000000000, \
+          "largest bound on additional constraints, with elim") \
+  OPTION ( \
+      elimsubsume, 1, 0, 1, \
+      "do not add resolvents subsumed by a stored constraint, with elim") \
   OPTION (elimocclim, 100, 1, 1000000000, \
           "occurrence limit per literal of an eliminated variable") \
   OPTION (elimclslim, 100, 2, 1000000000, "size limit of a resolvent") \

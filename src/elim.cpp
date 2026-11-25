@@ -61,9 +61,35 @@
 //  E4 (bound).  At most '--elimocclim' irredundant occurrences per
 //     polarity; every resolvent (non-tautological, after 'qreduce') has at
 //     most '--elimclslim' literals; there are at most as many resolvents as
-//     irredundant parents plus '--elimbound'.  A resolvent containing a
-//     literal and its negation (any variable) is dropped: such a clause is
-//     satisfied and such a cube falsified by every assignment.
+//     irredundant parents plus 'eliminator.bound' (below).  A resolvent
+//     containing a literal and its negation (any variable) is dropped: such
+//     a clause is satisfied and such a cube falsified by every assignment.
+//
+// Subsumed resolvents ('--elimsubsume', M3-T4).  A resolvent 'R' (after
+// 'qreduce') all of whose literals occur in a live irredundant
+// 'K'-constraint 'D' that is not a parent, or in an earlier resolvent of
+// the same candidate, is dropped: not stored, not logged, no id, and not
+// counted against the bound ('elimsubsumed').  'D' never contains 'x' (the
+// literal of 'x' is not in 'R'), so it survives the elimination of 'x';
+// learnt constraints are never used as 'D', since 'reduce' may delete them.
+// Sound: nothing is added, so INV-DERIVED and the proof are untouched (a
+// dropped resolvent has no proof step at all); INV-COMPLETE holds because
+// 'D' (or the earlier resolvent, which is stored) propagates whenever 'R'
+// would, and is irredundant.  Dropping 'R' is the same as adding it and
+// removing it at once by subsumption with an irredundant constraint, so the
+// rounds after it start from an ordinary formula state.  'D' is looked up
+// in the occurrence lists of the round, which hold the literals of
+// candidates only, and only in the shortest non-empty list of a literal of
+// 'R' (walking all of them used up the tick budget on the corpus, see
+// STATUS.md M3-T4): a 'D' without that literal, or without any candidate
+// literal, is not found, a missed opportunity and not an error.  The visits
+// count as ticks.
+//
+// Growing bound ('--elimboundmax', as 'elimboundmin/max' in CaDiCaL).  The
+// first round sets 'eliminator.bound' to '--elimbound'.  A round whose
+// passes reached a fixpoint (the last one eliminated nothing) within
+// '--elimticks' raises it to '2 * bound' (to 1 from 0), at most to
+// '--elimboundmax', for the next round; a round never loops over bounds.
 //
 // Root-assigned literals are ordinary literals here: a root-disabled
 // parent takes part and resolvents keep root-vanished literals, because no
@@ -94,8 +120,9 @@
 //
 // Left out (ROADMAP "Left for later"): effort relative to search ticks,
 // delays after fruitless rounds, decision variables, QDIMACS input, mode 2,
-// gate-aware elimination, subsumption, schedule marks, candidates ordered
-// by cost, a growing bound and occurrence mode.
+// gate-aware elimination, backward subsumption and strengthening with the
+// resolvents, schedule marks, candidates ordered by cost and occurrence
+// mode.
 
 #include "contract.hpp"
 #include "internal.hpp"
@@ -159,9 +186,64 @@ void Internal::flush_occs (std::vector<Ref> &occs) {
                  [&] (Ref ref) { return deref (arena, ref).garbage (); });
 }
 
+// Whether an earlier resolvent of this candidate has all its literals
+// marked ('marked' holds the 'size' literals of the new one).
+bool Internal::subsumed_by_resolvent (size_t size) {
+  for (const Resolvent &r : eliminator.resolvents) {
+    if (r.size > size)
+      continue;
+    eliminator.ticks += r.size;
+    const Lit *begin = eliminator.lits.data () + r.offset;
+    if (std::all_of (begin, begin + r.size,
+                     [&] (Lit l) { return eliminator.marked[index (l)]; }))
+      return true;
+  }
+  return false;
+}
+
+// Whether a live irredundant 'kind'-constraint in the shortest non-empty
+// occurrence list of a literal of 'lits' has all its literals marked.
+// Lists of non-candidate literals are empty or stale (without the later
+// resolvents), which only misses opportunities; a parent never qualifies,
+// since its pivot is unmarked.
+bool Internal::subsumed_by_stored (Kind kind, std::span<const Lit> lits) {
+  const std::vector<Ref> *shortest = nullptr;
+  for (const Lit l : lits) {
+    const std::vector<Ref> &occs = eliminator (kind, l);
+    eliminator.ticks++;
+    if (!occs.empty () && (!shortest || occs.size () < shortest->size ()))
+      shortest = &occs;
+  }
+  if (!shortest)
+    return false;
+  for (const Ref ref : *shortest) {
+    eliminator.ticks++;
+    const Constraint &d = deref (arena, ref);
+    if (d.garbage () || d.redundant () || d.size () > lits.size ())
+      continue;
+    eliminator.ticks += d.size ();
+    if (std::all_of (d.begin (), d.end (),
+                     [&] (Lit k) { return eliminator.marked[index (k)]; }))
+      return true;
+  }
+  return false;
+}
+
+// '--elimsubsume': whether the resolvent 'lits' is subsumed by an earlier
+// resolvent of the candidate or by a stored irredundant constraint.
+bool Internal::resolvent_subsumed (Kind kind, std::span<const Lit> lits) {
+  for (const Lit l : lits)
+    eliminator.marked[index (l)] = 1;
+  const bool subsumed = subsumed_by_resolvent (lits.size ()) ||
+                        subsumed_by_stored (kind, lits);
+  for (const Lit l : lits)
+    eliminator.marked[index (l)] = 0;
+  return subsumed;
+}
+
 // The resolvent of 'c' (containing 'pivot', whose other literals are
-// marked) and 'd' (containing '~pivot'), stored unless tautological.
-// False if it is too large (E4).
+// marked) and 'd' (containing '~pivot'), stored unless tautological or
+// subsumed.  False if it is too large (E4).
 bool Internal::resolve (Kind kind, Ref c_ref, Ref d_ref, Lit pivot) {
   std::vector<Lit> &lits = eliminator.resolvent;
   const Constraint &c = deref (arena, c_ref);
@@ -180,6 +262,10 @@ bool Internal::resolve (Kind kind, Ref c_ref, Ref d_ref, Lit pivot) {
       lits.push_back (l);
   }
   prefix.qreduce (lits, kind);
+  if (opts.elimsubsume && resolvent_subsumed (kind, lits)) {
+    stats.elimsubsumed[index (kind)]++;
+    return true;
+  }
   if (lits.size () > (size_t) opts.elimclslim)
     return false;
   eliminator.resolvents.push_back (
@@ -203,7 +289,7 @@ bool Internal::find_resolvents (Kind kind, Var x) {
   const size_t p = irredundant_count (pos), n = irredundant_count (neg);
   if (p > (size_t) opts.elimocclim || n > (size_t) opts.elimocclim)
     return false;
-  const size_t limit = p + n + (size_t) opts.elimbound;
+  const size_t limit = p + n + (size_t) eliminator.bound;
   eliminator.lits.clear ();
   eliminator.resolvents.clear ();
   std::vector<int8_t> &marks = eliminator.marks;
@@ -330,6 +416,16 @@ bool Internal::try_eliminate (Var x) {
   return true;
 }
 
+// After a round at a fixpoint within its budget: the next round may add
+// more (0, 1, 2, 4, ... up to '--elimboundmax'; never lowers the bound).
+void Internal::grow_elim_bound () {
+  int64_t &bound = eliminator.bound;
+  if (bound >= opts.elimboundmax)
+    return;
+  bound = std::min<int64_t> (bound ? 2 * bound : 1, opts.elimboundmax);
+  LOG ("elimination bound raised to %" PRId64, bound);
+}
+
 // Drops the occurrence lists and the garbage references of the databases
 // ('reduce.cpp' and 'check.cpp' expect lists without garbage), resets the
 // dependencies if one mentions an eliminated variable, and schedules the
@@ -360,7 +456,8 @@ Ref Internal::eliminate () {
   PROFILE_SCOPE (elim);
   assert (!decision_level () && propagated == trail.size ());
   assert (opts.mode != 2 && complete && simplifier.units.empty ());
-  stats.elimrounds++;
+  if (!stats.elimrounds++)
+    eliminator.bound = opts.elimbound;
   if (stats.conflicts)
     stats.eliminprounds++;
   const size_t vars = prefix.size ();
@@ -368,6 +465,7 @@ Ref Internal::eliminate () {
   eliminator.occs.resize (4 * vars);
   eliminator.pending.assign (vars, 0);
   eliminator.marks.assign (2 * vars, 0);
+  eliminator.marked.assign (2 * vars, 0);
   connect_occs ();
   bool progress = true;
   while (progress && status == Status::Unknown &&
@@ -380,6 +478,9 @@ Ref Internal::eliminate () {
         progress = true;
     }
   }
+  const int64_t bound = eliminator.bound;
+  if (!progress && eliminator.ticks < opts.elimticks)
+    grow_elim_bound ();
   finish_elim_round ();
   if (status != Status::Unknown) {
     simplifier.units.clear ();
@@ -389,9 +490,10 @@ Ref Internal::eliminate () {
   PHASE ("elim", stats.elimrounds,
          "eliminated %" PRId64 " existential %" PRId64
          " universal, resolvents %" PRId64 " clauses %" PRId64
-         " cubes, deleted %" PRId64,
+         " cubes, deleted %" PRId64 ", bound %" PRId64,
          stats.eliminated[0], stats.eliminated[1], stats.resolvents[0],
-         stats.resolvents[1], stats.elimdeleted[0] + stats.elimdeleted[1]);
+         stats.resolvents[1], stats.elimdeleted[0] + stats.elimdeleted[1],
+         bound);
   if (conflict != Ref::none)
     return conflict;
   if (collecting ())

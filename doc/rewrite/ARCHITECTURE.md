@@ -1235,9 +1235,20 @@ design, which is not built yet. What is built:
   variable, and an eliminated variable unassigned and not a decision
   variable; debug builds re-scan all four lists before each commit
   (`check_elimination_owner ()`, quadratic).
+- Subsumed resolvents (M3-T4, `--elimsubsume`, on with `--elim`): a
+  resolvent all of whose literals occur in a live irredundant constraint of
+  its kind (found through the occurrence lists of the round, so only one
+  with a candidate literal), or in an earlier resolvent of the same
+  candidate, is not stored, not logged, gets no id and does not count
+  against the bound (`elimsubsumed`). Learnt constraints never subsume.
+- Growing bound (M3-T4): `Eliminator::bound` starts at `--elimbound` and
+  doubles (0, 1, 2, 4, ...) up to `--elimboundmax` after each round whose
+  passes reached a fixpoint within `--elimticks`; the PHASE line prints it.
 - The options of 9.1 are an excerpt; the elimination options (`elim`,
   `elimclause`, `elimcube`, `elimpre`, `eliminp`, `elimint`, `elimbound`,
-  `elimocclim`, `elimclslim`, `elimticks`) are in `src/options.hpp`.
+  `elimocclim`, `elimclslim`, `elimticks`) are in `src/options.hpp`, and:
+  - `elimsubsume` (1, [0,1]): do not add resolvents subsumed by a stored constraint, with elim.
+  - `elimboundmax` (16, [0,1e9]): largest bound on additional constraints, with elim.
 
 ### 10.1 Scheduling
 

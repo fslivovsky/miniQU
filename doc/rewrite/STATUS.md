@@ -3848,3 +3848,65 @@ Invariant checks, matrix rows, sanity runs, ARCHITECTURE as built. Elimination a
 2. No UNSAT real file in the sanity set; no timing comparison; no asan run; seeds beyond 1:30; no full matrix.
 3. 9.1 option list not extended (excerpt); `check_invariants` does not check the state of occurrence lists (none outlive a round).
 4. `elim-clause-only`/`elim-cube-only` rows require only their own counter; "other counter is 0" is not enforced by matrix.txt (checked by hand only).
+
+## M3-T4 (worker, 2026-11-25)
+
+**Built** (`src/elim.cpp`, `src/elim.hpp`, `src/internal.hpp`, `src/options.hpp`, `src/stats.hpp`):
+- Feature A, `--elimsubsume` (1, [0,1]), KIND_COUNTER `elimsubsumed`: in `resolve ()`, after `qreduce`, a
+  resolvent is dropped (not stored, not logged, no id, not counted against the bound) if an earlier resolvent of the
+  same candidate (`subsumed_by_resolvent`) or a live irredundant constraint of the same kind found in the round's
+  occurrence lists (`subsumed_by_stored`) has all its literals in it. Learnt constraints never subsume. All visits
+  count as `elimticks`. The size limit `elimclslim` is checked after the subsumption test (a dropped resolvent is
+  never stored, so its size does not matter).
+- Feature B, `--elimboundmax` (16, [0,1e9]): `Eliminator::bound` is set to `elimbound` by the first round and E4 uses
+  it; a round whose passes ended at a fixpoint (last pass eliminated nothing) without exhausting `elimticks` calls
+  `grow_elim_bound ()`: `bound ? 2 * bound : 1`, capped at `elimboundmax`, never lowered, no loop inside a round.
+  The PHASE line prints the bound the round used.
+- Both are sub-options of `--elim` (off by default), so the default search is unchanged; with `--elim` the new
+  defaults (subsume on, bound growing to 16) are active as the spec asks. `--no-elimsubsume --elimboundmax=0`
+  reproduces the previous `--elim` exactly (row `elim-nosub`: same conflicts 59719 and eliminated 39773/38550 as the
+  `elim` row of M3-T3).
+
+**Deviation from the spec (measured, deliberate):** the spec says to walk the occurrence lists of all literals of R.
+That version used up the whole `elimticks` budget in the first pass on corpus instances: s104.qcir
+(`/home/ec2-user/miniqu-work/m3/t1/eq/`) `elimtried` 56946 -> 592, eliminated clause/cube 7326/7154 -> 384/162, and the
+`elim-noearly` row failed its `eliminated.cube` counter (0%) (log `/home/ec2-user/miniqu-work/m3t4/rel.log`). Capping
+lists at `elimocclim` entries did not help. As built, `subsumed_by_stored` walks only the shortest non-empty list among
+the literals of R (a D must contain that literal to be found; any other D is a missed opportunity, never an error).
+With it s104: tried 77940, eliminated 7371/7258, elimsubsumed.clause 2328. Better schemes (one-watch occurrence lists
+as in CaDiCaL's forward subsumption, or a separate subsumption budget) are left for later.
+
+**Soundness (header of elim.cpp):** a dropped resolvent adds nothing, so INV-DERIVED and the proof are untouched; it
+has no proof step and consumes no id, so ids number alike with and without a proof. INV-COMPLETE holds because the
+subsuming D (irredundant, not containing x, so not deleted with x; or the earlier resolvent, which is stored)
+propagates whenever R would. Dropping R equals adding it and removing it at once by subsumption with an irredundant
+constraint, so later eliminations start from an ordinary formula state. The owner's side conditions E2/E3 are
+unchanged.
+
+**Tests** (machine has 48 cores; heavy commands on cores 0-39/0-23):
+- `taskset -c 0-23 cmake --build --preset release -j 16`: 0 warnings; `ctest --preset release` 44/44; debug build 0
+  warnings, `ctest --preset debug` 44/44; clang-format clean. `unit-elim` has 4 new tests: a resolvent equal to the
+  stored irredundant (1 2 7) is dropped and not counted, so the gate 8 (6 resolvents, 5 parents, bound 0) is eliminated
+  with the option and blocked without; a learnt (1 2 7) does not subsume; a resolvent subsumed by an earlier one of
+  the same candidate is dropped, with the proof steps replayed by the internal checker and `next_id` checked (no id
+  consumed); the bound sequence 1, 2, 4, 8, 16, 16 after rounds 1..6, constant with `elimboundmax <= elimbound`, not
+  raised when `elimticks` ran out.
+- `tests/regress.sh -S -j 40 -s 1:30 -M <all 14 elim* rows incl. elim-nosub, elim-sub-inp>` (release): PASSED, 1
+  warning (2 timeouts in `elim-noearly`, as in M3-T1/T3), 0 wrong verdicts, 418 proofs accepted by the Lean checker.
+  Log `/home/ec2-user/miniqu-work/m3t4/rel2.log`. `elimsubsumed.clause` is nonzero on 40% of the finished search
+  instances in the `elim` row (cube also 40%), so it was added to the required counters of that row.
+- Without `--elim`: 20 corpus instances x modes `''`, `-dl`, `-mode=1`, `-mode=2`: verdict and
+  conflicts/decisions/propagations/ticks equal to `/home/ec2-user/miniqu-work/m3/miniQU.before`, 80/80 (script
+  `/home/ec2-user/miniqu-work/m3t4/eq1.sh`, log `m3t4/eq.log`).
+
+**Not done / not tested (for the owner):**
+1. Gate-aware elimination, backward subsumption and strengthening with resolvents, any relaxation of the rightmost
+   condition: not built (listed for later).
+2. No benchmark and no timing measurement of either feature; the very large `elimsubsumed` counts in the `--elimint=1`
+   rows (millions, mostly duplicates among resolvents) suggest the duplicate check is worth measuring for cost.
+3. `subsumed_by_stored` is incomplete by design (shortest list only, see deviation); a complete and cheap scheme
+   (one-watch occurrence lists) is open.
+4. Not run: debug-build regress, asan fuzz, `-cert` runs (`tests/fuzz_cert.sh`) with the new options, seeds beyond
+   1:30, full matrix, m1_equiv, real benchmark files.
+5. Defaults: `elimsubsume=1`, `elimboundmax=16` follow the spec; they only act under `--elim` (off). The owner may
+   prefer them at 0/elimbound until benchmarked.

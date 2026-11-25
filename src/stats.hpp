@@ -51,6 +51,7 @@ namespace miniqu {
   KIND_COUNTER (resolvents) \
   KIND_COUNTER (elimdeleted) \
   KIND_COUNTER (elimlearnt) \
+  KIND_COUNTER (elimsubsumed) \
   COUNTER (collections) \
   COUNTER (relocated) \
   COUNTER (modelcubes) \
