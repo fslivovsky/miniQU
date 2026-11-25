@@ -4001,3 +4001,72 @@ rounds, one code path over `Kind`, off by default (`--vivify`).
    same round then run with incomplete root propagation (sound, weaker). Not measured how often this happens.
 4. Not run: asan fuzz, full matrix, seeds beyond 1:60, smoke set, m1_equiv, any real benchmark file, Lean check of
    proofs from QDIMACS input with `--vivify` (fuzz_qdimacs checks verdicts only).
+
+## M4-T2 (worker, 2026-11-25)
+
+**Built** (commit 83d6671 code and unit tests, matrix rows and this entry in the commit after it; branch
+`rewrite/cadical-style`): candidate selection and literal order of vivification, still off by default (`--vivify`).
+- `src/constraint.hpp`: bit 16 of the glue word of redundant constraints is the `vivified` flag (`vivified ()`, false
+  for irredundant constraints; `set_vivified (bool)`); layout comment updated. Survives `shrink` and garbage
+  collection (word copies), independent of glue and used.
+- `src/vivify.cpp`: `vivify_tier` (tier by glue with `tiers.tier1/tier2[index (kind)]`), `vivify_select` (candidates
+  of tier <= `--vivifytier`, without the bit under `--vivifyonce`; if all selected candidates have the bit, their bits
+  are cleared, all are taken, `vivifyrescheduled`++; stable sort so that lower tiers are visited first, newest first
+  inside a tier), `vivify_count` (occurrences per `index (lit)` in `vivifier.counts`, sized `2 * vars` for the round,
+  zeroed after each kind's pass), `vivify_order` (descending count, ties by literal index; only the visit order, the
+  stored order is not touched). The bit is set when a tried candidate is not shortened (no conflict, analysis gave up,
+  or D not shorter) and cleared when it is rewritten. Debug-only assertion before a rewrite: D is a subset of C,
+  strictly shorter, no two literals on the same variable. The header comment describes selection and order.
+- Options `vivifyonce` (1) and `vivifytier` (2); counter `vivifyrescheduled`.
+- Invariant check: the round already ends with `check_invariants ()` under `assertions_enabled || opts.check` when no
+  root conflict is returned and no collection runs (from T1); unchanged.
+
+**Deviations from the spec:**
+- The occurrence count is not charged to the tick budget (the budget stays propagation ticks only, as in T1).
+- When rescheduling, only the bits of the candidates selected by the tier limit are cleared (constraints of a higher
+  tier keep theirs; they are never candidates under that tier setting anyway).
+- With `--no-vivifyonce` the bit is still set and cleared (it is never read then).
+- Unit-test fixture of `test/unit/vivify.cpp` now calls `init_tiers ()` and `size_watches ()` (otherwise the tier
+  limits are 0 and a fixture without originals has no watch lists).
+
+**Tests** (48 cores; heavy commands on cores 0-23; logs in `/home/ec2-user/miniqu-work/m4t2/`):
+- Release and debug builds (`cmake --build --preset release|debug -j 16`): 0 warnings. `ctest --preset release` and
+  `ctest --preset debug`: 45/45 each.
+- New unit tests: `test/unit/constraint.cpp` `test_vivified` (bit set/clear, independent of glue/used/id, survives
+  `shrink` and `copy_constraint`, false on irredundant); `test/unit/vivify.cpp` (9) bit set on unchanged candidates,
+  skipped in the next round with `vivifyonce`, all retried and `vivifyrescheduled` = 1 in the round after, retried
+  every round without it; a shortened candidate keeps the bit clear; (10) `vivifytier` 1/2/3 with limits 2/6 and
+  glues 2/5/9: exact candidate vectors (order: tier 3, tier 2, tier 1 oldest..newest, visited from the back) and
+  checked counts; (11) literal order: (1 2 3) with (3 -1) stays unchanged with equal counts (index order) and becomes
+  (2 3) when two other learnts make 3 the most frequent literal; (12) after an elimination round (QCIR fixture,
+  `complete`, `elim = 1`): the eliminated gate variable is unassigned and in no live constraint after the
+  vivification round; the fixture's round checks `check_invariants ()`.
+- `tests/regress.sh -S -j 40 -s 1:30 -M vivify,vivify-int1,vivify-clause-only,vivify-cube-only,vivify-mode1-dl,vivify-dl,vivify-elim,vivify-all,vivify-elim-inp,vivify-gc <release miniQU>`
+  (`regress1.log`, about 3 minutes): REGRESSION TESTS PASSED, 0 warnings, 0 wrong verdicts, 0 timeouts; 297 proofs
+  accepted by the Lean checker, 3 proof checks timed out (row `vivify-mode1-dl`, warnings only; not rejected).
+  Required counters, nonzero share over the 15 search instances:
+  `vivify` vivifyrounds 87%, vivified.clause 53%, vivified.cube 20% (T1: 80%/87%; lower now because of
+  `vivifyonce` and the tier-2 default); `vivify-int1` vivifyrounds 93%, vivifychecked.clause 93%,
+  vivifychecked.cube 20% (T1: 80%); `vivify-clause-only` vivified.clause 53%; `vivify-cube-only` vivified.cube 20%;
+  `vivify-mode1-dl` vivifyrounds 93%, vivified.clause 93%, vivified.cube 33%, dependencies 93%; `vivify-dl`
+  vivifyrounds 93%, dependencies 93%; `vivify-elim` vivifyrounds 87%, eliminated.clause 40%, eliminated.cube 40%;
+  `vivify-all` vivifyrounds 87%, vivified.clause 73%, vivified.cube 87%; `vivify-elim-inp` vivifyrounds 93%,
+  eliminprounds 93%; `vivify-gc` vivifyrounds 93%, reductions 93%, collections 100% (vivifyrescheduled 80%).
+  All rows kept as specified, no requirement reduced, both stress rows within their limit (0 timeouts).
+- `tests/fuzz_qdimacs.sh <release miniQU> 1 30 --vivify --vivifyint=5`: 60 instances agreed, 0 failures
+  (`qdimacs.log`); seeds 31..300: 540 agreed, 0 failures (`qdimacs2.log`).
+- Option off: 12 corpus instances (`m4t1/eq/`) x `-verb=1`, `-dl`, `-mode=1`: conflicts/decisions/propagations/ticks
+  and verdict equal to the binary of bc96a5a (before M4-T1), 36/36 (`m4t2/eq.log`, `m4t2/eq1.sh`).
+
+**Not done / not tested (for the owner):**
+1. Left out on purpose: irredundant constraints, mode 2, decision reuse and candidate sorting by literals, per-tier
+   effort shares, effort relative to search ticks, deletion of subsumed candidates, glue recomputation/promotion,
+   all tuning and benchmarks.
+2. The occurrence count and candidate selection/sort are not charged to `--vivifyticks`.
+3. No measurement of whether the order heuristic or `vivifyonce` helps (no benchmark, no ablation); the share of
+   instances with vivified cubes dropped from 87% to 20% in the `vivify` row under the new defaults
+   (`vivifytier=2`, `vivifyonce=1`), which may or may not be desirable.
+4. Three proofs of row `vivify-mode1-dl` were not checked (Lean checker timed out at the harness limit); not rerun
+   with a longer limit.
+5. Not run: asan build, full matrix, seeds beyond 1:30 for the matrix rows, smoke set, m1_equiv, `-cert` fuzz with
+   the new options, Lean check of proofs from QDIMACS input, any real benchmark file.

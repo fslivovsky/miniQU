@@ -110,3 +110,11 @@ elim-sub-inp | --elim --elimint=1 --rootsimpdelay=0 | yes | eliminprounds elimin
 # Vivification of learnt constraints (M4-T1).
 vivify       | --vivify --vivifyint=50          | yes | conflicts vivifyrounds vivified.clause vivified.cube | normal
 vivify-int1  | --vivify --vivifyint=1 --rootsimpdelay=0 | yes | conflicts vivifyrounds vivifychecked.clause vivifychecked.cube | stress | 4
+vivify-clause-only | --vivify --vivifyint=50 --no-vivifycube | yes | vivified.clause | normal
+vivify-cube-only | --vivify --vivifyint=50 --no-vivifyclause | yes | vivified.cube | normal
+vivify-mode1-dl | --vivify --vivifyint=50 -mode=1 -dl | yes | vivifyrounds vivified.clause vivified.cube dependencies | normal
+vivify-dl    | --vivify --vivifyint=50 -dl | yes | vivifyrounds dependencies | normal
+vivify-elim  | --vivify --vivifyint=50 --elim --elimint=50 | yes | vivifyrounds eliminated.clause eliminated.cube | normal
+vivify-all   | --vivify --vivifyint=20 --vivifytier=3 --no-vivifyonce -ccminmode=3 | yes | vivifyrounds vivified.clause vivified.cube | normal
+vivify-elim-inp | --vivify --vivifyint=1 --elim --no-elimpre --elimint=1 --rootsimpdelay=0 | yes | vivifyrounds eliminprounds | stress | 4
+vivify-gc    | --vivify --vivifyint=1 --reduceint=2 --tier1glue=0 --tier2glue=0 --gcfrac=0 --vivifytier=3 | yes | vivifyrounds reductions collections | stress | 4
