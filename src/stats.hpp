@@ -52,6 +52,14 @@ namespace miniqu {
   KIND_COUNTER (elimdeleted) \
   KIND_COUNTER (elimlearnt) \
   KIND_COUNTER (elimsubsumed) \
+  COUNTER (vivifyrounds) \
+  COUNTER (vivifydecisions) \
+  COUNTER (vivifyprops) \
+  COUNTER (vivifyskipped) \
+  COUNTER (vivifyunits) \
+  KIND_COUNTER (vivifychecked) \
+  KIND_COUNTER (vivified) \
+  KIND_COUNTER (vivifiedlits) \
   COUNTER (collections) \
   COUNTER (relocated) \
   COUNTER (modelcubes) \

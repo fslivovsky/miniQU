@@ -107,3 +107,6 @@ elim-inp-dl  | --elim --no-elimpre --elimint=1 -dl  | yes | conflicts eliminprou
 elim-inp-gc  | --elim --elimint=1 --elimbound=16 --reduceint=2 --tier1glue=0 --tier2glue=0 --gcfrac=0 --rootsimpdelay=0 | yes | conflicts eliminprounds reductions collections | stress | 2
 elim-inp-mode1 | --elim --no-elimpre --elimint=1 -mode=1 | yes | conflicts eliminprounds eliminated.clause eliminated.cube | stress | 2
 elim-sub-inp | --elim --elimint=1 --rootsimpdelay=0 | yes | eliminprounds eliminated.clause eliminated.cube | stress | 2
+# Vivification of learnt constraints (M4-T1).
+vivify       | --vivify --vivifyint=50          | yes | conflicts vivifyrounds vivified.clause vivified.cube | normal
+vivify-int1  | --vivify --vivifyint=1 --rootsimpdelay=0 | yes | conflicts vivifyrounds vivifychecked.clause vivifychecked.cube | stress | 4

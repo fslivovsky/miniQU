@@ -17,6 +17,7 @@
 #include "random.hpp"
 #include "stats.hpp"
 #include "tier.hpp"
+#include "vivify.hpp"
 #include "watch.hpp"
 
 #include <array>
@@ -178,6 +179,7 @@ struct Internal {
   Depend depend;
   Simplifier simplifier;
   Eliminator eliminator;
+  Vivifier vivifier;
 
   Ref model_cube = Ref::none; // buffer of 'initial_cube'
   std::vector<Lit> model;     // literals of the next initial cube
@@ -236,6 +238,9 @@ struct Internal {
   [[nodiscard]] Ref propagate ();
   [[nodiscard]] Ref propagate_ldq ();
   template <Kind K> [[nodiscard]] Ref propagate_ldq_watches (Lit p);
+  template <Kind K, Lone R>
+  [[nodiscard]] Ref propagate_kind_trail (size_t &head);
+  [[nodiscard]] Ref propagate_kind (Kind, size_t &head);
 
   // backtrack.cpp
   void backtrack (int new_level);
@@ -326,6 +331,16 @@ struct Internal {
   void grow_elim_bound ();
   void finish_elim_round ();
   [[nodiscard]] Ref eliminate ();
+
+  // vivify.cpp
+  void init_vivify ();
+  bool vivifying () const;
+  void vivify_order (const Constraint &);
+  [[nodiscard]] bool vivify_analyze (Kind, Ref start, Lit kept);
+  void vivify_apply (Ref);
+  void vivify_constraint (Ref);
+  void vivify_kind (Kind, int64_t ticks);
+  [[nodiscard]] Ref vivify ();
 
   // collect.cpp
   bool collecting () const;

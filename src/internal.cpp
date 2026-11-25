@@ -18,7 +18,11 @@
 // then on a conflict schedule ('--eliminp'); a round due above level 0
 // backtracks to level 0 first, and runs once propagation and root
 // simplification had their turn.  It may assign root literals or return a
-// root conflict, and the next round is never due right after one.  When no
+// root conflict, and the next round is never due right after one.
+// Vivification of learnt constraints ('vivify.cpp', '--vivify', modes 0 and
+// 1) has the same shape: due on a conflict schedule ('--vivifyint'), it
+// backtracks to level 0 first, runs after elimination had its turn, may
+// return a root conflict, and is never due right after a round.  When no
 // decision variable is left, the clauses are satisfied (QDIMACS) and the
 // initial cube taken from the assignment is analysed like any satisfied
 // cube (4.5).  Analysis ends the search by deriving an empty constraint,
@@ -70,11 +74,14 @@ void Internal::search () {
   size_watches ();
   init_reduce ();
   init_elim ();
+  init_vivify ();
   init_tiers ();
   init_model_cube ();
   if (opts.elim && (opts.mode == 2 || !complete))
     VERBOSE (1, "elimination is not applied %s",
              complete ? "in mode 2" : "to QDIMACS input");
+  if (opts.vivify && opts.mode == 2)
+    VERBOSE (1, "vivification is not applied in mode 2");
   while (status == Status::Unknown) {
     if (const Ref conflict = propagate (); conflict != Ref::none)
       analyze (conflict);
@@ -95,6 +102,13 @@ void Internal::search () {
       if (decision_level ())
         backtrack (0);
       else if (const Ref root_conflict = eliminate ();
+               root_conflict != Ref::none)
+        analyze (root_conflict);
+    } else if (vivifying ()) {
+      // Same shape as elimination (vivify.cpp).
+      if (decision_level ())
+        backtrack (0);
+      else if (const Ref root_conflict = vivify ();
                root_conflict != Ref::none)
         analyze (root_conflict);
     } else {

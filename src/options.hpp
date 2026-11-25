@@ -111,6 +111,16 @@ namespace miniqu {
   OPTION (elimclslim, 100, 2, 1000000000, "size limit of a resolvent") \
   OPTION (elimticks, 100000000, 0, 1000000000, \
           "literal visits one elimination round may spend") \
+  OPTION ( \
+      vivify, 0, 0, 1, \
+      "vivify learnt constraints in inprocessing rounds (modes 0 and 1)") \
+  OPTION (vivifyclause, 1, 0, 1, "vivify learnt clauses, with vivify") \
+  OPTION (vivifycube, 1, 0, 1, "vivify learnt cubes, with vivify") \
+  OPTION ( \
+      vivifyint, 2000, 1, 1000000000, \
+      "conflicts between vivification rounds (growing arithmetically)") \
+  OPTION (vivifyticks, 2000000, 0, 1000000000, \
+          "propagation ticks one vivification round may spend") \
   OPTION (profile, 0, 0, 3, "profiling level")
 
 struct Options {
