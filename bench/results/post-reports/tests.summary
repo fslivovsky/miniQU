@@ -1,0 +1,61 @@
+=== ctest start 09:36
+=== ctest rc=0 end 09:38
+=== m1equiv start 09:38
+=== m1equiv rc=0 end 09:48
+=== matrix-release start 09:48
+=== matrix-release rc=0 end 12:36
+=== matrix-asan start 12:36
+=== matrix-asan rc=0 end 13:48
+=== cert-1 start 13:48
+=== cert-1 rc=0 end 13:49
+=== cert-2 start 13:49
+=== cert-2 rc=0 end 13:49
+=== cert-3 start 13:49
+=== cert-3 rc=0 end 13:50
+=== cert-4 start 13:50
+=== cert-4 rc=0 end 13:51
+=== cert-5 start 13:51
+=== cert-5 rc=0 end 13:52
+=== cert-6 start 13:52
+=== cert-6 rc=0 end 13:53
+=== cert-7 start 13:53
+=== cert-7 rc=0 end 13:54
+=== qdimacs-1-plain start 13:54
+=== qdimacs-1-plain rc=0 end 13:55
+=== qdimacs-1-stress start 13:55
+=== qdimacs-1-stress rc=0 end 13:56
+=== qdimacs-1-viv start 13:56
+=== qdimacs-1-viv rc=0 end 13:59
+=== qdimacs-1-asan start 13:59
+=== qdimacs-1-asan rc=0 end 14:07
+=== qdimacs-2-plain start 14:07
+=== qdimacs-2-plain rc=0 end 14:08
+=== qdimacs-2-stress start 14:08
+=== qdimacs-2-stress rc=0 end 14:10
+=== qdimacs-2-viv start 14:10
+=== qdimacs-2-viv rc=0 end 14:13
+=== qdimacs-2-asan start 14:13
+=== qdimacs-2-asan rc=0 end 14:22
+=== qdimacs-3-plain start 14:22
+=== qdimacs-3-plain rc=0 end 14:24
+=== qdimacs-3-stress start 14:24
+=== qdimacs-3-stress rc=0 end 14:26
+=== qdimacs-3-viv start 14:26
+=== qdimacs-3-viv rc=0 end 14:33
+=== qdimacs-3-asan start 14:33
+=== qdimacs-3-asan rc=0 end 14:49
+=== qdimacs-4-plain start 14:49
+=== qdimacs-4-plain rc=0 end 14:54
+=== qdimacs-4-stress start 14:54
+=== qdimacs-4-stress rc=0 end 14:56
+=== qdimacs-4-viv start 14:56
+=== qdimacs-4-viv rc=0 end 14:58
+=== qdimacs-4-asan start 14:58
+=== qdimacs-4-asan rc=0 end 15:00
+=== complete-1 start 15:00
+=== complete-1 rc=0 end 15:11
+=== complete-2 start 15:11
+=== complete-2 rc=0 end 15:22
+=== complete-3 start 15:22
+=== complete-3 rc=0 end 15:34
+ALLDONE

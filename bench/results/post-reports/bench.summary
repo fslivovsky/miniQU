@@ -1,0 +1,89 @@
+=== post-ref-s1 start 09:36
+=== post-ref-s1 rc=0 end 09:47 run.py: post-ref-s1: solved 150/376; errors: 0; rejected proofs: 0; proof coverage gaps: 0 -> /home/ec2-user/miniQU/bench/results/post-ref-s1/results.
+=== post-elim-s1 start 09:47
+=== post-elim-s1 rc=0 end 09:57 run.py: post-elim-s1: solved 161/376; errors: 0; rejected proofs: 0; proof coverage gaps: 0 -> /home/ec2-user/miniQU/bench/results/post-elim-s1/result
+=== post-vivify-s1 start 09:57
+=== post-vivify-s1 rc=0 end 10:08 run.py: post-vivify-s1: solved 153/376; errors: 0; rejected proofs: 0; proof coverage gaps: 0 -> /home/ec2-user/miniQU/bench/results/post-vivify-s1/re
+=== post-both-s1 start 10:08
+=== post-both-s1 rc=0 end 10:19 run.py: post-both-s1: solved 166/376; errors: 0; rejected proofs: 0; proof coverage gaps: 0 -> /home/ec2-user/miniQU/bench/results/post-both-s1/result
+=== post-base-s1 start 10:19
+=== post-base-s1 rc=0 end 10:30 run.py: post-base-s1: solved 141/376; errors: 0; rejected proofs: 0; proof coverage gaps: 0 -> /home/ec2-user/miniQU/bench/results/post-base-s1/result
+=== post-ref-dl-s1 start 10:30
+=== post-ref-dl-s1 rc=0 end 10:41 run.py: post-ref-dl-s1: solved 154/376; errors: 0; rejected proofs: 0; proof coverage gaps: 0 -> /home/ec2-user/miniQU/bench/results/post-ref-dl-s1/re
+=== post-elim-dl-s1 start 10:41
+=== post-elim-dl-s1 rc=0 end 10:51 run.py: post-elim-dl-s1: solved 158/376; errors: 0; rejected proofs: 0; proof coverage gaps: 0 -> /home/ec2-user/miniQU/bench/results/post-elim-dl-s1/
+=== post-vivify-dl-s1 start 10:51
+=== post-vivify-dl-s1 rc=0 end 11:02 run.py: post-vivify-dl-s1: solved 155/376; errors: 0; rejected proofs: 0; proof coverage gaps: 0 -> /home/ec2-user/miniQU/bench/results/post-vivify-dl
+=== post-both-dl-s1 start 11:02
+=== post-both-dl-s1 rc=0 end 11:12 run.py: post-both-dl-s1: solved 164/376; errors: 0; rejected proofs: 0; proof coverage gaps: 0 -> /home/ec2-user/miniQU/bench/results/post-both-dl-s1/
+=== post-base-dl-s1 start 11:12
+=== post-base-dl-s1 rc=0 end 11:23 run.py: post-base-dl-s1: solved 150/376; errors: 0; rejected proofs: 0; proof coverage gaps: 0 -> /home/ec2-user/miniQU/bench/results/post-base-dl-s1/
+=== post-m1-s1 start 11:23
+=== post-m1-s1 rc=0 end 11:34 run.py: post-m1-s1: solved 141/376; errors: 0; rejected proofs: 0; proof coverage gaps: 0 -> /home/ec2-user/miniQU/bench/results/post-m1-s1/results.cs
+=== post-m1-dl-s1 start 11:34
+=== post-m1-dl-s1 rc=0 end 11:45 run.py: post-m1-dl-s1: solved 150/376; errors: 0; rejected proofs: 0; proof coverage gaps: 0 -> /home/ec2-user/miniQU/bench/results/post-m1-dl-s1/resu
+=== post-elim-clauseonly-s1 start 11:45
+=== post-elim-clauseonly-s1 rc=0 end 11:55 run.py: post-elim-clauseonly-s1: solved 160/376; errors: 0; rejected proofs: 0; proof coverage gaps: 0 -> /home/ec2-user/miniQU/bench/results/post-eli
+=== post-elim-cubeonly-s1 start 11:55
+=== post-elim-cubeonly-s1 rc=0 end 12:06 run.py: post-elim-cubeonly-s1: solved 156/376; errors: 0; rejected proofs: 0; proof coverage gaps: 0 -> /home/ec2-user/miniQU/bench/results/post-elim-
+=== post-elim-preonly-s1 start 12:06
+=== post-elim-preonly-s1 rc=0 end 12:17 run.py: post-elim-preonly-s1: solved 157/376; errors: 0; rejected proofs: 0; proof coverage gaps: 0 -> /home/ec2-user/miniQU/bench/results/post-elim-p
+=== post-elim-inponly-s1 start 12:17
+=== post-elim-inponly-s1 rc=0 end 12:27 run.py: post-elim-inponly-s1: solved 162/376; errors: 0; rejected proofs: 0; proof coverage gaps: 0 -> /home/ec2-user/miniQU/bench/results/post-elim-i
+=== post-vivify-clauseonly-s1 start 12:27
+=== post-vivify-clauseonly-s1 rc=0 end 12:38 run.py: post-vivify-clauseonly-s1: solved 156/376; errors: 0; rejected proofs: 0; proof coverage gaps: 0 -> /home/ec2-user/miniQU/bench/results/post-v
+=== post-vivify-cubeonly-s1 start 12:38
+=== post-vivify-cubeonly-s1 rc=0 end 12:49 run.py: post-vivify-cubeonly-s1: solved 148/376; errors: 0; rejected proofs: 0; proof coverage gaps: 0 -> /home/ec2-user/miniQU/bench/results/post-viv
+=== post-vivify-tier3-s1 start 12:49
+=== post-vivify-tier3-s1 rc=0 end 13:00 run.py: post-vivify-tier3-s1: solved 148/376; errors: 0; rejected proofs: 0; proof coverage gaps: 0 -> /home/ec2-user/miniQU/bench/results/post-vivify
+=== post-notiers-s1 start 13:00
+=== post-notiers-s1 rc=0 end 13:11 run.py: post-notiers-s1: solved 152/376; errors: 0; rejected proofs: 0; proof coverage gaps: 0 -> /home/ec2-user/miniQU/bench/results/post-notiers-s1/
+=== post-norootsimp-s1 start 13:11
+=== post-norootsimp-s1 rc=0 end 13:22 run.py: post-norootsimp-s1: solved 151/376; errors: 0; rejected proofs: 0; proof coverage gaps: 0 -> /home/ec2-user/miniQU/bench/results/post-norootsi
+=== post-noreusetrail-s1 start 13:22
+=== post-noreusetrail-s1 rc=0 end 13:33 run.py: post-noreusetrail-s1: solved 157/376; errors: 0; rejected proofs: 0; proof coverage gaps: 0 -> /home/ec2-user/miniQU/bench/results/post-noreus
+=== post-proofcov-both-s0 start 13:33
+=== post-proofcov-both-s0 rc=0 end 13:51 run.py: post-proofcov-both-s0: solved 163/376; errors: 0; rejected proofs: 0; proof coverage gaps: 0 -> /home/ec2-user/miniQU/bench/results/post-proof
+=== post-proofcov-both-dl-s0 start 13:51
+=== post-proofcov-both-dl-s0 rc=0 end 14:08 run.py: post-proofcov-both-dl-s0: solved 162/376; errors: 0; rejected proofs: 0; proof coverage gaps: 0 -> /home/ec2-user/miniQU/bench/results/post-pr
+=== post-ref-s2 start 14:08
+=== post-ref-s2 rc=0 end 14:19 run.py: post-ref-s2: solved 151/376; errors: 0; rejected proofs: 0; proof coverage gaps: 0 -> /home/ec2-user/miniQU/bench/results/post-ref-s2/results.
+=== post-elim-s2 start 14:19
+=== post-elim-s2 rc=0 end 14:29 run.py: post-elim-s2: solved 166/376; errors: 0; rejected proofs: 0; proof coverage gaps: 0 -> /home/ec2-user/miniQU/bench/results/post-elim-s2/result
+=== post-vivify-s2 start 14:29
+=== post-vivify-s2 rc=0 end 14:40 run.py: post-vivify-s2: solved 151/376; errors: 0; rejected proofs: 0; proof coverage gaps: 0 -> /home/ec2-user/miniQU/bench/results/post-vivify-s2/re
+=== post-both-s2 start 14:40
+=== post-both-s2 rc=0 end 14:50 run.py: post-both-s2: solved 166/376; errors: 0; rejected proofs: 0; proof coverage gaps: 0 -> /home/ec2-user/miniQU/bench/results/post-both-s2/result
+=== post-base-s2 start 14:50
+=== post-base-s2 rc=0 end 15:01 run.py: post-base-s2: solved 146/376; errors: 0; rejected proofs: 0; proof coverage gaps: 0 -> /home/ec2-user/miniQU/bench/results/post-base-s2/result
+=== post-ref-dl-s2 start 15:01
+=== post-ref-dl-s2 rc=0 end 15:12 run.py: post-ref-dl-s2: solved 161/376; errors: 0; rejected proofs: 0; proof coverage gaps: 0 -> /home/ec2-user/miniQU/bench/results/post-ref-dl-s2/re
+=== post-elim-dl-s2 start 15:12
+=== post-elim-dl-s2 rc=0 end 15:22 run.py: post-elim-dl-s2: solved 160/376; errors: 0; rejected proofs: 0; proof coverage gaps: 0 -> /home/ec2-user/miniQU/bench/results/post-elim-dl-s2/
+=== post-vivify-dl-s2 start 15:22
+=== post-vivify-dl-s2 rc=0 end 15:33 run.py: post-vivify-dl-s2: solved 157/376; errors: 0; rejected proofs: 0; proof coverage gaps: 0 -> /home/ec2-user/miniQU/bench/results/post-vivify-dl
+=== post-both-dl-s2 start 15:33
+=== post-both-dl-s2 rc=0 end 15:43 run.py: post-both-dl-s2: solved 163/376; errors: 0; rejected proofs: 0; proof coverage gaps: 0 -> /home/ec2-user/miniQU/bench/results/post-both-dl-s2/
+=== post-base-dl-s2 start 15:43
+=== post-base-dl-s2 rc=0 end 15:54 run.py: post-base-dl-s2: solved 153/376; errors: 0; rejected proofs: 0; proof coverage gaps: 0 -> /home/ec2-user/miniQU/bench/results/post-base-dl-s2/
+=== post-ref-s3 start 15:54
+=== post-ref-s3 rc=0 end 16:05 run.py: post-ref-s3: solved 151/376; errors: 0; rejected proofs: 0; proof coverage gaps: 0 -> /home/ec2-user/miniQU/bench/results/post-ref-s3/results.
+=== post-elim-s3 start 16:05
+=== post-elim-s3 rc=0 end 16:16 run.py: post-elim-s3: solved 159/376; errors: 0; rejected proofs: 0; proof coverage gaps: 0 -> /home/ec2-user/miniQU/bench/results/post-elim-s3/result
+=== post-vivify-s3 start 16:16
+=== post-vivify-s3 rc=0 end 16:27 run.py: post-vivify-s3: solved 150/376; errors: 0; rejected proofs: 0; proof coverage gaps: 0 -> /home/ec2-user/miniQU/bench/results/post-vivify-s3/re
+=== post-both-s3 start 16:27
+=== post-both-s3 rc=0 end 16:37 run.py: post-both-s3: solved 161/376; errors: 0; rejected proofs: 0; proof coverage gaps: 0 -> /home/ec2-user/miniQU/bench/results/post-both-s3/result
+=== post-base-s3 start 16:37
+=== post-base-s3 rc=0 end 16:48 run.py: post-base-s3: solved 144/376; errors: 0; rejected proofs: 0; proof coverage gaps: 0 -> /home/ec2-user/miniQU/bench/results/post-base-s3/result
+=== post-ref-dl-s3 start 16:48
+=== post-ref-dl-s3 rc=0 end 16:59 run.py: post-ref-dl-s3: solved 158/376; errors: 0; rejected proofs: 0; proof coverage gaps: 0 -> /home/ec2-user/miniQU/bench/results/post-ref-dl-s3/re
+=== post-elim-dl-s3 start 16:59
+=== post-elim-dl-s3 rc=0 end 17:09 run.py: post-elim-dl-s3: solved 162/376; errors: 0; rejected proofs: 0; proof coverage gaps: 0 -> /home/ec2-user/miniQU/bench/results/post-elim-dl-s3/
+=== post-vivify-dl-s3 start 17:09
+=== post-vivify-dl-s3 rc=0 end 17:20 run.py: post-vivify-dl-s3: solved 158/376; errors: 0; rejected proofs: 0; proof coverage gaps: 0 -> /home/ec2-user/miniQU/bench/results/post-vivify-dl
+=== post-both-dl-s3 start 17:20
+=== post-both-dl-s3 rc=0 end 17:30 run.py: post-both-dl-s3: solved 162/376; errors: 0; rejected proofs: 0; proof coverage gaps: 0 -> /home/ec2-user/miniQU/bench/results/post-both-dl-s3/
+=== post-base-dl-s3 start 17:30
+=== post-base-dl-s3 rc=0 end 17:41 run.py: post-base-dl-s3: solved 146/376; errors: 0; rejected proofs: 0; proof coverage gaps: 0 -> /home/ec2-user/miniQU/bench/results/post-base-dl-s3/
+ALLDONE
