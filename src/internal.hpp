@@ -16,6 +16,7 @@
 #include "profile.hpp"
 #include "random.hpp"
 #include "stats.hpp"
+#include "subsume.hpp"
 #include "tier.hpp"
 #include "vivify.hpp"
 #include "watch.hpp"
@@ -182,6 +183,7 @@ struct Internal {
   Simplifier simplifier;
   Eliminator eliminator;
   Vivifier vivifier;
+  Subsumer subsumer;
 
   Ref model_cube = Ref::none; // buffer of 'initial_cube'
   std::vector<Lit> model;     // literals of the next initial cube
@@ -326,6 +328,7 @@ struct Internal {
   bool elim_candidate (Var) const;
   bool elim_marking () const;
   void mark_elim_removed (const Constraint &);
+  void mark_elim_literal (Lit, bool learnt);
   void mark_elim_all ();
   void schedule_elim ();
   [[nodiscard]] bool connect_occs ();
@@ -340,6 +343,21 @@ struct Internal {
   void grow_elim_bound ();
   void finish_elim_round ();
   [[nodiscard]] Ref eliminate ();
+  void elim_backward (Ref);
+  void elim_backward_queue ();
+
+  // subsume.cpp
+  void init_subsume ();
+  bool subsume_applies () const;
+  bool subsuming () const;
+  void mark_subsume (const Constraint &);
+  enum class Strengthening { Shortened, Unit, Empty };
+  Strengthening strengthen_by (Ref ref, Ref by, Lit remove);
+  int subsume_check (const Constraint &subsuming, Lit &flipped);
+  bool try_to_subsume (Ref);
+  void subsume_connect (Ref);
+  bool subsume_kind (Kind);
+  [[nodiscard]] Ref subsume ();
 
   // vivify.cpp
   void init_vivify ();

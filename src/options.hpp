@@ -118,6 +118,20 @@ namespace miniqu {
       "inprocessing round budget in per mille of search ticks (0: off)") \
   OPTION (elimmineff, 10000000, 0, 1000000000, \
           "smallest budget of an inprocessing round, with elimeffort") \
+  OPTION (elimbackward, 1, 0, 1, \
+          "subsume and strengthen with resolvents, with elim and subsume") \
+  OPTION (subsume, 0, 0, 1, \
+          "subsumption and strengthening rounds (modes 0 and 1)") \
+  OPTION (subsumestr, 1, 0, 1, \
+          "strengthen by self-subsuming resolution, with subsume") \
+  OPTION (subsumeint, 2000, 1, 1000000000, \
+          "conflicts between subsumption rounds (growing arithmetically)") \
+  OPTION (subsumeclslim, 100, 2, 1000000000, \
+          "size limit of a constraint in a subsumption round") \
+  OPTION (subsumeocclim, 100, 1, 1000000000, \
+          "limit on the constraints connected to one literal") \
+  OPTION (subsumeticks, 100000000, 0, 1000000000, \
+          "literal visits one subsumption round may spend") \
   OPTION ( \
       vivify, 0, 0, 1, \
       "vivify learnt constraints in inprocessing rounds (modes 0 and 1)") \

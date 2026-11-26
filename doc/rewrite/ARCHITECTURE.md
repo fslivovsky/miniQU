@@ -1284,6 +1284,38 @@ for elimination:
 - `--no-elimmark` is the search of the version before these three changes
   (same counters on the test corpus).
 
+Subsumption (`subsume.{hpp,cpp}`, off by default, `--subsume`; CaDiCaL's
+`subsume.cpp` and `backward.cpp` are the reference):
+
+- Within one kind only. A constraint all of whose literals occur in
+  another one deletes it (an irredundant one only for an irredundant one).
+  Strengthening (`--subsumestr`): if C contains p, D contains ~p and the
+  other literals of C occur in D, D loses ~p and is reduced; the pivot must
+  be primary for the kind. `strengthen_by ()` rewrites D in place like
+  `strengthen_root ()`; one derived step with chain (D, C), then `d`.
+- A round (`subsume ()`) is forward subsumption with one-watch lists, the
+  candidates sorted by size: irredundant constraints and learnt ones of
+  tiers 1 and 2, at most `--subsumeclslim` literals, none assigned at the
+  root. `Flags::subsume` marks the variables of constraints added or
+  shortened since the last complete round (`mark_subsume ()`); a candidate
+  needs two marked variables and only constraints with all variables marked
+  are connected.
+- Schedule: `subsuming ()` in the search loop, before elimination: every
+  `subsumeint * (rounds + 1)` conflicts, the first round before the search,
+  and before an elimination round if none ran since the last one
+  (`Subsumer::since_elim`).
+- With elimination (`--elimbackward`, on, effective with `--subsume`):
+  `add_resolvents ()` queues each stored resolvent and `elim_backward ()`
+  uses it for backward subsumption and strengthening through the
+  occurrence list of its candidate literal with the shortest list;
+  shortened constraints are queued again. Deleted and shortened
+  constraints mark their variables for elimination.
+- Not built: turning a learnt subsuming constraint irredundant, on-the-fly
+  strengthening of a parent by its resolvent, the alternation of
+  elimination and subsumption rounds inside one phase (CaDiCaL's
+  `elimrounds`), binary constraints as literal pairs, an effort limit
+  relative to the search.
+
 **Vivification (M4, `vivify.{hpp,cpp}`, off by default).**
 
 - Schedule. `vivifying ()` says a round is due (`--vivify`, a kind switched

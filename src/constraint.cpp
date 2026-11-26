@@ -124,6 +124,8 @@ Ref Internal::new_constraint (uint64_t id, Kind kind,
   (learnt ? redundant : irredundant)[index (kind)].push_back (ref);
   if (lits.size () > 1)
     attach (ref);
+  if (opts.subsume)
+    mark_subsume (c);
   LOG (ref, "new");
   return ref;
 }

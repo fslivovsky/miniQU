@@ -193,18 +193,23 @@ bool Internal::elim_marking () const {
 // on a learnt constraint.
 void Internal::mark_elim_removed (const Constraint &c) {
   const bool learnt = c.redundant ();
-  for (const Lit l : c) {
-    const Var v = var (l);
-    Flags &f = ftab[v];
-    if (f.elim || f.eliminated || prefix.vars[v].decision)
-      continue;
-    if (learnt && !f.elimblocked)
-      continue;
-    if (val (l) && !level (v))
-      continue;
-    f.elim = true;
-    eliminator.scheduled++;
-  }
+  for (const Lit l : c)
+    mark_elim_literal (l, learnt);
+}
+
+// The literal left a constraint (deleted, or shortened in place by
+// 'strengthen_by').
+void Internal::mark_elim_literal (Lit l, bool learnt) {
+  const Var v = var (l);
+  Flags &f = ftab[v];
+  if (f.elim || f.eliminated || prefix.vars[v].decision)
+    return;
+  if (learnt && !f.elimblocked)
+    return;
+  if (val (l) && !level (v))
+    return;
+  f.elim = true;
+  eliminator.scheduled++;
 }
 
 // Marks every variable that may be a candidate (before the first round and
@@ -434,6 +439,8 @@ void Internal::add_resolvents (Kind kind, Var x) {
     for (const Lit l : lits)
       if (elim_candidate (var (l)))
         eliminator.occs.push (kind, l, ref);
+    if (subsume_applies () && opts.elimbackward)
+      eliminator.backward.push_back (ref);
     stats.resolvents[index (kind)]++;
   }
 }
@@ -501,8 +508,116 @@ bool Internal::try_eliminate (Var x) {
   eliminator.occs.truncate (kind, ~pivot, 0);
   if (opts.dl && (!depend.on[x].empty () || !depend.watching[x].empty ()))
     eliminator.dependent = true;
+  elim_backward_queue ();
   stats.eliminated[index (kind)]++;
   return true;
+}
+
+// Backward subsumption and strengthening with one constraint C, a
+// resolvent or a constraint this function shortened ('--elimbackward';
+// CaDiCaL's 'elim_backward_clause').  Every constraint D of the kind of C
+// that contains all literals of C is deleted, and one that contains all of
+// them but one, and that one negated, loses the negated literal
+// ('strengthen_by' in 'subsume.cpp', which has the side conditions and the
+// proof steps).  The constraints D are those in the occurrence list of the
+// candidate literal of C with the shortest list: the lists of candidate
+// literals hold every live constraint with that literal, learnt ones
+// included.  As in CaDiCaL a D that contains that literal negated is not
+// found.  A root reason is left alone.  A shortened D leaves the lists of
+// the literals it lost and is queued itself.
+void Internal::elim_backward (Ref ref) {
+  const Constraint &c = deref (arena, ref);
+  if (c.garbage ())
+    return;
+  const Kind kind = c.kind ();
+  const size_t k = index (kind);
+  const uint32_t size = c.size ();
+  const bool learnt = c.redundant ();
+  Lit best = lit_undef;
+  size_t shortest = 0;
+  for (const Lit l : c) {
+    eliminator.ticks++;
+    if (!elim_candidate (var (l)))
+      continue;
+    const size_t length = eliminator (kind, l).size ();
+    if (best == lit_undef || length < shortest)
+      best = l, shortest = length;
+  }
+  if (best == lit_undef || shortest > (size_t) opts.elimocclim)
+    return;
+  flush_occs (kind, best);
+  std::vector<int8_t> &marked = eliminator.marked;
+  for (const Lit l : c)
+    marked[index (l)] = 1;
+  for (size_t i = 0;
+       i < eliminator (kind, best).size () && status == Status::Unknown;
+       i++) {
+    const Ref other = eliminator (kind, best)[i];
+    if (other == ref)
+      continue;
+    const Constraint &d = deref (arena, other);
+    eliminator.ticks++;
+    if (d.garbage () || d.size () < size)
+      continue;
+    eliminator.ticks += d.size ();
+    uint32_t found = 0;
+    Lit negated = lit_undef;
+    bool failed = false;
+    for (const Lit l : d) {
+      if (marked[index (l)])
+        found++;
+      else if (marked[index (~l)]) {
+        if (negated != lit_undef) {
+          failed = true;
+          break;
+        }
+        negated = l;
+        found++;
+      }
+    }
+    if (failed || found != size || is_root_reason (other))
+      continue;
+    if (negated == lit_undef) {
+      // An irredundant constraint is not deleted for a learnt one.
+      if (!d.redundant () && learnt)
+        continue;
+      LOG (other, "backward subsumed");
+      stats.elimbwsubsumed[k]++;
+      mark_garbage (other);
+      continue;
+    }
+    if (!opts.subsumestr || !prefix.is_primary (kind, var (negated)))
+      continue;
+    stats.elimbwstrengthened[k]++;
+    switch (strengthen_by (other, ref, negated)) {
+    case Strengthening::Empty:
+      break;
+    case Strengthening::Unit:
+      stats.elimunits++;
+      eliminator.pending[var (subsumer.lits[0])] = 1;
+      break;
+    case Strengthening::Shortened:
+      for (const Lit l : subsumer.removed) {
+        eliminator.occs.remove (kind, l, other);
+        if (l == best)
+          i--;
+      }
+      eliminator.backward.push_back (other);
+      break;
+    }
+  }
+  for (const Lit l : deref (arena, ref))
+    marked[index (l)] = 0;
+}
+
+void Internal::elim_backward_queue () {
+  std::vector<Ref> &queue = eliminator.backward;
+  for (size_t i = 0; i < queue.size (); i++) {
+    if (status != Status::Unknown || eliminator.ticks >= eliminator.budget)
+      break;
+    elim_backward (queue[i]);
+  }
+  queue.clear ();
 }
 
 // After a round at a fixpoint within its budget: the next round may add
@@ -538,6 +653,7 @@ void Internal::finish_elim_round () {
   eliminator.lits.clear ();
   eliminator.resolvents.clear ();
   eliminator.resolvent.clear ();
+  eliminator.backward.clear ();
   if (eliminator.dependent) {
     eliminator.dependent = false;
     reset_dependencies ();
@@ -565,6 +681,7 @@ Ref Internal::eliminate () {
   PROFILE_SCOPE (elim);
   assert (!decision_level () && propagated == trail.size ());
   assert (opts.mode != 2 && complete && simplifier.units.empty ());
+  subsumer.since_elim = false; // the next round gets a subsumption round
   if (!stats.elimrounds++) {
     eliminator.bound = opts.elimbound;
     mark_elim_all ();

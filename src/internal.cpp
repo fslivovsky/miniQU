@@ -75,11 +75,14 @@ void Internal::search () {
   init_reduce ();
   init_elim ();
   init_vivify ();
+  init_subsume ();
   init_tiers ();
   init_model_cube ();
   if (opts.elim && (opts.mode == 2 || !complete))
     VERBOSE (1, "elimination is not applied %s",
              complete ? "in mode 2" : "to QDIMACS input");
+  if (opts.subsume && opts.mode == 2)
+    VERBOSE (1, "subsumption is not applied in mode 2");
   if (opts.vivify && opts.mode == 2)
     VERBOSE (1, "vivification is not applied in mode 2");
   while (status == Status::Unknown) {
@@ -95,6 +98,13 @@ void Internal::search () {
       // It may assign root literals, which are propagated first.
       if (const Ref root_conflict = simplify_root ();
           root_conflict != Ref::none)
+        analyze (root_conflict);
+    } else if (subsuming ()) {
+      // Same shape as elimination, and before it (subsume.cpp).
+      if (decision_level ())
+        backtrack (0);
+      else if (const Ref root_conflict = subsume ();
+               root_conflict != Ref::none)
         analyze (root_conflict);
     } else if (eliminating ()) {
       // A round needs level 0: backtrack first, then propagation and root

@@ -54,6 +54,15 @@ namespace miniqu {
   KIND_COUNTER (elimdeleted) \
   KIND_COUNTER (elimlearnt) \
   KIND_COUNTER (elimsubsumed) \
+  KIND_COUNTER (elimbwsubsumed) \
+  KIND_COUNTER (elimbwstrengthened) \
+  COUNTER (subsumerounds) \
+  COUNTER (subsumechecks) \
+  COUNTER (subsumeunits) \
+  KIND_COUNTER (subsumetried) \
+  KIND_COUNTER (subsumed) \
+  KIND_COUNTER (strengthened) \
+  KIND_COUNTER (strengthenedlits) \
   COUNTER (vivifyrounds) \
   COUNTER (vivifydecisions) \
   COUNTER (vivifyprops) \

@@ -19,6 +19,7 @@ namespace miniqu {
   PROFILE (simplify, 2) \
   PROFILE (elim, 2) \
   PROFILE (vivify, 2) \
+  PROFILE (subsume, 2) \
   PROFILE (collect, 2) \
   PROFILE (analyze, 3) \
   PROFILE (propagate, 3)

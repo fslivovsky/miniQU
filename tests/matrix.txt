@@ -110,6 +110,18 @@ elim-sub-inp | --elim --elimint=1 --rootsimpdelay=0 | yes | eliminprounds elimin
 elim-nomark  | --elim --elimint=1 --no-elimmark | yes | conflicts eliminprounds eliminated.clause eliminated.cube | stress | 2
 elim-effort  | --elim --elimint=1 --elimmineff=0 --elimeffort=1 | yes | conflicts eliminprounds elimdelayed eliminated.clause eliminated.cube | stress | 2
 elim-skip    | --elim --elimint=1 --elimboundmax=0 | yes | conflicts eliminprounds elimskipped eliminated.clause eliminated.cube | stress | 2
+# Subsumption and strengthening rounds (subsume.cpp) and backward
+# subsumption with the resolvents of elimination (--elimbackward, on with
+# --subsume).  subsume-nobw and subsume-nostr switch one part off each.
+subsume      | --subsume --subsumeint=50        | yes | conflicts subsumerounds subsumetried.clause subsumetried.cube | normal
+subsume-int1 | --subsume --subsumeint=1 --rootsimpdelay=0 | yes | conflicts subsumerounds strengthened.clause | stress | 2
+subsume-dl   | --subsume --subsumeint=1 -dl     | yes | conflicts subsumerounds strengthened.clause dependencies | stress | 4
+subsume-mode1 | --subsume --subsumeint=1 -mode=1 | yes | conflicts subsumerounds strengthened.clause | stress | 2
+subsume-elim | --elim --subsume --elimint=1 --subsumeint=1 | yes | conflicts eliminprounds subsumerounds elimbwsubsumed.clause elimbwsubsumed.cube eliminated.clause eliminated.cube | stress | 2
+subsume-elim-dl | --elim --subsume --elimint=1 --subsumeint=1 -dl | yes | conflicts eliminprounds elimbwsubsumed.clause dependencies | stress | 4
+subsume-nobw | --elim --subsume --no-elimbackward --elimint=1 --subsumeint=1 | yes | conflicts eliminprounds subsumerounds eliminated.clause | stress | 2
+subsume-nostr | --elim --subsume --no-subsumestr --elimint=1 --subsumeint=1 | yes | conflicts subsumerounds elimbwsubsumed.clause | stress | 2
+subsume-vivify-gc | --subsume --subsumeint=1 --vivify --vivifyint=1 --elim --elimint=1 --reduceint=10 --tier1glue=0 --tier2glue=0 --gcfrac=0 --rootsimpdelay=0 | yes | conflicts subsumerounds vivifyrounds reductions collections | stress | 4
 # Vivification of learnt constraints (M4-T1).
 vivify       | --vivify --vivifyint=50          | yes | conflicts vivifyrounds vivified.clause vivified.cube | normal
 vivify-int1  | --vivify --vivifyint=1 --rootsimpdelay=0 | yes | conflicts vivifyrounds vivifychecked.clause vivifychecked.cube | stress | 4

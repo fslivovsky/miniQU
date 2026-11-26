@@ -17,6 +17,11 @@ struct Flags {
   // only the deletion of an irredundant one does.
   bool elim = true;
   bool elimblocked = false;
+  // Scheduling mark of subsumption ('subsume.cpp', as in CaDiCaL): the
+  // variable occurs in a constraint that was added or shortened since the
+  // last complete round.  Only such constraints can subsume or strengthen
+  // another one that was there before.
+  bool subsume = true;
 };
 
 } // namespace miniqu

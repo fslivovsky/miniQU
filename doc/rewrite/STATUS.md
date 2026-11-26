@@ -4338,3 +4338,93 @@ machine and only indicate the order of magnitude)
    real instances.
 5. Still open from the comparison with CaDiCaL: counting resolvents before building them, candidate order by
    occurrence count, gate-aware resolution from the encoder's definitions, backward subsumption.
+
+## Subsumption and its integration with elimination (2026-11-26)
+
+Reference: CaDiCaL 3.1.0 (`e4d9bd9`), `subsume.cpp`, `backward.cpp`, and the places of `elim.cpp` that call
+them. Off by default (`--subsume`); without it the search is that of `b2679fa`.
+
+**Correction to the previous entry.** The binary of its matrix runs and of its table rows "`--elim`, new" was
+built before `--elimeffort` became 0: the last build in that session stopped at `unit-propagate_ldq` (GCC 13)
+before linking `miniQU`, so the runs had `elimeffort=1000 elimmineff=1000000`. The comparison with `ae0477b`
+(explicit `--no-elimmark --elimeffort=0`) and the committed sources are not affected. The matrix run below is
+on a binary of the final sources and covers all `elim*` rows with the committed defaults.
+
+**Barkla, `b2679fa`, 900 s, 376 instances, one seed** (reported after the previous entry; corrected for a
+degraded node): `--elim --no-elimmark` 198 solved (same search as `ae0477b --elim`, CPU ratio 0.947 on
+identical searches), `--elim` 193, `--elim --elimeffort=1000` 192; marks against no marks PAR2 +19.1 s
+[+1.7, +39.0], sign test 39/37. The overhead of elimination on the 6 identical `numeric` searches is still
+1.19 to 1.24 against the default, and `5.2-3` still runs out of memory. The default of `--elimmark` is
+unchanged here; the owner has not decided.
+
+**Built**
+1. `subsume.{hpp,cpp}`: rounds of forward subsumption and strengthening per kind (`subsume ()`), one-watch
+   lists, candidates sorted by size: irredundant constraints and learnt ones of tiers 1 and 2, at most
+   `--subsumeclslim` literals, no literal assigned at the root. Variable marks `Flags::subsume` as in CaDiCaL
+   (set by `new_constraint` and after every rewrite in place, cleared by a complete round).
+2. Strengthening (`--subsumestr`, on): self-subsuming resolution on a pivot that is primary for the kind,
+   then `qreduce`; `strengthen_by ()` rewrites in place, one derived step with chain (D, C), then `d`. Units
+   go through `simplifier.units`, an empty result through `found_empty` with the constraint before reduction.
+3. Schedule: before elimination in the search loop; every `subsumeint * (rounds + 1)` conflicts, first round
+   before the search, and before an elimination round if none ran since the last one.
+4. `elim_backward ()` (`--elimbackward`, on, effective with `--subsume`): each stored resolvent, and each
+   constraint it shortens, is used for backward subsumption and strengthening through the occurrence list of
+   its candidate literal with the shortest list.
+5. Side conditions: one kind only; an irredundant constraint is deleted only for an irredundant one; a root
+   reason is never touched; mode 2 excluded (notice at `--verb=1`); QDIMACS input included for the rounds.
+
+**Differences from CaDiCaL** (also in the header of `subsume.cpp`): no promotion of a learnt subsuming
+constraint to irredundant (different layouts in the arena); no on-the-fly strengthening of a parent by its
+resolvent; no alternation of elimination and subsumption inside one phase (`elimrounds`): the next round
+comes with the schedule; binary constraints are connected like the others; the literals of connected
+constraints are not sorted (the watches fix two positions); no per-constraint mark for candidates left over
+from an incomplete round; backward subsumption needs a candidate (gate) literal in the constraint, since
+only those have occurrence lists.
+
+**Measured** (same container as before; 150 search instances of `tests/corpus.py`; sums; times on a shared
+4-core machine)
+
+| options | conflicts | eliminated | subsumed / strengthened in rounds | by resolvents: subsumed / strengthened | time |
+|---|---:|---:|---:|---:|---:|
+| (default) | 507059 | | | | 10.3 s |
+| `--subsume` | 560258 | | 1431 / 1480 | | 11.4 s |
+| `--elim` | 510303 | 760441 | | | 15.9 s |
+| `--elim --subsume` | 563020 | 843015 | 1431 / 1489 | 203339 / 9 | 17.6 s |
+| `--elim --subsume --no-elimbackward` | 562840 | 760441 | 1431 / 1480 | | 17.1 s |
+| `--elim --subsume --no-subsumestr` | 533666 | 843015 | 1573 / 0 | 203336 / 0 | 17.1 s |
+
+The resolvents delete 203339 stored constraints and elimination removes 11% more variables; the rounds find
+little on these inputs (no cube at all), and with frequent rounds (`--subsumeint=20 --elimint=20`) most of
+their work is strengthening learnt constraints (608598 steps). Same verdicts everywhere. Nothing here says
+whether the solver gets faster on the benchmark set.
+
+**Tests**
+- Without `--subsume` against `b2679fa`, all `c stat` lines and the verdict: 300 instances x 6 option sets
+  (default; `--elim`; `--elim --elimint=5 -dl`; `--vivify --vivifyint=5 --elim --elimint=5
+  --rootsimpdelay=0`; `--elim --no-elimmark --elimint=5 -mode=1`; `--elim --elimint=5 --elimbound=16
+  --reduceint=10 --tier1glue=0 --tier2glue=0 --gcfrac=0`): 1800 equal.
+- `unit-subsume` (12 tests: both kinds, status, strengthening with its proof steps, secondary pivot, reduction
+  to a unit, root-assigned literals, marks, incomplete round, schedule, backward subsumption on and off):
+  pass, release and sanitizer build, with `unit-elim`, `unit-vivify`, `unit-simplify`, `unit-search`.
+- Sanitizer build with assertions and `check_invariants`, 40 instances x 5 option sets with `--subsume`
+  (alone; with `--elim`; with `-dl --check`; mode 1 with `--vivify`; with reductions and collections at every
+  chance and `--no-elimmark`), rounds at every conflict: 200 of 200 with the verdict of `b2679fa`, no report.
+- Matrix: 9 rows `subsume*` added. `tests/regress.sh -S -j 4 -s 1:40 -M default,<all elim*, vivify-elim*,
+  subsume* rows>` with `tests/qlrup_check.py` as the checker (no Lean on this machine): no wrong verdict and no rejected proof in 29 rows, 1150 proofs accepted, 7 proof checks at the time limit of the Python checker, 3 solver time-outs in `elim-noearly` (known). The run failed on one coverage requirement of my own new row (`subsume-int1` asked for `strengthened.cube`, nonzero on 5% of the instances); the requirement was removed and the row passes alone (40 proofs).
+- `tests/fuzz_qdimacs.sh` seeds 1:80 with `--subsume --subsumeint=1`; the same with `-dl --vivify
+  --vivifyint=1 --reduceint=10 --gcfrac=0`; with `-mode=1`: 160 instances agreed each.
+- `tests/fuzz_cert.sh`: seeds 100:150 with `--elim --subsume --elimint=1 --subsumeint=1`: 125 VALID, 79
+  WELLFORMED; seeds 151:200 with `--subsume --subsumeint=1`: 200 VALID or WELLFORMED when checked one by one
+  (the script printed one empty line: two of its parallel jobs wrote at once).
+
+**Not done / for the owner**
+1. No run on the benchmark set and no Lean-checked proof. Wanted on Barkla: `--elim --no-elimmark` against
+   the same with `--subsume`, and with `--subsume --no-elimbackward`.
+2. The rounds have an absolute budget (`--subsumeticks`) and no effort limit relative to the search; a round
+   allocates 13 bytes per literal and 8 per scheduled constraint.
+3. `--subsume` changes the search by itself on small instances (conflicts +10% on the corpus, within what a
+   different learnt database does); not a statement about speed.
+4. `vivify_apply` and `strengthen_root` shorten constraints in place without marking the removed variables
+   for elimination (`--elimmark`); left as it was so that the search without `--subsume` stays that of
+   `b2679fa`.
+5. The items under "Differences from CaDiCaL".

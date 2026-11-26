@@ -282,6 +282,8 @@ void Internal::vivify_apply (Ref ref) {
   c.set_glue (std::min (c.glue (), size));
   c.set_vivified (false);
   watch_root_simplified (ref);
+  if (opts.subsume)
+    mark_subsume (c);
 }
 
 // One candidate, from level 0 back to level 0.

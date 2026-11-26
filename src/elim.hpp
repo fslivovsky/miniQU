@@ -3,6 +3,7 @@
 
 #include "lit.hpp"
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <span>
@@ -59,6 +60,15 @@ struct Occs {
     else
       len[s] = (uint32_t) size;
   }
+  // Takes 'ref' out of the list, if it is there.
+  void remove (Kind kind, Lit l, Ref ref) {
+    const std::span<Ref> old = (*this) (kind, l);
+    const auto it = std::find (old.begin (), old.end (), ref);
+    if (it == old.end ())
+      return;
+    std::copy (it + 1, old.end (), it);
+    truncate (kind, l, old.size () - 1);
+  }
   void release () {
     std::vector<uint32_t> ().swap (start);
     std::vector<uint32_t> ().swap (len);
@@ -91,6 +101,10 @@ struct Eliminator {
   std::vector<int8_t> marks; // per literal: in the first parent
   std::vector<int8_t>
       marked; // per literal: in the resolvent ('elimsubsume')
+
+  // Resolvents and strengthened constraints that wait for backward
+  // subsumption ('--elimbackward'); empty between two candidates.
+  std::vector<Ref> backward;
 
   int64_t ticks = 0;  // literal visits of the round
   int64_t budget = 0; // of the round ('--elimticks', '--elimeffort')

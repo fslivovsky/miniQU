@@ -273,6 +273,8 @@ void Internal::strengthen_root (Ref ref) {
   if (c.redundant ())
     c.set_glue (std::min (c.glue (), size));
   watch_root_simplified (ref);
+  if (opts.subsume)
+    mark_subsume (c);
 }
 
 // Steps 2 and 3 on one constraint; step 2 may decide the formula.
