@@ -126,6 +126,11 @@ foreach(test_source ${MINIQU_UNIT_TESTS})
   endif()
   target_include_directories(unit-${test_name} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/test/unit)
   target_compile_options(unit-${test_name} PRIVATE ${MINIQU_WARNINGS})
+  # GCC 12/13 at -O3 without LTO report a spurious -Wfree-nonheap-object on
+  # temporary std::vector comparisons in the tests (propagate_ldq.cpp).
+  if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    target_compile_options(unit-${test_name} PRIVATE -Wno-free-nonheap-object)
+  endif()
   add_dependencies(unit-tests unit-${test_name})
   add_test(NAME unit-${test_name} COMMAND unit-${test_name})
 endforeach()
