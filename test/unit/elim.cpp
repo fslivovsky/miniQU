@@ -505,11 +505,13 @@ static void test_duplicate_resolvents () {
 // The bound: 'elimbound' in the first round, doubled after each round at
 // a fixpoint up to 'elimboundmax' (0, 1, 2, 4, 8, 16, 16); never changed
 // with 'elimboundmax <= elimbound'; not raised when the ticks ran out.
-// Variable 2 stays a candidate (E3 fails on an original), and a larger
-// bound marks it again: six rounds try it, the seventh has no mark.
+// With '--elimmark': variable 2 stays a candidate (E3 fails on an
+// original), and a larger bound marks it again: six rounds try it, the
+// seventh has no mark.  Without marks every round tries it.
 static void test_bound_sequence () {
   {
     Fixture f ("eEae");
+    f.internal.opts.elimmark = 1;
     f.add (Clause, {2, 4});
     f.add (Clause, {-2, 1});
     std::vector<int64_t> seen;
@@ -523,8 +525,23 @@ static void test_bound_sequence () {
     CHECK_EQ (f.internal.stats.elimskipped, 1);
   }
   {
+    Fixture f ("eEae");
+    f.add (Clause, {2, 4});
+    f.add (Clause, {-2, 1});
+    std::vector<int64_t> seen;
+    for (int round = 0; round < 7; round++) {
+      f.internal.lim.elim = 0;
+      CHECK (f.eliminate () == Ref::none);
+      seen.push_back (f.internal.eliminator.bound);
+    }
+    CHECK ((seen == std::vector<int64_t>{1, 2, 4, 8, 16, 16, 16}));
+    CHECK_EQ (f.internal.stats.elimtried, 7);
+    CHECK_EQ (f.internal.stats.elimskipped, 0);
+  }
+  {
     // Without a candidate left the rounds are skipped and the bound stays.
     Fixture f ("eE");
+    f.internal.opts.elimmark = 1;
     for (int round = 0; round < 3; round++) {
       f.internal.lim.elim = 0;
       CHECK (f.eliminate () == Ref::none);
@@ -564,6 +581,7 @@ static void test_marks () {
   {
     // E3 fails on the learnt (3 5) only.
     Fixture f ("eeEae");
+    f.internal.opts.elimmark = 1;
     f.internal.opts.elimboundmax = 0;
     f.add (Clause, {3, 1});
     f.add (Clause, {-3, 2});
@@ -587,6 +605,7 @@ static void test_marks () {
     // E3 fails on the original (3 5): a deleted learnt constraint does
     // not mark, a deleted original does.
     Fixture f ("eeEae");
+    f.internal.opts.elimmark = 1;
     f.internal.opts.elimboundmax = 0;
     f.add (Clause, {3, 1});
     f.add (Clause, {-3, 2});

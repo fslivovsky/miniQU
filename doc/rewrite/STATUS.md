@@ -4428,3 +4428,15 @@ whether the solver gets faster on the benchmark set.
    for elimination (`--elimmark`); left as it was so that the search without `--subsume` stays that of
    `b2679fa`.
 5. The items under "Differences from CaDiCaL".
+
+## Owner decision: `--elimmark` off by default (2026-11-26)
+
+After the 900 s runs of `b2679fa` (marks 5 solved instances fewer than no marks, one seed). `--elim` is now the
+search of `ae0477b --elim` with the compact occurrence lists. Matrix: row `elim-nomark` became `elim-mark`
+(`--elimmark`), rows `elim-skip` and `subsume-vivify-gc` got `--elimmark`. `unit-elim`: the tests of the marks
+set the option; `test_bound_sequence` also runs without it (7 attempts, no skipped round).
+
+Checked: `--elim` against `b2679fa --elim --no-elimmark`, all `c stat` lines and the verdict, 300 instances:
+300 equal. `unit-elim`, `unit-subsume`: pass. `tests/regress.sh -S -j 4 -s 1:40 -M
+elim,elim-mark,elim-skip,subsume-elim,subsume-vivify-gc` with the Python checker: passed, 200 proofs. The
+other rows were not rerun; their option strings are unchanged, and those with `--elim` now run without marks.

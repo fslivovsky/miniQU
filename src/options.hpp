@@ -111,7 +111,7 @@ namespace miniqu {
   OPTION (elimclslim, 100, 2, 1000000000, "size limit of a resolvent") \
   OPTION (elimticks, 100000000, 0, 1000000000, \
           "literal visits one elimination round may spend") \
-  OPTION (elimmark, 1, 0, 1, \
+  OPTION (elimmark, 0, 0, 1, \
           "retry only variables with a deleted constraint, with elim") \
   OPTION ( \
       elimeffort, 0, 0, 1000000000, \

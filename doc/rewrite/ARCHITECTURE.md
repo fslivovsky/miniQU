@@ -1260,10 +1260,11 @@ for elimination:
   `elimocclim`, `elimclslim`, `elimticks`) are in `src/options.hpp`, and:
   - `elimsubsume` (1, [0,1]): do not add resolvents subsumed by a stored constraint, with elim.
   - `elimboundmax` (16, [0,1e9]): largest bound on additional constraints, with elim.
-  - `elimmark` (1, [0,1]): retry only variables with a deleted constraint, with elim.
+  - `elimmark` (0, [0,1]): retry only variables with a deleted constraint, with elim.
   - `elimeffort` (0, [0,1e9]): inprocessing round budget in per mille of search ticks (0: off).
   - `elimmineff` (10000000, [0,1e9]): smallest budget of an inprocessing round, with elimeffort.
-- Marks (`--elimmark`): `Flags::elim` says a variable is to be tried. All
+- Marks (`--elimmark`, off by default since the 900 s runs of `b2679fa`,
+  STATUS.md): `Flags::elim` says a variable is to be tried. All
   candidates are marked before the first round and whenever the bound
   grows; an attempt clears the mark; `mark_garbage` marks the variables of
   a deleted constraint again (`mark_elim_removed`), those of a learnt one
@@ -1281,8 +1282,9 @@ for elimination:
 - Occurrence lists are one array of references with an offset and a length
   per literal and kind (`Occs`, 32 bytes per variable); a list that
   receives a resolvent is copied into a vector of its own first.
-- `--no-elimmark` is the search of the version before these three changes
-  (same counters on the test corpus).
+- Without `--elimmark` (the default) and `--elimeffort` the search is that
+  of the version before these three changes (same counters on the test
+  corpus).
 
 Subsumption (`subsume.{hpp,cpp}`, off by default, `--subsume`; CaDiCaL's
 `subsume.cpp` and `backward.cpp` are the reference):

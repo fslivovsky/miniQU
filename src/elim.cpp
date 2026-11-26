@@ -20,7 +20,9 @@
 // marked variables.  All are marked before the first round and whenever
 // the bound grows; an attempt clears the mark, and the deletion of a
 // constraint marks its variables again ('mark_elim_removed', called by
-// 'mark_garbage').  With '--no-elimmark' every pass tries every candidate.
+// 'mark_garbage').  Off by default (STATUS.md: on the benchmark set the
+// marks solved fewer instances, one seed): every pass then tries every
+// candidate.
 //
 // Level 0.  A round runs at level 0 with propagation complete.  When one is
 // due above level 0 the search loop backtracks to level 0 and the next
@@ -226,7 +228,8 @@ void Internal::mark_elim_all () {
 // Occurrence lists of both kinds, irredundant and learnt constraints, in
 // two passes: the lengths, then the references.  Only the second pass
 // counts ticks, so that a round spends its budget as it did with one pass
-// ('--no-elimmark' is the search of the version before the marks).  False
+// (without '--elimmark' this is the search of the version before the
+// marks).  False
 // if the lists do not fit 32-bit offsets.
 bool Internal::connect_occs () {
   Occs &occs = eliminator.occs;
