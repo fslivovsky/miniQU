@@ -98,6 +98,24 @@ public:
 
   // Keeps the memory.
   void clear () { size_ = 0; }
+
+  // Reconnecting ('Internal::connect_watches'): an empty list without
+  // storage first counts its watches in 'size_', then gets storage for
+  // exactly that many and is empty again.
+  void count () {
+    assert (!data && !capacity_);
+    size_++;
+  }
+  void allocate_counted () {
+    assert (!data && !capacity_);
+    if (size_) {
+      data = static_cast<Watch *> (std::malloc (sizeof (Watch) * size_));
+      if (!data)
+        fatal ("out of memory: watch list of %" PRIu32 " watches", size_);
+      capacity_ = size_;
+    }
+    size_ = 0;
+  }
 };
 static_assert (sizeof (WatchList) == 16);
 
@@ -198,6 +216,23 @@ public:
       for (WatchList &list : l.lists)
         remove_garbage (list, arena);
     clear_dirty_flags ();
+  }
+
+  // Frees the lists and the tables ('Internal::drop_watches'); 'resize'
+  // brings empty ones back.
+  void release () {
+    std::vector<PerLit> ().swap (lits);
+    std::vector<std::array<uint8_t, 2>> ().swap (dirty_flags);
+    for (std::vector<Lit> &d : dirty_lits)
+      std::vector<Lit> ().swap (d);
+  }
+  void count (Kind kind, Lit p) {
+    lits[index (p)].lists[index (kind)].count ();
+  }
+  void allocate_counted () {
+    for (PerLit &l : lits)
+      for (WatchList &list : l.lists)
+        list.allocate_counted ();
   }
 
   // Drops all watches, to reconnect after a pass that rewrites many

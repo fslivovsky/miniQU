@@ -657,6 +657,9 @@ void Internal::finish_elim_round () {
   eliminator.resolvents.clear ();
   eliminator.resolvent.clear ();
   eliminator.backward.clear ();
+  std::vector<int8_t> ().swap (eliminator.marks);
+  std::vector<int8_t> ().swap (eliminator.marked);
+  connect_watches ();
   if (eliminator.dependent) {
     eliminator.dependent = false;
     reset_dependencies ();
@@ -711,6 +714,7 @@ Ref Internal::eliminate () {
       return Ref::none;
     }
   }
+  drop_watches ();
   const size_t vars = prefix.size ();
   eliminator.ticks = 0;
   eliminator.pending.assign (vars, 0);

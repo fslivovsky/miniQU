@@ -4507,3 +4507,54 @@ Checked: all `c stat` lines and the verdict against the binary before the change
 sets with `--subsume` (alone; with `--elim`; rounds every 3 conflicts; `-dl --vivify`; mode 1 with a budget of
 20000 ticks): 1500 equal. `unit-subsume` release and sanitizer build: pass. Sanitizer build, 20 instances,
 `--elim --subsume` at every conflict: 20 OK. The matrix was not rerun.
+
+## Watches dropped during elimination and subsumption rounds (owner request, 2026-11-27)
+
+`--dropwatches` (on): `eliminate ()` and `subsume ()` free the watch lists and their tables before they
+allocate and `connect_watches ()` rebuilds them after the round released its own tables (CaDiCaL's
+`reset_watches`). Between the two `Internal::connected` is false and `attach`, `detach` and the lazy removal
+of `mark_garbage` do nothing. The rebuild counts first and allocates every list at its size; order:
+clauses then cubes, irredundant before learnt, each constraint by its first two literals.
+
+**Why.** Measured with an instrumented copy on the generated instance with 3 million gates (6.0 million
+variables, 18.7 million constraints, peak RSS 1834 MB): arena 273 MB; watch table (32 bytes per literal)
+366 MB; watch lists 379 MB of capacity for 286 MB of watches; about 134 MB of allocator overhead for 8.8
+million lists (estimate, 16 bytes each); dirty flags 23 MB. 63% of the 24 million lists are empty. 14.0
+million of the constraints are binary (161 MB of the arena, 54 MB of list entries).
+
+**Measured**
+- Peak RSS on that instance: 1834 MB without rounds; with `--elim --subsume` 2187 MB before and 1834 MB now
+  (also with `--elim` or `--subsume` alone). RSS at the end of the elimination round, before reconnecting:
+  1110 MB, against 1863 MB with `--no-dropwatches`.
+- `malloc_trim` after freeing made no difference (1110 MB against 1117 MB without it), so it is not called.
+- Time, 150 search instances, rounds every 20 conflicts: `--elim` 51.5 s without and 53.2 s with dropping;
+  `--elim --subsume` 53.3 s and 53.1 s.
+- The search changes after a round, since the lists come back in another order. Conflicts per instance,
+  dropping against not: `--elim` more on 8, fewer on 12, equal on 130 (geometric mean ratio 0.996);
+  `--elim --elimint=200` 43 / 65 / 42 (0.964); `--elim --elimint=20` 67 / 58 / 25 (1.052). No trend.
+- Not measured: `5.2-3` itself. Scaled by its size the watches are several GB against the 540 MB that were
+  missing, but that is an extrapolation.
+
+**Tests**
+- `--no-dropwatches` against the binary before the change (`ce5fa1f`), all `c stat` lines and the verdict, 300
+  instances x 4 option sets (`--elim`; `--elim --subsume`; rounds every 3 conflicts with `-dl`; mode 1 with
+  `--vivify`): 1200 equal.
+- With dropping: verdicts of 150 search instances x 3 option sets equal to the reference; 48 instances x 4
+  option sets with proofs, 192 accepted by `tests/qlrup_check.py`.
+- Sanitizer build with assertions and `check_invariants` (which checks the watches), 40 instances x 5 option
+  sets, rounds at every conflict: 200 of 200 (run before the `malloc_trim` call was removed; nothing else
+  changed after it). `unit-elim`, `unit-subsume`, `unit-search`, `unit-vivify`: pass.
+- Matrix rows added: `elim-keepwatches`, `subsume-keepwatches`. `tests/regress.sh -S -j 4 -s 1:40 -M
+  elim,elim-inp-dl,elim-inp-gc,elim-keepwatches,subsume-elim,subsume-elim-dl,subsume-keepwatches,subsume-vivify-gc,subsume-mode1,vivify-elim-inp`
+  with the Python checker: passed, 398 proofs accepted, 2 checks at the checker's time limit.
+- `tests/fuzz_qdimacs.sh` seeds 1:60 with `--subsume --subsumeint=1`, and with `-dl --vivify --vivifyint=1
+  --reduceint=10 --gcfrac=0`: 120 agreed each. `tests/fuzz_cert.sh` seeds 100:130 with `--elim --subsume
+  --elimint=1 --subsumeint=1`: 76 VALID, 48 WELLFORMED.
+
+**Not done / for the owner**
+1. No run on the benchmark set: the effect on `5.2-3` and on the solved counts (the search after each round
+   changes) is not known. `--elim` is no longer the search of `ae0477b --elim`; `--elim --no-dropwatches` is.
+2. No Lean-checked proof; the full matrix was not run.
+3. The watch table (32 bytes per literal, most lists empty) is the largest single block outside the rounds;
+   its layout is the M1 decision and was not touched. Binary constraints only in the watch lists would save
+   about 215 MB on the instance above (ROADMAP "M5+" item 8).

@@ -122,6 +122,10 @@ subsume-elim-dl | --elim --subsume --elimint=1 --subsumeint=1 -dl | yes | confli
 subsume-nobw | --elim --subsume --no-elimbackward --elimint=1 --subsumeint=1 | yes | conflicts eliminprounds subsumerounds eliminated.clause | stress | 2
 subsume-nostr | --elim --subsume --no-subsumestr --elimint=1 --subsumeint=1 | yes | conflicts subsumerounds elimbwsubsumed.clause | stress | 2
 subsume-vivify-gc | --subsume --subsumeint=1 --vivify --vivifyint=1 --elim --elimint=1 --reduceint=10 --tier1glue=0 --tier2glue=0 --gcfrac=0 --rootsimpdelay=0 --elimmark | yes | conflicts subsumerounds vivifyrounds reductions collections | stress | 4
+# The rounds free the watch lists and reconnect them (--dropwatches, on);
+# these two rows keep the lists, which is the search before that option.
+elim-keepwatches | --elim --elimint=1 --no-dropwatches | yes | conflicts eliminprounds eliminated.clause eliminated.cube | stress | 2
+subsume-keepwatches | --elim --subsume --elimint=1 --subsumeint=1 --no-dropwatches | yes | conflicts subsumerounds elimbwsubsumed.clause | stress | 2
 # Vivification of learnt constraints (M4-T1).
 vivify       | --vivify --vivifyint=50          | yes | conflicts vivifyrounds vivified.clause vivified.cube | normal
 vivify-int1  | --vivify --vivifyint=1 --rootsimpdelay=0 | yes | conflicts vivifyrounds vivifychecked.clause vivifychecked.cube | stress | 4

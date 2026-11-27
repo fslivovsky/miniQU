@@ -356,6 +356,7 @@ Ref Internal::subsume () {
   assert (!decision_level () && propagated == trail.size ());
   assert (subsume_applies () && simplifier.units.empty ());
   stats.subsumerounds++;
+  drop_watches ();
   const size_t literals = 2 * (size_t) prefix.size ();
   subsumer.ticks = 0;
   subsumer.head.assign (literals, 0);
@@ -393,6 +394,7 @@ Ref Internal::subsume () {
         std::erase_if ((*lists)[index (kind)], [&] (Ref ref) {
           return deref (arena, ref).garbage ();
         });
+  connect_watches ();
   subsumer.since_elim = true;
   lim.subsume = stats.conflicts +
                 (int64_t) opts.subsumeint * (stats.subsumerounds + 1);

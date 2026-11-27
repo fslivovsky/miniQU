@@ -131,6 +131,8 @@ Ref Internal::new_constraint (uint64_t id, Kind kind,
 }
 
 void Internal::attach (Ref ref) {
+  if (!connected)
+    return;
   const Constraint &c = deref (arena, ref);
   assert (c.size () > 1);
   const Kind kind = c.kind ();
@@ -142,6 +144,8 @@ void Internal::attach (Ref ref) {
 // literals are about to change outside propagation; deleted constraints
 // leave their lists lazily ('mark_garbage').
 void Internal::detach (Ref ref) {
+  if (!connected)
+    return;
   const Constraint &c = deref (arena, ref);
   assert (c.size () > 1);
   const Kind kind = c.kind ();
@@ -168,9 +172,54 @@ void Internal::mark_garbage (Ref ref) {
     mark_elim_removed (c);
   c.set_garbage (true);
   arena.free (c.words ());
+  if (!connected)
+    return;
   const Kind kind = c.kind ();
   watches.smudge (kind, watch_key (kind, c[0]));
   watches.smudge (kind, watch_key (kind, c[1]));
+}
+
+// '--dropwatches' (CaDiCaL's 'reset_watches' around elimination and
+// subsumption, "saves lots of memory").  A round at level 0 that does not
+// propagate frees the watch lists and their tables before it allocates its
+// own occurrence lists, so that the two are not in memory together; on a
+// formula with 3 million gates the watches are 900 MB of 1834 MB.
+void Internal::drop_watches () {
+  assert (!decision_level () && connected);
+  if (!opts.dropwatches)
+    return;
+  watches.release ();
+  connected = false;
+}
+
+// The lists again, after the round: every live constraint of two or more
+// literals is watched by its first two literals, as 'attach' would have
+// done ('order_root_watches' chose them for the constraints the round
+// added or shortened; the others still have the two they had).  Counted
+// first, so that every list is allocated once at its size.  The lists come
+// back in the order of the databases (irredundant before learnt), not in
+// the order propagation had left them in, so the search after the round
+// differs from that of '--no-dropwatches'.
+void Internal::connect_watches () {
+  if (connected)
+    return;
+  watches.resize (prefix.size ());
+  const auto each = [&] (const auto &visit) {
+    for (const Kind kind : {Kind::Clause, Kind::Cube})
+      for (const auto *lists : {&irredundant, &redundant})
+        for (const Ref ref : (*lists)[index (kind)])
+          if (const Constraint &c = deref (arena, ref);
+              !c.garbage () && c.size () > 1)
+            visit (ref, c);
+  };
+  each ([&] (Ref, const Constraint &c) {
+    const Kind kind = c.kind ();
+    watches.count (kind, watch_key (kind, c[0]));
+    watches.count (kind, watch_key (kind, c[1]));
+  });
+  watches.allocate_counted ();
+  connected = true;
+  each ([&] (Ref ref, const Constraint &) { attach (ref); });
 }
 
 // The caller keeps the watches consistent: either the first two literals

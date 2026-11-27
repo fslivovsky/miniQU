@@ -118,6 +118,9 @@ namespace miniqu {
       "inprocessing round budget in per mille of search ticks (0: off)") \
   OPTION (elimmineff, 10000000, 0, 1000000000, \
           "smallest budget of an inprocessing round, with elimeffort") \
+  OPTION ( \
+      dropwatches, 1, 0, 1, \
+      "free the watch lists during elimination and subsumption rounds") \
   OPTION (elimbackward, 1, 0, 1, \
           "subsume and strengthen with resolvents, with elim and subsume") \
   OPTION (subsume, 0, 0, 1, \

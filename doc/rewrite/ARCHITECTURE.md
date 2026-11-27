@@ -1312,6 +1312,16 @@ Subsumption (`subsume.{hpp,cpp}`, off by default, `--subsume`; CaDiCaL's
   occurrence list of its candidate literal with the shortest list;
   shortened constraints are queued again. Deleted and shortened
   constraints mark their variables for elimination.
+- Watches during the rounds (`--dropwatches`, on; CaDiCaL's
+  `reset_watches`): `eliminate ()` and `subsume ()` call `drop_watches ()`
+  before they allocate, which frees the lists and their tables, and
+  `connect_watches ()` after they released their own tables. In between
+  `Internal::connected` is false and `attach`, `detach` and the lazy
+  removal of `mark_garbage` do nothing. The lists are rebuilt from the
+  databases, counted first and allocated at their size, irredundant
+  before learnt constraints, each constraint by its first two literals.
+  The order of the lists is therefore not the one propagation left, and
+  the search after a round differs from `--no-dropwatches`.
 - Not built: turning a learnt subsuming constraint irredundant, on-the-fly
   strengthening of a parent by its resolvent, the alternation of
   elimination and subsumption rounds inside one phase (CaDiCaL's

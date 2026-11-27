@@ -146,6 +146,10 @@ struct Internal {
 
   Arena arena;
   Watches watches;
+  // False inside a round that dropped the watches ('drop_watches'): then
+  // 'attach', 'detach' and the lazy removal of 'mark_garbage' do nothing,
+  // and 'connect_watches' builds the lists again from the databases.
+  bool connected = true;
   std::array<std::vector<Ref>, 2> irredundant; // per kind
   std::array<std::vector<Ref>, 2> redundant;   // per kind
   uint64_t next_id = 1;
@@ -216,6 +220,8 @@ struct Internal {
   // internal.cpp
   Var add_var (Quant, bool decision, int proof_number);
   void size_watches ();
+  void drop_watches ();
+  void connect_watches ();
   [[nodiscard]] Status solve ();
   void search ();
 
