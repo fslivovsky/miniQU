@@ -355,7 +355,7 @@ struct Internal {
   Strengthening strengthen_by (Ref ref, Ref by, Lit remove);
   int subsume_check (const Constraint &subsuming, Lit &flipped);
   bool try_to_subsume (Ref);
-  void subsume_connect (Ref);
+  void subsume_connect (size_t position);
   bool subsume_kind (Kind);
   [[nodiscard]] Ref subsume ();
 

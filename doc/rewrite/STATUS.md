@@ -4487,3 +4487,23 @@ instance. So:
 The comment in `propagate.hpp` and the statement "4% (GCC 11)" of the previous entry and of the commit
 message of `2a042ed` are corrected by this entry; the bias of "about 5%" claimed there for comparisons of
 round 3 with earlier rounds is not supported.
+
+## Subsumption rounds: smaller data structures (2026-11-27)
+
+`--subsume` alone ran out of memory on `5.2-3` in round 3 (8263 MB after 18 s; the default peaks at 7649 MB).
+Changed, with the same behaviour: the one-watch lists are a `next` index per position of the schedule (4
+bytes) instead of a vector of links (8 bytes); the schedule is counted first and allocated once, and released
+between the two kinds; `length` and `noccs` are 16 bits, saturating. 18 bytes per variable (was 26) and 12 per
+scheduled constraint (was 16 plus the slack of two growing vectors).
+
+Measured on the generated instance with 3 million gates: peak RSS 1834 MB without, 2162 MB with `--subsume`
+before and 2021 MB now (the round costs 187 MB instead of 328 MB). With `--elim --subsume` the peak is that
+of the elimination round, 2187 MB, unchanged. Scaled to `5.2-3` (about five times the gates) the round still
+needs about 900 MB where 540 MB are free, so this alone does not bring that instance back; the options that
+would (no round over the untouched original formula, a size limit) change behaviour and are the owner's
+choice.
+
+Checked: all `c stat` lines and the verdict against the binary before the change, 300 instances x 5 option
+sets with `--subsume` (alone; with `--elim`; rounds every 3 conflicts; `-dl --vivify`; mode 1 with a budget of
+20000 ticks): 1500 equal. `unit-subsume` release and sanitizer build: pass. Sanitizer build, 20 instances,
+`--elim --subsume` at every conflict: 20 OK. The matrix was not rerun.

@@ -219,9 +219,9 @@ bool Internal::try_to_subsume (Ref ref) {
       if (found)
         break;
       for (uint32_t i = subsumer.head[index (key)]; i && !found;
-           i = subsumer.links[i - 1].next) {
+           i = subsumer.next[i - 1]) {
         subsumer.ticks++;
-        const Ref other = subsumer.links[i - 1].ref;
+        const Ref other = subsumer.schedule[i - 1].ref;
         const Constraint &e = deref (arena, other);
         assert (!e.garbage () && other != ref && e.size () <= c.size ());
         const int result = subsume_check (e, flipped);
@@ -252,11 +252,12 @@ bool Internal::try_to_subsume (Ref ref) {
   return false;
 }
 
-// Connects a constraint that was tried to its literal with the shortest
-// list (ties: fewest occurrences in the schedule), if all its variables
-// are marked and that list is not longer than '--subsumeocclim'.
-void Internal::subsume_connect (Ref ref) {
-  const Constraint &c = deref (arena, ref);
+// Connects the constraint at that position of the schedule, which was
+// tried, to its literal with the shortest list (ties: fewest occurrences in
+// the schedule), if all its variables are marked and that list is not
+// longer than '--subsumeocclim'.
+void Internal::subsume_connect (size_t position) {
+  const Constraint &c = deref (arena, subsumer.schedule[position].ref);
   Lit best = lit_undef;
   for (const Lit l : c) {
     if (!ftab[var (l)].subsume)
@@ -265,68 +266,86 @@ void Internal::subsume_connect (Ref ref) {
       best = l;
       continue;
     }
-    const uint32_t a = subsumer.length[index (l)];
-    const uint32_t b = subsumer.length[index (best)];
+    const uint16_t a = subsumer.length[index (l)];
+    const uint16_t b = subsumer.length[index (best)];
     if (a < b || (a == b &&
                   subsumer.noccs[index (l)] < subsumer.noccs[index (best)]))
       best = l;
   }
   subsumer.ticks += c.size ();
-  if (subsumer.length[index (best)] > (uint32_t) opts.subsumeocclim)
+  uint16_t &length = subsumer.length[index (best)];
+  const int limit =
+      std::min<int> (opts.subsumeocclim, Subsumer::saturated - 1);
+  if (length > limit)
     return;
-  subsumer.links.push_back ({ref, subsumer.head[index (best)]});
-  subsumer.head[index (best)] = (uint32_t) subsumer.links.size ();
-  subsumer.length[index (best)]++;
+  subsumer.next[position] = subsumer.head[index (best)];
+  subsumer.head[index (best)] = (uint32_t) position + 1;
+  if (length < Subsumer::saturated)
+    length++;
 }
 
 // The round for one kind.  True if every scheduled candidate was tried.
 bool Internal::subsume_kind (Kind kind) {
   std::vector<Subsumer::Scheduled> &schedule = subsumer.schedule;
-  schedule.clear ();
   const size_t k = index (kind);
-  for (const auto *lists : {&irredundant, &redundant})
-    for (const Ref ref : (*lists)[k]) {
-      const Constraint &c = deref (arena, ref);
-      if (c.garbage () || c.size () < 2 ||
-          c.size () > (uint32_t) opts.subsumeclslim)
-        continue;
-      if (c.redundant () && c.glue () > (uint32_t) tiers.tier2[k])
-        continue;
-      subsumer.ticks += c.size ();
-      bool fixed = false;
-      int marked = 0;
-      for (const Lit l : c) {
-        fixed |= val (l) != 0;
-        marked += ftab[var (l)].subsume;
+  // The candidates are counted first, so that the schedule is allocated
+  // once at its final size; only the second pass counts ticks.
+  const auto each = [&] (const auto &visit) {
+    for (const auto *lists : {&irredundant, &redundant})
+      for (const Ref ref : (*lists)[k]) {
+        const Constraint &c = deref (arena, ref);
+        if (c.garbage () || c.size () < 2 ||
+            c.size () > (uint32_t) opts.subsumeclslim)
+          continue;
+        if (c.redundant () && c.glue () > (uint32_t) tiers.tier2[k])
+          continue;
+        bool fixed = false;
+        int marked = 0;
+        for (const Lit l : c) {
+          fixed |= val (l) != 0;
+          marked += ftab[var (l)].subsume;
+        }
+        visit (c, ref, !fixed && marked >= 2);
       }
-      if (fixed || marked < 2)
-        continue;
-      schedule.push_back ({c.size (), ref});
-      for (const Lit l : c)
-        subsumer.noccs[index (l)]++;
-    }
+  };
+  size_t candidates = 0;
+  each ([&] (const Constraint &, Ref, bool candidate) {
+    candidates += candidate;
+  });
+  schedule.reserve (candidates);
+  each ([&] (const Constraint &c, Ref ref, bool candidate) {
+    subsumer.ticks += c.size ();
+    if (!candidate)
+      return;
+    schedule.push_back ({c.size (), ref});
+    for (const Lit l : c)
+      if (uint16_t &n = subsumer.noccs[index (l)]; n < Subsumer::saturated)
+        n++;
+  });
   std::stable_sort (
       schedule.begin (), schedule.end (),
       [] (const Subsumer::Scheduled &a, const Subsumer::Scheduled &b) {
         return a.size < b.size;
       });
+  subsumer.next.assign (schedule.size (), 0);
   size_t tried = 0;
-  for (const Subsumer::Scheduled &s : schedule) {
+  for (size_t i = 0; i < schedule.size (); i++) {
     if (status != Status::Unknown || subsumer.ticks >= opts.subsumeticks)
       break;
     tried++;
-    if (s.size > 2 && try_to_subsume (s.ref))
+    if (schedule[i].size > 2 && try_to_subsume (schedule[i].ref))
       continue;
-    subsume_connect (s.ref);
+    subsume_connect (i);
   }
   const bool finished =
       tried == schedule.size () && status == Status::Unknown;
   // Not through the literals of the schedule: strengthening removed some.
-  std::fill (subsumer.noccs.begin (), subsumer.noccs.end (), 0u);
+  std::fill (subsumer.noccs.begin (), subsumer.noccs.end (), 0);
   std::fill (subsumer.head.begin (), subsumer.head.end (), 0u);
-  std::fill (subsumer.length.begin (), subsumer.length.end (), 0u);
-  subsumer.links.clear ();
-  schedule.clear ();
+  std::fill (subsumer.length.begin (), subsumer.length.end (), 0);
+  // Released, so that the other kind allocates its own size.
+  std::vector<uint32_t> ().swap (subsumer.next);
+  std::vector<Subsumer::Scheduled> ().swap (schedule);
   return finished;
 }
 
@@ -358,10 +377,10 @@ Ref Internal::subsume () {
         mark_subsume (c);
   }
   std::vector<uint32_t> ().swap (subsumer.head);
-  std::vector<uint32_t> ().swap (subsumer.length);
-  std::vector<uint32_t> ().swap (subsumer.noccs);
+  std::vector<uint16_t> ().swap (subsumer.length);
+  std::vector<uint16_t> ().swap (subsumer.noccs);
   std::vector<int8_t> ().swap (subsumer.marks);
-  std::vector<Subsumer::Link> ().swap (subsumer.links);
+  std::vector<uint32_t> ().swap (subsumer.next);
   std::vector<Subsumer::Scheduled> ().swap (subsumer.schedule);
   std::vector<Ref> ().swap (subsumer.shrunken);
   const int64_t subsumed =

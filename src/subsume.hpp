@@ -20,18 +20,19 @@ struct Subsumer {
   std::vector<Scheduled> schedule;
 
   // One-watch lists: a constraint that was tried is connected to one of
-  // its literals.  'head' (per literal) is the index + 1 of the newest
-  // link of that literal in 'links', 0 for none; 'length' the number of
-  // links of the literal.
-  struct Link {
-    Ref ref;
-    uint32_t next; // index + 1 of the next link, 0 at the end
-  };
+  // its literals.  'head' (per literal) is the position + 1 in 'schedule'
+  // of the constraint connected to that literal last, 0 for none; 'next'
+  // (per position of 'schedule') the position + 1 of the one connected to
+  // the same literal before it; 'length' the number connected to a literal.
+  // 'length' and 'noccs' saturate at 65535: the first is only compared
+  // with '--subsumeocclim', the second only breaks ties.  That is 18 bytes
+  // per variable and 12 per scheduled constraint.
+  static constexpr uint16_t saturated = UINT16_MAX;
   std::vector<uint32_t> head;
-  std::vector<uint32_t> length;
-  std::vector<Link> links;
+  std::vector<uint32_t> next;
+  std::vector<uint16_t> length;
 
-  std::vector<uint32_t> noccs; // per literal: occurrences in the schedule
+  std::vector<uint16_t> noccs; // per literal: occurrences in the schedule
   std::vector<int8_t> marks;   // per literal: in the candidate being tried
 
   std::vector<Ref> shrunken; // strengthened in this round
