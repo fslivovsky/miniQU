@@ -86,7 +86,14 @@ template <Kind K, Lone R> Ref Internal::propagate_watches (Lit p) {
 // until it is exhausted or a conflict is found.  'propagated' counts only
 // literals for which both loops ran to the end, so on a conflict it stays
 // at the literal that caused it.
-template <Lone R> Ref Internal::propagate_trail () {
+//
+// Never inlined: this loop, with the two watch loops inside it, is where
+// the solver spends half its time, and it is compiled best as a function of
+// its own.  With link-time optimisation the compiler otherwise decides by
+// the size of 'search ()' whether it ends up inside that function; after
+// one more branch was added there it did, and propagation ran 4% (GCC 11)
+// to 30% (GCC 13) slower on identical searches (STATUS.md, 2026-11-27).
+template <Lone R> [[gnu::noinline]] Ref Internal::propagate_trail () {
   Ref conflict = Ref::none;
   while (conflict == Ref::none && propagated < trail.size ()) {
     const Lit p = trail[propagated];

@@ -4440,3 +4440,33 @@ Checked: `--elim` against `b2679fa --elim --no-elimmark`, all `c stat` lines and
 300 equal. `unit-elim`, `unit-subsume`: pass. `tests/regress.sh -S -j 4 -s 1:40 -M
 elim,elim-mark,elim-skip,subsume-elim,subsume-vivify-gc` with the Python checker: passed, 200 proofs. The
 other rows were not rerun; their option strings are unchanged, and those with `--elim` now run without marks.
+
+## Barkla round 3 (`32811fc`) and a propagation slowdown from inlining (2026-11-27)
+
+**Barkla, 900 s, 376 instances, one seed, node017 excluded**: `--elim` 195 solved (PAR2 897.2), `--elim
+--subsume` 192 (908.7), `--elim --subsume --no-elimbackward` 196 (892.8), `--subsume` 184 (943.3); default
+184 (943.8) from the first round. No verdict discrepancy in 11 runs. No paired comparison with a measurable
+difference: `--elim --subsume` against `--elim` +11.5 s [-12.8, +37.5], sign test 59/45; `--subsume` against
+the default -0.5 s, 48/48. Over the 187 instances solved by the three elimination arms the rounds delete
+about 590000 constraints and strengthen about 2.5 million; backward subsumption by resolvents deletes 88853;
+the number of eliminated variables does not rise (5229162 without, 5241327 with). Single instances move a
+lot (`jctc8-pass` 116 s to 0.3 s, `jctc14-unrolled-fail` time-out to 68 s; `jctc10-fail`, `jctc9-pass` and
+the `connect` family the other way). `--subsume` alone runs out of memory on `5.2-3` (8263 MB after 18 s).
+`--subsume` stays off.
+
+**Slowdown.** `32811fc --elim` is the search of `b2679fa --elim --no-elimmark` on all 194 instances both
+solve, at a CPU ratio of 1.050 (n = 140); same node, `jctc14-unrolled-fail`: 464.7 s against 485.4 s for
+347600 conflicts (GCC 11.5). Reproduced here (GCC 13.3, flags of the release preset, one pinned core,
+alternating runs, medians of 5 to 7, four generated instances of 1.5 to 4.5 s): 1.27 with `--elim`, 1.31
+with no option at all; 1.007 without link-time optimisation. `--profile=3`: `propagate` 3.34 s against
+4.55 s of 7.0 and 8.3 s. Cause: in `b2679fa` the compiler kept `propagate_trail<Lone::Conflict>` (the trail
+loop with both watch loops inlined) as a function and inlined `propagate_ldq` into `search ()`; with the
+`subsuming ()` branch added to `search ()` it did the opposite, and the loop inside `search ()` is compiled
+worse. Nothing in the propagation sources had changed.
+
+**Fix.** `[[gnu::noinline]]` on `propagate_trail` (`propagate.hpp`). After it, against `b2679fa` with the
+same flags: 0.994 with `--elim` (four instances), 1.006 by default (two), 0.988 in mode 1 (two); same
+conflict counts. Consequences for the data: all four arms of round 3 carry the slowdown, so the comparisons
+inside that round stand, and comparisons of round 3 with the earlier rounds are biased by about 5% in CPU
+time. Not checked on GCC 11.5 yet; whether other hot functions (`analyze`) depend on the same accident was
+not looked at.
