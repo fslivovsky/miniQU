@@ -90,9 +90,10 @@ template <Kind K, Lone R> Ref Internal::propagate_watches (Lit p) {
 // Never inlined: this loop, with the two watch loops inside it, is where
 // the solver spends half its time, and it is compiled best as a function of
 // its own.  With link-time optimisation the compiler otherwise decides by
-// the size of 'search ()' whether it ends up inside that function; after
-// one more branch was added there it did, and propagation ran 4% (GCC 11)
-// to 30% (GCC 13) slower on identical searches (STATUS.md, 2026-11-27).
+// the size of 'search ()' whether the loop ends up inside that function.
+// GCC 13.3 kept it separate until one more branch was added to
+// 'search ()'; then propagation ran 30% slower on identical searches.  GCC
+// 11.5 had it inside 'search ()' all along (STATUS.md, 2026-11-27).
 template <Lone R> [[gnu::noinline]] Ref Internal::propagate_trail () {
   Ref conflict = Ref::none;
   while (conflict == Ref::none && propagated < trail.size ()) {

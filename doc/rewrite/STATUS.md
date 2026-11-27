@@ -4470,3 +4470,20 @@ conflict counts. Consequences for the data: all four arms of round 3 carry the s
 inside that round stand, and comparisons of round 3 with the earlier rounds are biased by about 5% in CPU
 time. Not checked on GCC 11.5 yet; whether other hot functions (`analyze`) depend on the same accident was
 not looked at.
+
+## Correction: the inlining fix under GCC 11.5 (Barkla, 2026-11-27)
+
+Same-node check of `b2679fa --elim --no-elimmark` (1), `32811fc --elim` (2) and `2a042ed --elim` (3) on
+node006, one core, order 1 2 3 3 2 1, four instances of 30 to 420 s, identical conflict counts: CPU ratio 2/1
+1.008, 3/1 0.974 (per instance 0.977, 0.981, 1.009, 0.930). The node drifted by 5 to 8% during the first
+instance. So:
+- The 4.5% gap between `b2679fa` and `32811fc` measured the day before on node008 did **not** reproduce
+  (1.008), and the 1.050 of round 3 is within what node placement explains. Under GCC 11.5 `32811fc` is not
+  shown to be slower.
+- The cause given in the previous entry holds for GCC 13.3 only. Under GCC 11.5 `propagate_trail` was inlined
+  into `search ()` in `b2679fa` already (no such symbol in either binary), so nothing flipped there.
+- With `noinline`, GCC 11.5 is 2.6% faster than `b2679fa` on these four instances (fastest or tied on each);
+  with the drift above, that is an indication, not a measurement.
+The comment in `propagate.hpp` and the statement "4% (GCC 11)" of the previous entry and of the commit
+message of `2a042ed` are corrected by this entry; the bias of "about 5%" claimed there for comparisons of
+round 3 with earlier rounds is not supported.
