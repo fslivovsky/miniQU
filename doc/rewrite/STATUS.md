@@ -4558,3 +4558,47 @@ million of the constraints are binary (161 MB of the arena, 54 MB of list entrie
 3. The watch table (32 bytes per literal, most lists empty) is the largest single block outside the rounds;
    its layout is the M1 decision and was not touched. Binary constraints only in the watch lists would save
    about 215 MB on the instance above (ROADMAP "M5+" item 8).
+
+## Barkla: `5.2-3`, three seeds of `--subsume`, and why `connect` loses (`1b073a1`, 2026-11-27/28)
+
+No code change in this entry. All runs 900 s, 8 GB, one core, node017 excluded.
+
+**`5.2-3` with `--dropwatches`.** Default SAT 653 s, peak 7733 MB; `--elim` 554 s, 7638 MB; `--subsume` 558 s,
+7610 MB; `--elim --subsume` 644 s, 7640 MB; `--elim --subsume --no-dropwatches` memory-out after 23.8 s
+(8399 MB). The rounds eliminate and subsume nothing on this instance; they change the search only through the
+order of the rebuilt watch lists (33307 conflicts against 51825). Memory after parsing is about 7.4 GB in
+every configuration.
+
+**Three seeds, `--elim` (A) against `--elim --subsume` (B), 376 instances.** Solved A 194 / 192 / 188, B 196 /
+196 / 193; PAR2 A 905.3 / 910.8 / 929.1, B 894.6 / 896.9 / 908.4. Paired: B - A = -15.1 s [-30.7, +0.1], sign
+test 53 / 34, p = 0.053: "no measurable difference", B not worse. No verdict discrepancy. Solved in all seeds
+by one arm and in none by the other: `hadw2-8` (B). About 20 instances per arm flip between seeds. Families:
+B better on `arbiter` 3/0, `hadw` 5/0, `jctc` 5/1, `test` 7/2; worse on `connect` 0/6 (231 s to 289 s), `CM`
+1/4, `numeric` 0/5 (+3 s). Memory-outs: `2.1`, `2.2` only. `--subsume` stays off.
+
+**`connect`.** B needs 1.3 to 2.5 times the conflicts of A on every instance and seed, at the same conflicts
+per CPU second; the rounds take 0.1 to 0.2% of the time. Reproduced in the cloud container on
+`connect-4x4_9_connect3.ig` (12 seeds, 2.30 times the conflicts) and taken apart with switches and a
+throw-away patch (not committed):
+- `--no-subsumestr` removes it (0.95); `--no-elimbackward` does not (2.45); cube-side elimination off removes
+  it (0.86 against `--elim --no-elimcube`); elimination before the search only removes it.
+- Strengthening only learnt constraints: 0.97. Only irredundant ones: 2.31. Only by irredundant ones: 2.30.
+  Clauses only: 0.96. So it is irredundant cubes strengthened by irredundant cubes.
+- Those strengthenings let rounds 8 to 16 eliminate 15 more universal gate variables, one or two per round,
+  with 19 to 53 resolvents each: gates `X = or(-Y, -769)` sharing one input, each used once.
+- The same happens without subsumption when the bound is raised: `--elim --elimboundmax=64` 2.21.
+
+**Elimination sweep on Barkla** (7 `connect` instances x 3 seeds; geometric mean of conflicts relative to
+`--elim` on the same instance and seed): `--elim --subsume` 1.757; with `--no-subsumestr` 0.920; with
+`--elimboundmax=0` 1.030; with `--elimboundmax=8` 1.494 (2 time-outs); with `--elimocclim=12` 0.998; `--elim
+--elimboundmax=0` 0.906; `--elim --elimocclim=12` 0.960; `--elim --elimboundmax=64` 1.747 (2 time-outs). The
+number of eliminated cube-side variables does not predict the loss (bound 8 with subsumption eliminates fewer
+than `--elim` and is still 1.49); which variables go matters. The bound of 64 hurts the `connect3` instances
+(2.4 to 5.8 times) and hardly the `connect4` ones.
+
+**`CM`.** No mechanism. The bound never binds there (bounds 0 and 64 give the search of `--elim`, conflict for
+conflict); only `--no-subsumestr` and `--elimocclim=12` change the trajectory, in both directions, with many
+time-outs. Taken as seed noise on a heavy-tailed family.
+
+**Open.** Why eliminating those gates costs conflicts is not known. Whether `--elimboundmax=0` or a lower
+`--elimocclim` is better on the whole set, with and without `--subsume`, has not been run.
